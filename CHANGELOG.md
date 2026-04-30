@@ -4,6 +4,11 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.20] — 2026-04-30
+
+### Fixed
+- **settings:** remove dead OAuth link, point users at API-key page (MMX-OAUTH-404-FIX)
+
 ## [0.9.19] — 2026-04-30
 
 ### Fixed
