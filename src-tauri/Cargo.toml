@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.9.17"
+version = "0.9.18"
 description = "MashupForge — AI-driven multiverse crossover content studio (Tauri desktop shell)"
 authors = ["Maurice (4neverCompany)"]
 license = "Proprietary"

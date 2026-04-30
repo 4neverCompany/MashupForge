@@ -4,6 +4,14 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.18] — 2026-04-30
+
+### Fixed
+- **mmx:** Windows install path resolution — PATH separator + .cmd shim
+
+### Docs
+- **qa:** MMX-CARD-VPASS-QA review report (CONCERNS — W-A already fixed)
+
 ## [0.9.17] — 2026-04-30
 
 ### Added
