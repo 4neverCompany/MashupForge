@@ -4,6 +4,11 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.19] — 2026-04-30
+
+### Fixed
+- **mmx:** spawn .cmd shims via shell + stop claiming success on pending auth
+
 ## [0.9.18] — 2026-04-30
 
 ### Fixed
