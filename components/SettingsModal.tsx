@@ -308,28 +308,26 @@ export function SettingsModal({
   }, [saveState]);
 
   // ── MMX setup form (shared between hoisted CTA and active-agent panel) ───
-  // Defined inline so both render sites get pixel-identical UX. The caption,
-  // button labels, and "or sign in via terminal" link are all state-aware so
-  // a single block covers Loading / Not Installed / Not Authenticated. The
-  // authenticated-and-ready state is rendered separately by the active-agent
-  // panel since the hoisted CTA hides itself in that case.
+  // Defined inline so both render sites get pixel-identical UX. The caption
+  // is state-aware so a single block covers Loading / Not Installed /
+  // Not Authenticated. The authenticated-and-ready state is rendered
+  // separately by the active-agent panel since the hoisted CTA hides itself
+  // in that case.
   //
-  // State-driven copy (microcopy harmonized 2026-04-30 per design pass):
-  //   loading        → "Checking MMX status…" + "Sign in via terminal (OAuth)"
+  // State-driven copy:
+  //   loading        → "Checking MMX status…"
   //   not installed  → "MMX is not installed yet."
-  //                    + "Install + sign in via terminal (OAuth)"
   //   not auth'd     → "MMX is installed but not authenticated."
-  //                    + "Sign in via terminal (OAuth)"
-  const mmxNeedsInstall = mmxStatus != null && !mmxStatus.available;
+  //
+  // Note: the prior secondary "Sign in via terminal (OAuth)" link was
+  // removed in MMX-OAUTH-404-FIX after MiniMax's `/oauth/authorize` 404'd.
+  // See docs/bmad/discoveries/MMX-OAUTH-404-2026-04-30.md.
   const mmxCaption =
     mmxStatus == null
       ? 'Checking MMX status…'
       : !mmxStatus.available
         ? 'MMX is not installed yet.'
         : 'MMX is installed but not authenticated.';
-  const mmxOauthLabel = mmxNeedsInstall
-    ? 'Install + sign in via terminal (OAuth)'
-    : 'Sign in via terminal (OAuth)';
 
   const mmxSetupBlock = (
     <div className="space-y-3">
@@ -372,21 +370,28 @@ export function SettingsModal({
           </button>
         </div>
         <p id="mmx-api-key-help" className="text-[10px] text-zinc-600">
-          Stored in your local mmx config; never sent to MashupForge servers. Get one at platform.minimax.io.
+          Stored in your local mmx config; never sent to MashupForge servers.
         </p>
       </div>
 
-      {/* Secondary path: tmux/cmd interactive flow. Demoted to a text link
-          so the API-key path is the visual primary. */}
+      {/* MMX-OAUTH-404-FIX 2026-04-30: the OAuth flow upstream
+          (`mmx auth login` → `platform.minimax.io/oauth/authorize?client_id=mmx-cli`)
+          currently returns 404 from MiniMax's server, so the prior "or sign in
+          via terminal (OAuth)" secondary action led users to a dead end.
+          Replaced with a direct external link to the API-key procurement page,
+          which is the only path that currently works end-to-end. The CLI
+          (provider/model config) remains reachable from the authenticated
+          state's "Open MMX CLI" link below — once a user has authenticated
+          via API key, they can drop into the shell to run `mmx config set …`. */}
       <div className="flex items-center gap-2 pt-1">
-        <button
-          type="button"
-          onClick={handleMmxSetup}
-          disabled={mmxBusy}
-          className="text-[11px] text-zinc-400 hover:text-[#c5a062] underline underline-offset-2 disabled:opacity-50"
+        <a
+          href="https://platform.minimax.io/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[11px] text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
         >
-          {mmxBusy ? 'Opening…' : `or ${mmxOauthLabel.charAt(0).toLowerCase()}${mmxOauthLabel.slice(1)}`}
-        </button>
+          Don&apos;t have an API key? Get one at platform.minimax.io →
+        </a>
       </div>
 
       {/* Inline feedback. mmxJustAuthed is a transient confirmation that
