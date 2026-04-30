@@ -32,6 +32,26 @@ function mmxBin(): string {
   return process.env.MMX_BIN || 'mmx';
 }
 
+// BUGFIX 2026-04-30: when MMX_BIN points at a Windows .cmd shim (which is
+// what `npm install -g mmx-cli` produces — `C:\Users\…\AppData\Roaming\npm\mmx.cmd`),
+// `child_process.spawn(bin, args)` fails without `shell: true`. Node 16+
+// enforces this strictly per CVE-2024-27980 (no implicit cmd.exe wrap for
+// .cmd / .bat). Without this, every isAvailable() probe returned false on
+// Windows even after a successful install — the symptom Maurice reported as
+// "npm install -g mmx-cli reported success but mmx is still not runnable".
+//
+// Trade-off: shell:true means args are joined into a command string the
+// shell parses, so shell metacharacters in args become a real risk. mmx
+// arg arrays are constructed via pushFlag/pushBool with controlled flag
+// names, so the only attacker-influenced inputs are user-supplied prompts
+// (--prompt <text>). Since this is a desktop app where the user is the
+// only prompt source, the shell-metachar risk is bounded to self-injection.
+// If we ever expose mmx behind a shared service, switch to spawning
+// `cmd.exe /d /s /c <bin>` with manual quoting instead.
+function spawnNeedsShell(bin: string): boolean {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin);
+}
+
 // Test-injection seam. The default is the real node:child_process.spawn;
 // tests replace it via {@link __setSpawnForTests} to avoid invoking the
 // real mmx binary. Keeping the seam in the module is more robust than
@@ -95,9 +115,11 @@ interface MmxRunResult {
 
 function runMmx(args: string[], opts: MmxRunOptions = {}): Promise<MmxRunResult> {
   return new Promise((resolve, reject) => {
-    const child = _spawn(mmxBin(), args, {
+    const bin = mmxBin();
+    const child = _spawn(bin, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       signal: opts.signal,
+      shell: spawnNeedsShell(bin),
     });
 
     const stdoutChunks: Buffer[] = [];
@@ -594,10 +616,15 @@ export async function* prompt(
 
   let child;
   try {
+    const bin = mmxBin();
     child = _spawn(
-      mmxBin(),
+      bin,
       ['text', 'chat', '--messages-file', '-', '--stream'],
-      { stdio: ['pipe', 'pipe', 'pipe'], signal: options?.signal },
+      {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        signal: options?.signal,
+        shell: spawnNeedsShell(bin),
+      },
     );
   } catch (e) {
     throw new MmxSpawnError(`failed to spawn ${mmxBin()}: ${e instanceof Error ? e.message : String(e)}`);

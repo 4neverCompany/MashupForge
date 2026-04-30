@@ -216,10 +216,16 @@ export async function POST(req: Request) {
   // mmx's local config via `mmx auth login --method api-key --api-key <key>`.
   // `mmx auth status` afterwards confirms the credential was accepted.
   if (apiKey) {
+    // Use the absolute MMX_BIN path set above for Windows .cmd shims, falling
+    // back to PATH lookup elsewhere. Bare `'mmx'` would re-trigger the same
+    // .cmd-not-runnable failure that the install branch above just worked
+    // around. Shell mode is required for .cmd shims (Node CVE-2024-27980).
+    const mmxPath = process.env.MMX_BIN || 'mmx';
+    const useShell = platform() === 'win32' && /\.(cmd|bat)$/i.test(mmxPath);
     const authResult = spawnSync(
-      'mmx',
+      mmxPath,
       ['auth', 'login', '--method', 'api-key', '--api-key', apiKey],
-      { encoding: 'utf8', timeout: 30_000 },
+      { encoding: 'utf8', timeout: 30_000, shell: useShell },
     );
 
     // Redact the API key from anything we echo back to the client. mmx
@@ -250,9 +256,11 @@ export async function POST(req: Request) {
     }
 
     // Verify with `mmx auth status` so we don't claim success on a no-op.
-    const statusResult = spawnSync('mmx', ['auth', 'status'], {
+    // Same .cmd-shim handling as the login call above.
+    const statusResult = spawnSync(mmxPath, ['auth', 'status'], {
       encoding: 'utf8',
       timeout: 10_000,
+      shell: useShell,
     });
     if (statusResult.status !== 0) {
       return NextResponse.json(
@@ -284,9 +292,16 @@ export async function POST(req: Request) {
         { shell: true, detached: true, stdio: 'ignore' },
       ).unref();
 
+      // `pending: true` signals the UI that the user still has to complete
+      // sign-in in the spawned terminal window. Without it the client could
+      // not distinguish "we opened a terminal for you" from "you are now
+      // authenticated" — Maurice flagged that the prior generic success
+      // message looked like an auth confirmation when no credentials had
+      // been entered.
       return NextResponse.json({
         success: true,
-        message: 'A new terminal window opened running `mmx auth login`. Follow the OAuth prompts to sign in.',
+        pending: true,
+        message: 'A new terminal window opened running `mmx auth login`. Complete the OAuth prompts there to finish setup — this card will refresh once you are signed in.',
         platform: 'win32',
       });
     }
@@ -310,6 +325,7 @@ export async function POST(req: Request) {
     if (hasSession.status === 0) {
       return NextResponse.json({
         success: true,
+        pending: true,
         message:
           'An MMX setup session is already running.\n\nAttach to it with:\n  tmux attach -t mmx-setup\n\nIf you need to start fresh, close that tmux session first:\n  tmux kill-session -t mmx-setup',
         tmuxSession: 'mmx-setup',
@@ -351,6 +367,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
+      pending: true,
       message:
         'MMX CLI opened in tmux session "mmx-setup". Attach with:\n  tmux attach -t mmx-setup\n\nIf not yet authenticated, follow the OAuth/device-code prompts. Once in the shell, run `mmx config set provider <name>` and `mmx config set model <name>` to choose your provider and model. `mmx --help` lists every resource.',
       tmuxSession: 'mmx-setup',

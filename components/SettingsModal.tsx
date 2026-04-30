@@ -214,6 +214,10 @@ export function SettingsModal({
         error?: string;
         tmuxSession?: string;
         message?: string;
+        // `pending: true` means the server opened a terminal / tmux session
+        // but the user still has to complete sign-in there. Used to keep the
+        // status panel in an informational rather than confirmatory state.
+        pending?: boolean;
       };
       if (!res.ok || data.success === false) {
         setMmxError(data.error || 'Setup failed');
@@ -827,9 +831,15 @@ export function SettingsModal({
                       </div>
                     )}
                   {mmxSetupMsg && (
+                    // Informational panel — the message describes a pending
+                    // terminal / tmux session the user still has to act on.
+                    // Body text is neutral zinc (not green) so it does not
+                    // read as an authentication confirmation; the green
+                    // ✓ badge above (gated on a real auth-status probe) is
+                    // the only place we claim success.
                     <div className="mt-3 bg-zinc-900 border border-zinc-700 rounded-lg p-3 space-y-1">
-                      <p className="text-[11px] text-amber-300 font-medium">MMX Setup</p>
-                      <pre className="text-[11px] text-emerald-400 bg-zinc-950 px-2 py-1 rounded whitespace-pre-wrap">{mmxSetupMsg}</pre>
+                      <p className="text-[11px] text-amber-300 font-medium">MMX setup — action required</p>
+                      <pre className="text-[11px] text-zinc-300 bg-zinc-950 px-2 py-1 rounded whitespace-pre-wrap">{mmxSetupMsg}</pre>
                     </div>
                   )}
                 </>
