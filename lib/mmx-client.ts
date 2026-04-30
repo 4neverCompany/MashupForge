@@ -22,7 +22,15 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { spawn as SpawnFn } from 'node:child_process';
 
-const MMX_BIN = process.env.MMX_BIN ?? 'mmx';
+// BUGFIX 2026-04-30: previously captured `process.env.MMX_BIN ?? 'mmx'` at
+// module-load time, which made post-install mutation of process.env.MMX_BIN
+// (done by /api/mmx/setup after running `npm install -g mmx-cli`) a no-op.
+// Read dynamically so an absolute path written by the setup route — e.g.
+// `C:\Users\…\AppData\Roaming\npm\mmx.cmd` on Windows — is honoured on the
+// very next call without re-importing the module.
+function mmxBin(): string {
+  return process.env.MMX_BIN || 'mmx';
+}
 
 // Test-injection seam. The default is the real node:child_process.spawn;
 // tests replace it via {@link __setSpawnForTests} to avoid invoking the
@@ -87,7 +95,7 @@ interface MmxRunResult {
 
 function runMmx(args: string[], opts: MmxRunOptions = {}): Promise<MmxRunResult> {
   return new Promise((resolve, reject) => {
-    const child = _spawn(MMX_BIN, args, {
+    const child = _spawn(mmxBin(), args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       signal: opts.signal,
     });
@@ -104,7 +112,7 @@ function runMmx(args: string[], opts: MmxRunOptions = {}): Promise<MmxRunResult>
 
     child.once('error', (err) => {
       clearTimeout(timer);
-      reject(new MmxSpawnError(`failed to spawn ${MMX_BIN}: ${err.message}`));
+      reject(new MmxSpawnError(`failed to spawn ${mmxBin()}: ${err.message}`));
     });
 
     child.once('close', (code) => {
@@ -587,12 +595,12 @@ export async function* prompt(
   let child;
   try {
     child = _spawn(
-      MMX_BIN,
+      mmxBin(),
       ['text', 'chat', '--messages-file', '-', '--stream'],
       { stdio: ['pipe', 'pipe', 'pipe'], signal: options?.signal },
     );
   } catch (e) {
-    throw new MmxSpawnError(`failed to spawn ${MMX_BIN}: ${e instanceof Error ? e.message : String(e)}`);
+    throw new MmxSpawnError(`failed to spawn ${mmxBin()}: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   // Stream-feed the messages array. mmx's --messages-file - reads from

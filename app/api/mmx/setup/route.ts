@@ -4,6 +4,8 @@ import { getErrorMessage } from '@/lib/errors';
 import { isServerless } from '@/lib/runtime-env';
 import { spawn, spawnSync } from 'node:child_process';
 import { platform } from 'node:os';
+import { delimiter as PATH_DELIMITER } from 'node:path';
+import { existsSync } from 'node:fs';
 
 export const runtime = 'nodejs';
 
@@ -170,8 +172,31 @@ export async function POST(req: Request) {
         { status: 500 },
       );
     }
-    if (install.globalBin && !process.env.PATH?.split(':').includes(install.globalBin)) {
-      process.env.PATH = `${install.globalBin}:${process.env.PATH ?? ''}`;
+    if (install.globalBin) {
+      // BUGFIX 2026-04-30: previously hard-coded `:` as the PATH separator,
+      // which corrupts PATH on Windows (separator is `;`). The split/join
+      // were both wrong, so a Windows install would silently break PATH and
+      // the follow-up isAvailable() probe would fail with "tried PATH and
+      // C:\Users\…\npm". Use node:path.delimiter for the OS-correct char.
+      const existing = process.env.PATH ?? '';
+      const segments = existing.split(PATH_DELIMITER);
+      if (!segments.includes(install.globalBin)) {
+        process.env.PATH = `${install.globalBin}${PATH_DELIMITER}${existing}`;
+      }
+
+      // Belt-and-suspenders for Windows: spawn() without shell:true cannot
+      // resolve npm shims (mmx.cmd / mmx.ps1), so even a corrected PATH
+      // wouldn't help lib/mmx-client.ts find the binary. Set MMX_BIN to the
+      // absolute path of the .cmd shim so spawn() invokes it directly.
+      // mmx-client reads process.env.MMX_BIN dynamically (per the matching
+      // bugfix in lib/mmx-client.ts on the same date), so this propagates
+      // to subsequent isAvailable() calls in the same process.
+      if (platform() === 'win32') {
+        const cmdShim = `${install.globalBin}\\mmx.cmd`;
+        if (existsSync(cmdShim)) {
+          process.env.MMX_BIN = cmdShim;
+        }
+      }
     }
     available = await isAvailable();
     if (!available) {
