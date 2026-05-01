@@ -284,24 +284,43 @@ export async function POST(req: Request) {
 
   try {
     if (platform() === 'win32') {
-      // Windows: pop a native console window running `mmx auth login`.
-      // `start "Title" cmd /k ...` opens a new cmd window; detached + shell
-      // because `start` is a cmd builtin, not an executable.
+      // MMX-OAUTH-ERROR-FIX 2026-05-01: previously this branch shelled into
+      // `mmx auth login` directly, which kicks off the OAuth flow. MiniMax's
+      // OAuth endpoint is currently broken (was 404, now an error page on
+      // platform.minimax.io). Auto-running the OAuth flow surfaces that
+      // upstream error to users with no actionable recourse, so we now open
+      // a console window with explicit guidance steering users to the
+      // working API-key paste path in the Settings UI. Power users who
+      // really want OAuth can still run `mmx auth login` themselves; we
+      // leave them at a prompt instead of running it for them.
+      const winInstructions = [
+        'echo.',
+        'echo === MMX CLI ===',
+        'echo.',
+        'echo Authenticate via the MashupForge Settings ^> AI Agent panel by',
+        'echo pasting your MiniMax API key. That is the recommended path.',
+        'echo.',
+        'echo Get an API key at: https://platform.minimax.io/',
+        'echo.',
+        'echo Note: `mmx auth login` (OAuth) currently shows an error on the',
+        'echo MiniMax website. Use the API key flow until upstream fixes it.',
+        'echo.',
+        'echo Once authenticated you can configure provider/model here:',
+        'echo   mmx config show',
+        'echo   mmx config set ^<key^> ^<value^>',
+        'echo   mmx --help',
+        'echo.',
+      ].join(' & ');
       spawn(
-        `start "MashupForge — MiniMax mmx Sign In" cmd /k "mmx auth login"`,
+        `start "MashupForge — MiniMax mmx CLI" cmd /k "${winInstructions}"`,
         { shell: true, detached: true, stdio: 'ignore' },
       ).unref();
 
-      // `pending: true` signals the UI that the user still has to complete
-      // sign-in in the spawned terminal window. Without it the client could
-      // not distinguish "we opened a terminal for you" from "you are now
-      // authenticated" — Maurice flagged that the prior generic success
-      // message looked like an auth confirmation when no credentials had
-      // been entered.
       return NextResponse.json({
         success: true,
         pending: true,
-        message: 'A new terminal window opened running `mmx auth login`. Complete the OAuth prompts there to finish setup — this card will refresh once you are signed in.',
+        message:
+          'A console window opened with mmx CLI instructions. Recommended: paste your MiniMax API key in this Settings panel above — that is the working path. The OAuth flow currently shows an error on platform.minimax.io.',
         platform: 'win32',
       });
     }
@@ -335,14 +354,29 @@ export async function POST(req: Request) {
     }
     spawnSync('tmux', ['kill-session', '-t', 'mmx-setup'], { stdio: 'ignore' });
 
-    // Inline bash script: run the auth flow only if needed, print a banner,
-    // then exec an interactive shell. Single-quoted to avoid shell expansion
-    // happening in this Node string before tmux passes it to bash.
+    // MMX-OAUTH-ERROR-FIX 2026-05-01: the previous script auto-ran
+    // `mmx auth login --no-browser` whenever the user was unauthenticated,
+    // which kicks the user into MiniMax's OAuth flow. That flow has been
+    // broken upstream (was 404, now reports an error on platform.minimax.io).
+    // Auto-running it surfaced the upstream failure with no actionable
+    // recovery, so we now print clear guidance instead. Users authenticate
+    // via the API-key paste form in the Settings UI (the working primary
+    // path) or, if they want to try OAuth themselves, run `mmx auth login`
+    // from this prompt directly. Either way, the script never auto-runs the
+    // broken flow.
     const setupScript = [
       'if mmx auth status >/dev/null 2>&1; then',
       '  echo "MMX is already authenticated."',
       'else',
-      '  mmx auth login --no-browser || true',
+      '  echo "MMX is not yet authenticated."',
+      '  echo',
+      '  echo "RECOMMENDED: close this terminal and paste your MiniMax API key"',
+      '  echo "in MashupForge Settings → AI Agent. That is the working path."',
+      '  echo',
+      '  echo "Get an API key at: https://platform.minimax.io/"',
+      '  echo',
+      '  echo "Note: \\`mmx auth login\\` (OAuth) currently shows an error on the"',
+      '  echo "MiniMax website. Use the API key flow until upstream fixes it."',
       'fi',
       'echo',
       'echo "─── MMX CLI ready ────────────────────────────────────────────"',
@@ -369,7 +403,7 @@ export async function POST(req: Request) {
       success: true,
       pending: true,
       message:
-        'MMX CLI opened in tmux session "mmx-setup". Attach with:\n  tmux attach -t mmx-setup\n\nIf not yet authenticated, follow the OAuth/device-code prompts. Once in the shell, run `mmx config set provider <name>` and `mmx config set model <name>` to choose your provider and model. `mmx --help` lists every resource.',
+        'MMX CLI opened in tmux session "mmx-setup". Recommended: paste your MiniMax API key in this Settings panel above — that is the working path (OAuth currently shows an error on platform.minimax.io). To attach the tmux session and run mmx commands directly:\n  tmux attach -t mmx-setup\n\nOnce authenticated, configure with `mmx config set provider <name>` and `mmx config set model <name>`. `mmx --help` lists every resource.',
       tmuxSession: 'mmx-setup',
       platform: 'posix',
     });
