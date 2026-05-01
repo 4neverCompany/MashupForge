@@ -1,9 +1,9 @@
 # QA Review — MMX-CARD-VPASS-QA
 
-**Status:** CONCERNS
+**Status:** PASS *(updated — W-A fixed in `a699a93`)*
 **Agent:** QA (Quinn)
-**Date:** 2026-04-30
-**Commits:** `0fc1321` (visual pass) · `d522b6f` (brief)
+**Date:** 2026-04-30 · Re-review: 2026-04-30
+**Commits:** `0fc1321` (visual pass) · `d522b6f` (brief) · `a699a93` (W-A fix)
 **Decisions doc:** `design/MMX-AGENT-CARD-UX-VISUAL-PASS.md`
 
 ## Files Reviewed
@@ -21,7 +21,7 @@
 |---|-----------|--------|
 | V1 | Hoisted CTA renders only when MMX is NOT the active agent; never both simultaneously | ✅ PASS |
 | V2 | `mmxSetupBlock` bit-identical in both render sites (single JSX variable) | ✅ PASS |
-| V3 | State-aware caption matches spec table; OAuth link copy correct | ⚠️ CONCERNS — see W-A |
+| V3 | State-aware caption matches spec table; OAuth link copy correct | ✅ PASS *(W-A fixed `a699a93`)* |
 | V4 | Authenticated state shows ready line + version + reconfigure link; link fires `handleMmxSetup` | ✅ PASS |
 | V5 | Success path: `Saving…`, input clears, re-probe, badge fires, 3.5s auto-clear | ✅ PASS |
 | V6 | Error path: input retains value, `role="alert"`, persists until next attempt, no success badge | ✅ PASS |
@@ -81,4 +81,33 @@ _None._
 
 ## Gate Decision
 
-**[CONCERNS — 0.88]** — 9 of 10 criteria pass exactly per spec. V3 passes functionally (the correct label text is computed) but fails on rendering: `.toLowerCase()` collapses `(OAuth)` to `(oauth)` in the tmux link button, deviating from the brief's table and the inline comment. All setup, error, success, timing, and Pi-panel criteria are correct. The fix is a single-line change. Merge acceptable with W-A patched first; it is the only deviation from the decisions doc.
+**[CONCERNS — 0.88]** *(original)* — 9 of 10 criteria pass exactly per spec. V3 passes functionally (the correct label text is computed) but fails on rendering: `.toLowerCase()` collapses `(OAuth)` to `(oauth)` in the tmux link button, deviating from the brief's table and the inline comment. All setup, error, success, timing, and Pi-panel criteria are correct. The fix is a single-line change. Merge acceptable with W-A patched first; it is the only deviation from the decisions doc.
+
+---
+
+## Re-review — MMX-CARD-VPASS-QA-FIX-REVIEW
+
+**Status:** PASS
+**Date:** 2026-04-30
+**Fix commit:** `a699a93 fix(settings): preserve OAuth casing in MMX terminal-link copy`
+
+### W-A verification
+
+`SettingsModal.tsx:388` (post-fix):
+```tsx
+{mmxBusy ? 'Opening…' : `or ${mmxOauthLabel.charAt(0).toLowerCase()}${mmxOauthLabel.slice(1)}`}
+```
+
+Traced through all three states:
+
+| `mmxStatus` | `mmxOauthLabel` | Rendered button text |
+|---|---|---|
+| `null` (loading) | `'Sign in via terminal (OAuth)'` | `or sign in via terminal (OAuth)` ✅ |
+| `{available:false}` | `'Install + sign in via terminal (OAuth)'` | `or install + sign in via terminal (OAuth)` ✅ |
+| `{available:true, authenticated:false}` | `'Sign in via terminal (OAuth)'` | `or sign in via terminal (OAuth)` ✅ |
+
+`charAt(0).toLowerCase()` lowercases only the first character; `slice(1)` preserves the rest — `(OAuth)` is intact in all states. Matches the brief's V3 table and the inline comment block exactly.
+
+`tsc --noEmit` clean (re-verified). Fix is minimal (1 line, 0 behaviour change).
+
+**[PASS — 1.0 on W-A]** — W-A fully resolved. All 10 original criteria remain PASS. Overall review upgrades to **PASS (0.93)**.
