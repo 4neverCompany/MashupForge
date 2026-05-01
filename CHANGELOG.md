@@ -4,6 +4,14 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.21] — 2026-05-01
+
+### Fixed
+- **mmx:** stop auto-running broken OAuth flow (MMX-OAUTH-ERROR-FIX)
+
+### Docs
+- **qa:** MMX-CARD-VPASS-QA re-review — W-A fixed, status PASS (0.93)
+
 ## [0.9.20] — 2026-04-30
 
 ### Fixed
