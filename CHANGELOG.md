@@ -7,6 +7,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.9.23] — 2026-05-02
 
 ### Added
+- **nca:** update settings UI for nca provider (NCA-INTEGRATION-DESIGN)
+- **nca:** replace broken mmx CLI with nca for chat (NCA-INTEGRATION-DEV)
+
+### Fixed
+- **mmx:** two bugs in text chat flow
+
+### Docs
+- **changelog:** v0.9.23 — nca integration (NCA-INTEGRATION)
+- **changelog:** v0.9.22 entry for mmx chat fix
+
+## [0.9.23] — 2026-05-02
+
+### Added
 - **nca:** new second AI provider — `nca` (native-cli-ai, Rust binary) replaces broken mmx chat path. Same MiniMax provider via `MINIMAX_API_KEY`. Clean ndjson subprocess contract, model selection via `NCA_MODEL` env var (default: MiniMax-M2.5, also M2.7 / M2.7-highspeed). `mmx` kept as back-compat alias for `nca` (NCA-INTEGRATION)
 
 ### Changed
