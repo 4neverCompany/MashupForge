@@ -4,6 +4,14 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.23] — 2026-05-02
+
+### Added
+- **nca:** new second AI provider — `nca` (native-cli-ai, Rust binary) replaces broken mmx chat path. Same MiniMax provider via `MINIMAX_API_KEY`. Clean ndjson subprocess contract, model selection via `NCA_MODEL` env var (default: MiniMax-M2.5, also M2.7 / M2.7-highspeed). `mmx` kept as back-compat alias for `nca` (NCA-INTEGRATION)
+
+### Changed
+- **settings:** renamed MMX card to nca, updated status text, added model display
+
 ## [0.9.22] — 2026-05-02
 
 ### Fixed
