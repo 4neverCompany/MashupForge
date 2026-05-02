@@ -137,15 +137,30 @@ jobs:
         with:
           workspaces: src-tauri
 
-      # NCA-BUNDLE: ship the nca.exe binary inside the Tauri installer so
-      # MashupForge users have working AI-agent support out of the box.
-      # Upstream (madebyaris/native-cli-ai) only publishes macOS + Linux
-      # release artifacts as of v0.3.0 — no Windows binary, no winget
-      # package — so we build from source pinned to that tag using the
-      # Rust toolchain already installed for the Tauri build below.
+      # NCA-BUNDLE: try to ship nca.exe inside the Tauri installer.
       #
-      # Cached on the pinned tag, so subsequent runs are a no-op until we
-      # bump NCA_TAG.
+      # Status as of 2026-05-02 (v0.9.26 build failure): nca v0.3.0 (and
+      # v0.2.0) does NOT compile on Windows — `crates/runtime/src/ipc.rs`
+      # imports `tokio::net::{UnixListener, UnixStream}` without a
+      # `#[cfg(unix)]` gate. That's why upstream only ships macOS +
+      # Linux release artifacts. We can't fix it from here without
+      # forking the project.
+      #
+      # The build step is left in place but marked `continue-on-error`
+      # so it does NOT block the Tauri build. If upstream eventually
+      # adds a Windows IPC backend (named pipes / interprocess crate /
+      # cfg-gated unix-only sockets), the build will start succeeding
+      # and the bundle will populate automatically. Until then:
+      #   - the Tauri Windows build ships WITHOUT bundled nca,
+      #   - the sidecar wrapper's existsSync guard sees no nca.exe,
+      #     leaves NCA_BIN unset, and falls back to PATH lookup,
+      #   - Settings → AI Agent renders the "Not Installed" branch
+      #     (no winget package, no platform binary, no PATH entry on
+      #     a clean Windows machine), so the user sees the install
+      #     instructions and can wait for upstream Windows support.
+      #
+      # See `docs/bmad/discoveries/NCA-WINDOWS-BUNDLE-2026-05-02.md`
+      # for the full upstream survey.
       - name: Cache nca binary
         id: cache-nca
         uses: actions/cache@v4
@@ -154,7 +169,9 @@ jobs:
           key: nca-windows-x86_64-v0.3.0
 
       - name: Build nca for Windows
+        id: nca_build
         if: steps.cache-nca.outputs.cache-hit != 'true'
+        continue-on-error: true
         shell: pwsh
         env:
           NCA_TAG: v0.3.0
@@ -177,6 +194,7 @@ jobs:
           }
 
       - name: Verify bundled nca
+        if: steps.nca_build.outcome == 'success' || steps.cache-nca.outputs.cache-hit == 'true'
         shell: pwsh
         run: |
           $nca = Join-Path $env:GITHUB_WORKSPACE "src-tauri\resources\nca\nca.exe"
@@ -185,6 +203,12 @@ jobs:
           # is enough to confirm the binary is loadable on this runner.
           & $nca --help | Out-Null
           Write-Host "nca bundled and runnable at $nca"
+
+      - name: Note nca bundle absence
+        if: steps.nca_build.outcome == 'failure' && steps.cache-nca.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          echo "::warning::nca build failed (upstream is currently Unix-only — see docs/bmad/discoveries/NCA-WINDOWS-BUNDLE-2026-05-02.md). Continuing without bundled nca; users will see the 'Not Installed' UI in Settings → AI Agent."
 
       # MUSTFIX-001: v0.2.2 CI run (24604871387) failed here with
       # "npm error could not determine executable to run". Root cause:

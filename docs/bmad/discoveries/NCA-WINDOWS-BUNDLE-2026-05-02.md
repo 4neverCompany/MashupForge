@@ -4,6 +4,86 @@
 **Triage:** Developer
 **Task id:** NCA-BUNDLE
 
+## Update — 2026-05-02 (post-v0.9.26 build failure)
+
+**The "build from source on the Windows runner" plan fails.** v0.9.26's
+Tauri build (`gh run 25258406519`) crashed at the new "Build nca for
+Windows" step with:
+
+```
+error[E0432]: unresolved import `tokio::net::UnixListener`
+   --> crates\runtime\src\ipc.rs:4:23
+    |
+  4 | use tokio::net::{UnixListener, UnixStream};
+    |                  ^^^^^^^^^^^^ no `UnixListener` in `net`
+```
+
+The `nca-runtime` crate imports `tokio::net::{UnixListener, UnixStream}`
+**without a `#[cfg(unix)]` gate**. Tokio gates those types behind
+`cfg(all(unix, feature = "net"))`, so on Windows the import resolves
+to nothing and four downstream `error[E0277]` build errors cascade.
+
+I verified this affects v0.2.0 too — same imports, same lack of
+gate. nca is **fundamentally Unix-only across all releases**, not just
+"missing a Windows release artifact." That's the real reason upstream
+only publishes macOS + Linux binaries: their IPC layer (supervisor →
+session daemon socket) hard-codes Unix-domain sockets. Windows would
+need a named-pipe / `interprocess` crate / cfg-gated alternative
+backend.
+
+We cannot fix this from the MashupForge side without forking the
+project, and a fork tracking upstream is more maintenance burden than
+the bundle is worth.
+
+### Revised plan (what's actually shipped)
+
+`.github/workflows/tauri-windows.yml`:
+
+- **"Build nca for Windows" step** now has `continue-on-error: true`
+  + `id: nca_build`. It will still fail on every run until upstream
+  adds Windows support — but it no longer blocks the Tauri build.
+- **"Verify bundled nca" step** now gated on
+  `steps.nca_build.outcome == 'success' || steps.cache-nca.outputs.cache-hit == 'true'`.
+  Skips silently when the bundle isn't there.
+- **New "Note nca bundle absence" step** prints a `::warning::` when
+  the build fails and there's no cache, so the failure is visible in
+  the run summary without breaking the run.
+
+`scripts/tauri-server-wrapper.js` (unchanged from NCA-BUNDLE):
+
+- The `pinBundledNca()` block already `existsSync`-guards the
+  resource path. With no `nca.exe` at the resource location, it
+  leaves `NCA_BIN` unset and `lib/nca-client.ts` falls back to the
+  PATH lookup (`'nca'`).
+
+`components/SettingsModal.tsx` (unchanged):
+
+- The "Not Installed" branch already covers this — Windows users
+  see the install instructions, the API-key paste form is hidden,
+  and they're directed at the upstream releases page (where they'll
+  find no Windows artifact, but at least the path is honest).
+
+**Net effect on the Windows installer:** ships without bundled nca
+until upstream adds Windows support. That is the same situation
+Windows users have always been in; v0.9.26's fix-attempt just
+revealed why.
+
+### Forward path
+
+If upstream adds a Windows IPC backend in a future release:
+
+1. Bump `NCA_TAG` in the workflow to the new release.
+2. Clear the `nca-windows-x86_64-v0.3.0` cache key (rename or delete).
+3. The `Build nca for Windows` step will succeed, the cache will
+   populate, the verify step will pass, and the `Note nca bundle
+   absence` step will be skipped — the bundle just starts working.
+
+If upstream publishes a Windows release artifact (no source build
+needed), swap the `cargo build` step for a `gh release download` of
+the asset. Same `continue-on-error` posture in the meantime.
+
+## Original plan (preserved for context — superseded above)
+
 ## Symptom
 
 Maurice on the Windows desktop build hit:
