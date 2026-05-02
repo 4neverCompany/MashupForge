@@ -4,6 +4,12 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.27] — 2026-05-02
+
+### Fixed
+- **ci:** handle nca Windows build failure gracefully (continue-on-error on throw)
+- **ci:** tolerate nca Windows build failure (upstream is Unix-only)
+
 ## [0.9.26] — 2026-05-02
 
 ### Added
