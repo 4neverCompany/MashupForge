@@ -27,7 +27,7 @@ import {
   Bot,
   Terminal,
 } from 'lucide-react';
-import { useMmxAvailability } from '@/lib/useMmxAvailability';
+import { useNcaAvailability } from '@/lib/useNcaAvailability';
 import { showToast } from '@/components/Toast';
 import {
   LEONARDO_MODELS,
@@ -53,10 +53,14 @@ const TABS: ReadonlyArray<{ id: TabId; label: string; icon: typeof SettingsIcon 
   { id: 'desktop', label: 'Desktop', icon: Monitor },
 ];
 
-interface MmxStatus {
+interface NcaStatus {
   available: boolean;
   authenticated: boolean;
-  version: string;
+  /** nca's selected provider (e.g. "MiniMax"). Replaces the mmx version
+   *  string since nca's `doctor` reports the provider name not a version. */
+  provider: string;
+  /** Default model for the selected provider (e.g. "MiniMax-M2.5"). */
+  model: string;
 }
 
 // FIX-100 slice A: extracted from MainContent.tsx (~714 LOC).
@@ -98,8 +102,8 @@ interface SettingsModalProps {
   piError: string | null;
   piSetupMsg: string | null;
   handlePiSetup: () => void;
-  mmxSetupMsg: string | null;
-  onMmxSetupComplete: (message: string | null) => void;
+  ncaSetupMsg: string | null;
+  onNcaSetupComplete: (message: string | null) => void;
   refreshPiStatus: () => void;
   collections: Collection[];
   savedImages: GeneratedImage[];
@@ -118,8 +122,8 @@ export function SettingsModal({
   piError,
   piSetupMsg,
   handlePiSetup,
-  mmxSetupMsg,
-  onMmxSetupComplete,
+  ncaSetupMsg,
+  onNcaSetupComplete,
   refreshPiStatus,
   collections,
   savedImages,
@@ -161,34 +165,35 @@ export function SettingsModal({
 
   // MMX setup handler — opens `mmx auth login --no-browser` in a tmux
   // session so the user can authenticate via OAuth or paste an API key.
-  // mmxBusyRef gates double-click: once the user clicks Launch, the button
+  // ncaBusyRef gates double-click: once the user clicks Launch, the button
   // stays disabled until the POST completes (success or error), preventing
   // a second click from silently killing the first tmux session.
-  const mmxBusyRef = useRef(false);
-  const [mmxApiKey, setMmxApiKey] = useState('');
+  const ncaBusyRef = useRef(false);
+  const [ncaApiKey, setNcaApiKey] = useState('');
   // Transient success flag set after a non-interactive API-key save lands a
   // 200 from /api/mmx/setup AND /api/mmx/status confirms `authenticated:true`.
   // Auto-clears after ~3.5s so the inline confirmation doesn't linger forever.
-  // Distinct from `onMmxSetupComplete` (which surfaces the server's `message`
+  // Distinct from `onNcaSetupComplete` (which surfaces the server's `message`
   // field in a separate code-block panel) — this flag is the green "✓
   // Authenticated" line that lives next to the form itself.
-  const [mmxJustAuthed, setMmxJustAuthed] = useState(false);
+  const [ncaJustAuthed, setNcaJustAuthed] = useState(false);
 
-  // Refresh `mmxStatus` from the server. Called after a successful setup so
+  // Refresh `ncaStatus` from the server. Called after a successful setup so
   // the UI flips from "Not Authenticated" → "Available" without a tab toggle.
   // Returns the new status (or null on error) so callers can branch on it
-  // — used by `postMmxSetup` to decide whether to fire the success badge.
-  const refreshMmxStatus = async (): Promise<MmxStatus | null> => {
+  // — used by `postNcaSetup` to decide whether to fire the success badge.
+  const refreshNcaStatus = async (): Promise<NcaStatus | null> => {
     try {
-      const r = await fetch('/api/mmx/status', { cache: 'no-store' });
+      const r = await fetch('/api/nca/status', { cache: 'no-store' });
       if (!r.ok) return null;
-      const d = (await r.json()) as { available?: unknown; authenticated?: unknown; version?: unknown };
-      const next: MmxStatus = {
+      const d = (await r.json()) as { available?: unknown; authenticated?: unknown; provider?: unknown; model?: unknown };
+      const next: NcaStatus = {
         available: !!d.available,
         authenticated: !!d.authenticated,
-        version: typeof d.version === 'string' ? d.version : '',
+        provider: typeof d.provider === 'string' ? d.provider : '',
+        model: typeof d.model === 'string' ? d.model : '',
       };
-      setMmxStatus(next);
+      setNcaStatus(next);
       return next;
     } catch {
       // Best-effort; the existing tab-mount probe will retry on next open.
@@ -198,13 +203,13 @@ export function SettingsModal({
 
   // Internal POST helper. `apiKey` undefined → interactive (tmux) flow;
   // `apiKey` set → non-interactive `mmx auth login --api-key` on the server.
-  const postMmxSetup = async (apiKey?: string): Promise<void> => {
-    if (mmxBusyRef.current) return;
-    mmxBusyRef.current = true;
-    setMmxBusy(true);
-    setMmxError(null);
+  const postNcaSetup = async (apiKey?: string): Promise<void> => {
+    if (ncaBusyRef.current) return;
+    ncaBusyRef.current = true;
+    setNcaBusy(true);
+    setNcaError(null);
     try {
-      const res = await fetch('/api/mmx/setup', {
+      const res = await fetch('/api/nca/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: apiKey ? JSON.stringify({ apiKey }) : undefined,
@@ -220,24 +225,24 @@ export function SettingsModal({
         pending?: boolean;
       };
       if (!res.ok || data.success === false) {
-        setMmxError(data.error || 'Setup failed');
+        setNcaError(data.error || 'Setup failed');
       } else {
-        onMmxSetupComplete(data.message || null);
+        onNcaSetupComplete(data.message || null);
         if (apiKey) {
           // Non-interactive path: clear the field + re-probe status. Fire
           // the success badge only if the re-probe confirms authenticated;
           // otherwise the user gets the server message via the existing
-          // mmxSetupMsg panel without a misleading green checkmark.
-          setMmxApiKey('');
-          const next = await refreshMmxStatus();
-          if (next?.authenticated) setMmxJustAuthed(true);
+          // ncaSetupMsg panel without a misleading green checkmark.
+          setNcaApiKey('');
+          const next = await refreshNcaStatus();
+          if (next?.authenticated) setNcaJustAuthed(true);
         }
       }
     } catch {
-      setMmxError('Network error — could not reach the setup endpoint.');
+      setNcaError('Network error — could not reach the setup endpoint.');
     } finally {
-      setMmxBusy(false);
-      mmxBusyRef.current = false;
+      setNcaBusy(false);
+      ncaBusyRef.current = false;
     }
   };
 
@@ -245,16 +250,16 @@ export function SettingsModal({
   // state. 3.5s is long enough to read "✓ Authenticated" without it becoming
   // visual debt the user has to dismiss manually.
   useEffect(() => {
-    if (!mmxJustAuthed) return;
-    const t = setTimeout(() => setMmxJustAuthed(false), 3500);
+    if (!ncaJustAuthed) return;
+    const t = setTimeout(() => setNcaJustAuthed(false), 3500);
     return () => clearTimeout(t);
-  }, [mmxJustAuthed]);
+  }, [ncaJustAuthed]);
 
-  const handleMmxSetup = () => { void postMmxSetup(); };
-  const handleMmxApiKeySave = () => {
-    const key = mmxApiKey.trim();
+  const handleNcaSetup = () => { void postNcaSetup(); };
+  const handleNcaApiKeySave = () => {
+    const key = ncaApiKey.trim();
     if (!key) return;
-    void postMmxSetup(key);
+    void postNcaSetup(key);
   };
 
   // MMX status polling — runs once when the AI Agent tab is opened.
@@ -262,32 +267,35 @@ export function SettingsModal({
   // When MMX is selected but not authenticated, the "Launch MMX Setup"
   // button opens `mmx auth login --no-browser` in a tmux session so the
   // user can OAuth or paste an API key interactively.
-  const mmxAvailable = useMmxAvailability();
-  const [mmxStatus, setMmxStatus] = useState<MmxStatus | null>(null);
-  const [mmxBusy, setMmxBusy] = useState(false);
-  const [mmxError, setMmxError] = useState<string | null>(null);
+  const ncaAvailable = useNcaAvailability();
+  const [ncaStatus, setNcaStatus] = useState<NcaStatus | null>(null);
+  const [ncaBusy, setNcaBusy] = useState(false);
+  const [ncaError, setNcaError] = useState<string | null>(null);
   useEffect(() => {
     if (activeTab !== 'aiAgent') return;
     let cancelled = false;
-    fetch('/api/mmx/status', { cache: 'no-store' })
+    fetch('/api/nca/status', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return;
-        setMmxStatus({
+        setNcaStatus({
           available: !!data.available,
           authenticated: !!data.authenticated,
-          version: typeof data.version === 'string' ? data.version : '',
+          provider: typeof data.provider === 'string' ? data.provider : '',
+          model: typeof data.model === 'string' ? data.model : '',
         });
       })
-      .catch(() => { /* leave null — card will fall back to mmxAvailable */ });
+      .catch(() => { /* leave null — card will fall back to ncaAvailable */ });
     return () => { cancelled = true; };
   }, [activeTab]);
 
-  // MMX-SETTINGS-UI: read the canonical aiAgentProvider but fall back to
+  // AI-AGENT-SETTINGS: read the canonical aiAgentProvider but fall back to
   // the legacy activeAiAgent so users with older persisted settings keep
   // their selection. Writes go to both fields below until activeAiAgent
-  // is fully retired (see types/mashup.ts deprecation note).
-  const activeAiAgent: 'mmx' | 'pi' =
+  // is fully retired (see types/mashup.ts deprecation note). 'mmx' is a
+  // historical value still in some IDB payloads — treated as 'nca' for
+  // selection / status logic per NCA-INTEGRATION-DESIGN.
+  const activeAiAgent: 'pi' | 'nca' | 'mmx' =
     settings.aiAgentProvider ?? settings.activeAiAgent ?? 'pi';
 
 
@@ -322,55 +330,55 @@ export function SettingsModal({
   // Note: the prior secondary "Sign in via terminal (OAuth)" link was
   // removed in MMX-OAUTH-404-FIX after MiniMax's `/oauth/authorize` 404'd.
   // See docs/bmad/discoveries/MMX-OAUTH-404-2026-04-30.md.
-  const mmxCaption =
-    mmxStatus == null
-      ? 'Checking MMX status…'
-      : !mmxStatus.available
-        ? 'MMX is not installed yet.'
-        : 'MMX is installed but not authenticated.';
+  const ncaCaption =
+    ncaStatus == null
+      ? 'Checking nca status…'
+      : !ncaStatus.available
+        ? 'nca is not installed yet.'
+        : 'nca is installed but not authenticated.';
 
-  const mmxSetupBlock = (
+  const ncaSetupBlock = (
     <div className="space-y-3">
-      <p className="text-[11px] text-zinc-400">{mmxCaption}</p>
+      <p className="text-[11px] text-zinc-400">{ncaCaption}</p>
 
       {/* Primary path: paste an API key. Server-side runs `mmx auth login
           --method api-key --api-key <key>` after auto-installing mmx-cli if
           needed. See docs/design/patterns/api-key-paste-form.md for the
           general pattern this implements. */}
       <div className="space-y-1">
-        <label htmlFor="mmx-api-key" className="block text-[10px] uppercase tracking-wider text-zinc-500">
+        <label htmlFor="nca-api-key" className="block text-[10px] uppercase tracking-wider text-zinc-500">
           MiniMax API key
         </label>
         <div className="flex gap-2">
           <input
-            id="mmx-api-key"
+            id="nca-api-key"
             type="password"
-            value={mmxApiKey}
-            onChange={(e) => setMmxApiKey(e.target.value)}
+            value={ncaApiKey}
+            onChange={(e) => setNcaApiKey(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && mmxApiKey.trim() && !mmxBusy) {
+              if (e.key === 'Enter' && ncaApiKey.trim() && !ncaBusy) {
                 e.preventDefault();
-                handleMmxApiKeySave();
+                handleNcaApiKeySave();
               }
             }}
             placeholder="sk-…"
-            disabled={mmxBusy}
+            disabled={ncaBusy}
             autoComplete="off"
             spellCheck={false}
-            aria-describedby="mmx-api-key-help"
+            aria-describedby="nca-api-key-help"
             className="flex-1 bg-zinc-900 border border-zinc-700 focus:border-[#c5a062] outline-none rounded px-2 py-1 text-[12px] text-white font-mono disabled:opacity-60"
           />
           <button
             type="button"
-            onClick={handleMmxApiKeySave}
-            disabled={mmxBusy || !mmxApiKey.trim()}
+            onClick={handleNcaApiKeySave}
+            disabled={ncaBusy || !ncaApiKey.trim()}
             className="btn-gold-sm rounded-lg px-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {mmxBusy ? 'Saving…' : 'Save'}
+            {ncaBusy ? 'Saving…' : 'Save'}
           </button>
         </div>
-        <p id="mmx-api-key-help" className="text-[10px] text-zinc-600">
-          Stored in your local mmx config; never sent to MashupForge servers.
+        <p id="nca-api-key-help" className="text-[10px] text-zinc-600">
+          Stored in your local config (read by nca via the MINIMAX_API_KEY env); never sent to MashupForge servers.
         </p>
       </div>
 
@@ -394,16 +402,16 @@ export function SettingsModal({
         </a>
       </div>
 
-      {/* Inline feedback. mmxJustAuthed is a transient confirmation that
-          auto-clears after 3.5s; mmxError persists until the next attempt. */}
-      {mmxJustAuthed && (
+      {/* Inline feedback. ncaJustAuthed is a transient confirmation that
+          auto-clears after 3.5s; ncaError persists until the next attempt. */}
+      {ncaJustAuthed && (
         <p className="text-[11px] text-emerald-400 flex items-center gap-1">
           <span aria-hidden>✓</span>
           MMX authenticated. Open the terminal anytime to pick a provider/model.
         </p>
       )}
-      {mmxError && (
-        <p className="text-[11px] text-red-400 whitespace-pre-wrap" role="alert">{mmxError}</p>
+      {ncaError && (
+        <p className="text-[11px] text-red-400 whitespace-pre-wrap" role="alert">{ncaError}</p>
       )}
     </div>
   );
@@ -651,15 +659,17 @@ export function SettingsModal({
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* MMX CLI card */}
+              {/* nca card — Aris's native-cli-ai. 'mmx' is treated as
+                  selected here too so legacy persisted settings render
+                  correctly; lib/aiClient.ts back-compat-aliases mmx→nca. */}
               {(() => {
-                const selected = activeAiAgent === 'mmx';
-                const available = mmxStatus?.available ?? mmxAvailable;
+                const selected = activeAiAgent === 'nca' || activeAiAgent === 'mmx';
+                const available = ncaStatus?.available ?? ncaAvailable;
                 let dot = 'bg-zinc-600';
                 let label = 'Checking…';
                 let labelColor = 'text-zinc-400';
                 if (available === true) {
-                  if (mmxStatus?.authenticated === false) {
+                  if (ncaStatus?.authenticated === false) {
                     dot = 'bg-amber-400';
                     label = 'Not Authenticated';
                     labelColor = 'text-amber-300';
@@ -673,31 +683,28 @@ export function SettingsModal({
                   label = 'Not Installed';
                   labelColor = 'text-red-300';
                 }
-                  const handleMmxCardClick = () => {
-                    // Always open the MMX CLI in tmux so the user can configure
-                    // provider/model, even when already authenticated. The
-                    // setup route is idempotent: it skips `mmx auth login` when
-                    // already auth'd and drops straight into an interactive
-                    // shell. If the tmux session is already running it returns
-                    // `alreadyRunning` instead of duplicating it.
-                    handleMmxSetup();
-                    // Promote MMX to the active agent only on a healthy
+                  const handleNcaCardClick = () => {
+                    // Probe / refresh nca state on click. /api/nca/setup is
+                    // idempotent — the empty-body call below is just a
+                    // doctor probe that re-syncs ncaStatus without writing.
+                    handleNcaSetup();
+                    // Promote nca to the active agent only on a healthy
                     // machine and only when not already selected — no point
                     // re-writing the same setting on every click.
                     if (
                       !selected
                       && available === true
-                      && mmxStatus?.authenticated === true
+                      && ncaStatus?.authenticated === true
                     ) {
-                      updateSettings({ activeAiAgent: 'mmx', aiAgentProvider: 'mmx' });
+                      updateSettings({ activeAiAgent: 'nca', aiAgentProvider: 'nca' });
                     }
                   };
                   return (
                     <button
                       type="button"
-                      onClick={handleMmxCardClick}
+                      onClick={handleNcaCardClick}
                       aria-pressed={selected}
-                      disabled={mmxBusy}
+                      disabled={ncaBusy}
                     className={`text-left rounded-xl border p-4 transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
                       selected
                         ? 'border-[#c5a062] bg-[#c5a062]/10 shadow-[0_0_0_1px_rgba(197,160,98,0.3)]'
@@ -707,7 +714,7 @@ export function SettingsModal({
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <Terminal className="w-4 h-4 text-[#c5a062]" />
-                        <span className="text-sm font-bold text-white">MMX CLI</span>
+                        <span className="text-sm font-bold text-white">nca</span>
                       </div>
                       <span className={`text-[10px] font-semibold uppercase tracking-wider ${selected ? 'text-[#c5a062]' : 'text-zinc-500'}`}>
                         {selected ? '● Selected' : '○ Select'}
@@ -716,12 +723,13 @@ export function SettingsModal({
                     <div className="flex items-center gap-1.5 mb-2">
                       <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
                       <span className={`text-[11px] ${labelColor}`}>{label}</span>
-                      {mmxStatus?.version && (
-                        <span className="text-[10px] text-zinc-500 ml-1 truncate">{mmxStatus.version}</span>
+                      {ncaStatus?.model && (
+                        <span className="text-[10px] text-zinc-500 ml-1 truncate">{ncaStatus.model}</span>
                       )}
                     </div>
                     <p className="text-[10px] text-zinc-500 leading-relaxed">
-                      MiniMax mmx — text, image, music, video, speech, vision, web search.
+                      Aris&apos;s nca (native-cli-ai) — Rust-native, MiniMax-powered text agent
+                      with multi-provider support (OpenAI / Anthropic / OpenRouter via env keys).
                     </p>
                   </button>
                 );
@@ -802,40 +810,40 @@ export function SettingsModal({
                 avoids the duplicate-MMX-panel concern flagged in the
                 MMX-AGENT-CARD-UX-VISUAL-PASS brief. */}
             {activeAiAgent !== 'mmx'
-              && (mmxStatus == null || !mmxStatus.available || !mmxStatus.authenticated) && (
-              <div className="pt-2">{mmxSetupBlock}</div>
+              && (ncaStatus == null || !ncaStatus.available || !ncaStatus.authenticated) && (
+              <div className="pt-2">{ncaSetupBlock}</div>
             )}
 
             {/* Launch Setup — active-agent-specific status panel.
                 When MMX is the active agent we own the full surface here:
-                needs-setup states reuse the shared mmxSetupBlock (so the
+                needs-setup states reuse the shared ncaSetupBlock (so the
                 user gets the same API-key form they'd see in the hoisted
                 CTA), and the authenticated state shows a compact ready
                 line + a reconfigure link to drop into the terminal for
                 provider/model changes. */}
             <div className="pt-2">
-              {activeAiAgent === 'mmx' ? (
+              {(activeAiAgent === 'nca' || activeAiAgent === 'mmx') ? (
                 <>
-                  {(mmxStatus == null || !mmxStatus.available || !mmxStatus.authenticated)
-                    ? mmxSetupBlock
+                  {(ncaStatus == null || !ncaStatus.available || !ncaStatus.authenticated)
+                    ? ncaSetupBlock
                     : (
                       <div className="space-y-1">
                         <p className="text-[11px] text-emerald-400 flex items-center gap-1">
                           <span aria-hidden>✓</span>
-                          MMX is authenticated and ready
-                          {mmxStatus.version ? ` (${mmxStatus.version})` : ''}.
+                          nca is authenticated and ready
+                          {ncaStatus.model ? ` (${ncaStatus.model})` : ''}.
                         </p>
                         <button
                           type="button"
-                          onClick={handleMmxSetup}
-                          disabled={mmxBusy}
+                          onClick={handleNcaSetup}
+                          disabled={ncaBusy}
                           className="text-[11px] text-zinc-400 hover:text-[#c5a062] underline underline-offset-2 disabled:opacity-50"
                         >
-                          {mmxBusy ? 'Opening…' : 'Open MMX CLI to change provider/model'}
+                          {ncaBusy ? 'Opening…' : 'Open MMX CLI to change provider/model'}
                         </button>
                       </div>
                     )}
-                  {mmxSetupMsg && (
+                  {ncaSetupMsg && (
                     // Informational panel — the message describes a pending
                     // terminal / tmux session the user still has to act on.
                     // Body text is neutral zinc (not green) so it does not
@@ -844,7 +852,7 @@ export function SettingsModal({
                     // the only place we claim success.
                     <div className="mt-3 bg-zinc-900 border border-zinc-700 rounded-lg p-3 space-y-1">
                       <p className="text-[11px] text-amber-300 font-medium">MMX setup — action required</p>
-                      <pre className="text-[11px] text-zinc-300 bg-zinc-950 px-2 py-1 rounded whitespace-pre-wrap">{mmxSetupMsg}</pre>
+                      <pre className="text-[11px] text-zinc-300 bg-zinc-950 px-2 py-1 rounded whitespace-pre-wrap">{ncaSetupMsg}</pre>
                     </div>
                   )}
                 </>

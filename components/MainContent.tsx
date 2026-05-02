@@ -1308,7 +1308,10 @@ export function MainContent() {
   const [piBusy, setPiBusy] = useState<PiBusy>(null);
   const [piError, setPiError] = useState<string | null>(null);
   const [piSetupMsg, setPiSetupMsg] = useState<string | null>(null);
-  const [mmxSetupMsg, setMmxSetupMsg] = useState<string | null>(null);
+  // Renamed from mmxSetupMsg in NCA-INTEGRATION-DESIGN; the AI agent's
+  // setup-message string is now provider-agnostic (used for nca-side
+  // success/pending banners). Multimodal mmx flows have their own state.
+  const [ncaSetupMsg, setNcaSetupMsg] = useState<string | null>(null);
   const piAutoBootRef = useRef(false);
 
   const refreshPiStatus = async (): Promise<PiStatus | null> => {
@@ -4965,8 +4968,8 @@ export function MainContent() {
           piError={piError}
           piSetupMsg={piSetupMsg}
           handlePiSetup={handlePiSetup}
-          mmxSetupMsg={mmxSetupMsg}
-          onMmxSetupComplete={setMmxSetupMsg}
+          ncaSetupMsg={ncaSetupMsg}
+          onNcaSetupComplete={setNcaSetupMsg}
           refreshPiStatus={refreshPiStatus}
           collections={collections}
           savedImages={savedImages}

@@ -257,7 +257,7 @@ async function submitWithOneRetry(
   initialPrompt: string,
   baseParams: Omit<LeonardoSubmitParams, 'prompt'>,
   callbacks: ModerationRetryCallback,
-  provider?: 'mmx' | 'pi',
+  provider?: 'pi' | 'nca' | 'mmx',
 ): Promise<SubmitResult> {
   try {
     const success = await submitLeonardoAndPoll({ prompt: initialPrompt, ...baseParams });

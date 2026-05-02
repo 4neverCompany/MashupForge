@@ -297,20 +297,25 @@ export interface UserSettings {
   /**
    * Which AI agent backend handles text/idea/caption work.
    *   'pi'  — pi.dev sidecar (default)
-   *   'mmx' — MiniMax mmx CLI
+   *   'nca' — Aris's nca (native-cli-ai), MiniMax-powered, replaced mmx
+   *           on 2026-05-02 (NCA-INTEGRATION-DEV)
+   *   'mmx' — legacy MiniMax mmx CLI. Kept on the union so persisted
+   *           IDB payloads from before the migration still validate;
+   *           lib/aiClient.ts treats 'mmx' as a back-compat alias for
+   *           'nca' so chat keeps working until users re-select.
    * Configured from the Settings → AI Agent tab.
    *
    * @deprecated Use {@link aiAgentProvider} instead — kept on the type
    * for one release so persisted user-settings payloads still validate;
    * read sites should fall back to it for back-compat.
    */
-  activeAiAgent?: 'mmx' | 'pi';
+  activeAiAgent?: 'pi' | 'nca' | 'mmx';
   /**
-   * MMX-SCHEMA: canonical name for the AI agent CLI provider. Same
-   * semantics as the deprecated `activeAiAgent` (kept on the type
-   * one release for back-compat with persisted IDB payloads).
+   * Canonical name for the AI agent CLI provider. Same semantics as the
+   * deprecated `activeAiAgent` (kept on the type one release for
+   * back-compat with persisted IDB payloads).
    */
-  aiAgentProvider?: 'mmx' | 'pi';
+  aiAgentProvider?: 'pi' | 'nca' | 'mmx';
 }
 
 export type ViewType = 'studio' | 'gallery' | 'compare' | 'captioning' | 'post-ready' | 'ideas' | 'pipeline';
