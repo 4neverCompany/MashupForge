@@ -63,6 +63,14 @@ interface NcaStatus {
   model: string;
 }
 
+/** One row from `nca models --json` → `provider_models`. */
+interface NcaModel {
+  provider: string;
+  model: string;
+  base_url?: string;
+  selected?: boolean;
+}
+
 // FIX-100 slice A: extracted from MainContent.tsx (~714 LOC).
 // PiStatus shape lifted from the inline declaration that lived inside
 // MainContent — moved to module scope so the prop interface can refer to it.
@@ -271,6 +279,18 @@ export function SettingsModal({
   const [ncaStatus, setNcaStatus] = useState<NcaStatus | null>(null);
   const [ncaBusy, setNcaBusy] = useState(false);
   const [ncaError, setNcaError] = useState<string | null>(null);
+  // Model list from /api/nca/models. Populated lazily once nca is
+  // authenticated — there's no point fetching it before then since the
+  // models endpoint will surface them per-provider regardless of which
+  // env keys are set, but the picker UI is only useful in the
+  // authenticated branch. NCA-INSTALL-DESIGN.
+  const [ncaModels, setNcaModels] = useState<NcaModel[] | null>(null);
+  // Disambiguates "saving a model selection" from the broader ncaBusy
+  // (which gates the API-key Save button + card click). Lets the model
+  // picker stay interactive while the auth flow is mid-flight, and vice
+  // versa.
+  const [ncaModelSaving, setNcaModelSaving] = useState<string | null>(null);
+
   useEffect(() => {
     if (activeTab !== 'aiAgent') return;
     let cancelled = false;
@@ -288,6 +308,62 @@ export function SettingsModal({
       .catch(() => { /* leave null — card will fall back to ncaAvailable */ });
     return () => { cancelled = true; };
   }, [activeTab]);
+
+  // Fetch the model list when (and only when) nca is authenticated. The
+  // endpoint runs `nca models --json` server-side and returns the full
+  // `provider_models` array; we ignore aliases / thinking config here
+  // because the picker only needs the raw provider/model rows.
+  useEffect(() => {
+    if (!ncaStatus?.authenticated) return;
+    let cancelled = false;
+    fetch('/api/nca/models', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { provider_models?: unknown } | null) => {
+        if (cancelled || !data || !Array.isArray(data.provider_models)) return;
+        const rows: NcaModel[] = data.provider_models.flatMap((row): NcaModel[] => {
+          if (!row || typeof row !== 'object') return [];
+          const r = row as Record<string, unknown>;
+          if (typeof r.provider !== 'string' || typeof r.model !== 'string') return [];
+          return [{
+            provider: r.provider,
+            model: r.model,
+            base_url: typeof r.base_url === 'string' ? r.base_url : undefined,
+            selected: typeof r.selected === 'boolean' ? r.selected : undefined,
+          }];
+        });
+        setNcaModels(rows);
+      })
+      .catch(() => { /* leave null — picker just won't render until next probe */ });
+    return () => { cancelled = true; };
+  }, [ncaStatus?.authenticated]);
+
+  /**
+   * Persist a model selection via /api/nca/setup, then re-probe status so
+   * the "ready (model)" line updates immediately. Uses the existing
+   * setup-route shape (which accepts `{ model }` without an apiKey).
+   */
+  const handleNcaModelSelect = async (model: string): Promise<void> => {
+    if (ncaModelSaving) return;
+    setNcaModelSaving(model);
+    setNcaError(null);
+    try {
+      const res = await fetch('/api/nca/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model }),
+      });
+      const data = (await res.json()) as { success?: boolean; error?: string };
+      if (!res.ok || data.success === false) {
+        setNcaError(data.error || 'Failed to save model selection');
+        return;
+      }
+      await refreshNcaStatus();
+    } catch {
+      setNcaError('Network error — could not reach the setup endpoint.');
+    } finally {
+      setNcaModelSaving(null);
+    }
+  };
 
   // AI-AGENT-SETTINGS: read the canonical aiAgentProvider but fall back to
   // the legacy activeAiAgent so users with older persisted settings keep
@@ -337,77 +413,101 @@ export function SettingsModal({
         ? 'nca is not installed yet.'
         : 'nca is installed but not authenticated.';
 
+  // NCA-INSTALL-DESIGN: branch on installation state. The "not installed"
+  // path used to render the same API-key form as "not authenticated",
+  // which was confusing — the user can't authenticate a binary that
+  // doesn't exist yet. Now we show an Install CTA + winget hint and
+  // hold back the API-key form until ncaStatus.available flips true.
+  const ncaIsNotInstalled = ncaStatus == null || !ncaStatus.available;
+
   const ncaSetupBlock = (
     <div className="space-y-3">
       <p className="text-[11px] text-zinc-400">{ncaCaption}</p>
 
-      {/* Primary path: paste an API key. Server-side runs `mmx auth login
-          --method api-key --api-key <key>` after auto-installing mmx-cli if
-          needed. See docs/design/patterns/api-key-paste-form.md for the
-          general pattern this implements. */}
-      <div className="space-y-1">
-        <label htmlFor="nca-api-key" className="block text-[10px] uppercase tracking-wider text-zinc-500">
-          MiniMax API key
-        </label>
-        <div className="flex gap-2">
-          <input
-            id="nca-api-key"
-            type="password"
-            value={ncaApiKey}
-            onChange={(e) => setNcaApiKey(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && ncaApiKey.trim() && !ncaBusy) {
-                e.preventDefault();
-                handleNcaApiKeySave();
-              }
-            }}
-            placeholder="sk-…"
-            disabled={ncaBusy}
-            autoComplete="off"
-            spellCheck={false}
-            aria-describedby="nca-api-key-help"
-            className="flex-1 bg-zinc-900 border border-zinc-700 focus:border-[#c5a062] outline-none rounded px-2 py-1 text-[12px] text-white font-mono disabled:opacity-60"
-          />
-          <button
-            type="button"
-            onClick={handleNcaApiKeySave}
-            disabled={ncaBusy || !ncaApiKey.trim()}
-            className="btn-gold-sm rounded-lg px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+      {ncaIsNotInstalled ? (
+        // ── State 1: Not Installed ─────────────────────────────────────
+        // Primary action is procuring the binary. The API-key form is
+        // intentionally hidden — it'd just produce a dead-end "nca not
+        // found" error if the user pasted a key now.
+        <div className="space-y-2">
+          <a
+            href="https://github.com/madebyaris/native-cli-ai/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-gold-sm rounded-lg px-3 inline-block"
           >
-            {ncaBusy ? 'Saving…' : 'Save'}
-          </button>
+            Install nca
+          </a>
+          <p className="text-[10px] text-zinc-500 leading-relaxed">
+            Windows: <code className="font-mono text-[10px] text-zinc-400">winget install Aris.native-cli-ai</code>
+            <br />
+            macOS / Linux: download the binary from the release page and place it at <code className="font-mono text-[10px] text-zinc-400">/usr/local/bin/nca</code> (or set <code className="font-mono text-[10px] text-zinc-400">NCA_BIN</code>).
+          </p>
         </div>
-        <p id="nca-api-key-help" className="text-[10px] text-zinc-600">
-          Stored in your local config (read by nca via the MINIMAX_API_KEY env); never sent to MashupForge servers.
-        </p>
-      </div>
+      ) : (
+        // ── State 2: Installed but Not Authenticated ──────────────────
+        // Reusable api-key paste pattern — see
+        // docs/design/patterns/api-key-paste-form.md.
+        <>
+          <div className="space-y-1">
+            <label htmlFor="nca-api-key" className="block text-[10px] uppercase tracking-wider text-zinc-500">
+              MiniMax API key
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="nca-api-key"
+                type="password"
+                value={ncaApiKey}
+                onChange={(e) => setNcaApiKey(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && ncaApiKey.trim() && !ncaBusy) {
+                    e.preventDefault();
+                    handleNcaApiKeySave();
+                  }
+                }}
+                placeholder="sk-…"
+                disabled={ncaBusy}
+                autoComplete="off"
+                spellCheck={false}
+                aria-describedby="nca-api-key-help"
+                className="flex-1 bg-zinc-900 border border-zinc-700 focus:border-[#c5a062] outline-none rounded px-2 py-1 text-[12px] text-white font-mono disabled:opacity-60"
+              />
+              <button
+                type="button"
+                onClick={handleNcaApiKeySave}
+                disabled={ncaBusy || !ncaApiKey.trim()}
+                className="btn-gold-sm rounded-lg px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {ncaBusy ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+            <p id="nca-api-key-help" className="text-[10px] text-zinc-600">
+              Stored in your local config (read by nca via the MINIMAX_API_KEY env); never sent to MashupForge servers.
+            </p>
+          </div>
 
-      {/* MMX-OAUTH-404-FIX 2026-04-30: the OAuth flow upstream
-          (`mmx auth login` → `platform.minimax.io/oauth/authorize?client_id=mmx-cli`)
-          currently returns 404 from MiniMax's server, so the prior "or sign in
-          via terminal (OAuth)" secondary action led users to a dead end.
-          Replaced with a direct external link to the API-key procurement page,
-          which is the only path that currently works end-to-end. The CLI
-          (provider/model config) remains reachable from the authenticated
-          state's "Open MMX CLI" link below — once a user has authenticated
-          via API key, they can drop into the shell to run `mmx config set …`. */}
-      <div className="flex items-center gap-2 pt-1">
-        <a
-          href="https://platform.minimax.io/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-[11px] text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
-        >
-          Don&apos;t have an API key? Get one at platform.minimax.io →
-        </a>
-      </div>
+          {/* MMX-OAUTH-404-FIX 2026-04-30: external link to the API-key
+              procurement page (the OAuth flow upstream is currently
+              broken). See docs/bmad/discoveries/MMX-OAUTH-404-2026-04-30.md. */}
+          <div className="flex items-center gap-2 pt-1">
+            <a
+              href="https://platform.minimax.io/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
+            >
+              Don&apos;t have an API key? Get one at platform.minimax.io →
+            </a>
+          </div>
+        </>
+      )}
 
       {/* Inline feedback. ncaJustAuthed is a transient confirmation that
           auto-clears after 3.5s; ncaError persists until the next attempt. */}
       {ncaJustAuthed && (
         <p className="text-[11px] text-emerald-400 flex items-center gap-1">
           <span aria-hidden>✓</span>
-          MMX authenticated. Open the terminal anytime to pick a provider/model.
+          nca authenticated. Pick a provider/model below or open the terminal.
         </p>
       )}
       {ncaError && (
@@ -827,19 +927,76 @@ export function SettingsModal({
                   {(ncaStatus == null || !ncaStatus.available || !ncaStatus.authenticated)
                     ? ncaSetupBlock
                     : (
-                      <div className="space-y-1">
+                      <div className="space-y-3">
                         <p className="text-[11px] text-emerald-400 flex items-center gap-1">
                           <span aria-hidden>✓</span>
                           nca is authenticated and ready
                           {ncaStatus.model ? ` (${ncaStatus.model})` : ''}.
                         </p>
+
+                        {/* NCA-INSTALL-DESIGN: model picker. Radio buttons
+                            grouped by provider, populated from /api/nca/models.
+                            On click, POSTs /api/nca/setup with `{model}` and
+                            re-probes status — the green "ready" line above
+                            then reflects the new selection. */}
+                        {ncaModels && ncaModels.length > 0 && (() => {
+                          const grouped = ncaModels.reduce<Record<string, NcaModel[]>>((acc, m) => {
+                            (acc[m.provider] ||= []).push(m);
+                            return acc;
+                          }, {});
+                          const providerOrder = Object.keys(grouped);
+                          return (
+                            <fieldset className="space-y-2">
+                              <legend className="text-[10px] uppercase tracking-wider text-zinc-500">Model</legend>
+                              <div className="space-y-2">
+                                {providerOrder.map((provider) => (
+                                  <div key={provider} className="space-y-1">
+                                    <p className="text-[10px] text-zinc-500">{provider}</p>
+                                    <div className="space-y-1">
+                                      {grouped[provider].map((m) => {
+                                        const id = `nca-model-${provider}-${m.model}`;
+                                        const checked = ncaStatus.model === m.model;
+                                        const saving = ncaModelSaving === m.model;
+                                        return (
+                                          <label
+                                            key={id}
+                                            htmlFor={id}
+                                            className={`flex items-center gap-2 px-2 py-1 rounded text-[11px] cursor-pointer transition-colors ${
+                                              checked
+                                                ? 'bg-[#c5a062]/10 border border-[#c5a062]/40 text-white'
+                                                : 'border border-transparent hover:border-zinc-700 text-zinc-300'
+                                            } ${ncaModelSaving && !saving ? 'opacity-50 pointer-events-none' : ''}`}
+                                          >
+                                            <input
+                                              id={id}
+                                              type="radio"
+                                              name="nca-model"
+                                              value={m.model}
+                                              checked={checked}
+                                              disabled={!!ncaModelSaving}
+                                              onChange={() => { void handleNcaModelSelect(m.model); }}
+                                              className="accent-[#c5a062]"
+                                            />
+                                            <span className="font-mono">{m.model}</span>
+                                            {saving && <span className="text-[10px] text-zinc-500 ml-auto">saving…</span>}
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </fieldset>
+                          );
+                        })()}
+
                         <button
                           type="button"
                           onClick={handleNcaSetup}
                           disabled={ncaBusy}
                           className="text-[11px] text-zinc-400 hover:text-[#c5a062] underline underline-offset-2 disabled:opacity-50"
                         >
-                          {ncaBusy ? 'Opening…' : 'Open MMX CLI to change provider/model'}
+                          {ncaBusy ? 'Opening…' : 'Open nca CLI to change provider/model'}
                         </button>
                       </div>
                     )}
@@ -851,7 +1008,7 @@ export function SettingsModal({
                     // ✓ badge above (gated on a real auth-status probe) is
                     // the only place we claim success.
                     <div className="mt-3 bg-zinc-900 border border-zinc-700 rounded-lg p-3 space-y-1">
-                      <p className="text-[11px] text-amber-300 font-medium">MMX setup — action required</p>
+                      <p className="text-[11px] text-amber-300 font-medium">nca setup — action required</p>
                       <pre className="text-[11px] text-zinc-300 bg-zinc-950 px-2 py-1 rounded whitespace-pre-wrap">{ncaSetupMsg}</pre>
                     </div>
                   )}
