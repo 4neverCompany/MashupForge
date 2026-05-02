@@ -4,6 +4,11 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.22] — 2026-05-02
+
+### Fixed
+- **mmx:** stdin format `{ messages }` → bare array `[...]`; removed `--stream` flag (mixed SSE+JSON); now collect full stdout and parse as one JSON object (MMX-CHAT-STREAM-FIX)
+
 ## [0.9.21] — 2026-05-01
 
 ### Fixed
