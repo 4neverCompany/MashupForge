@@ -31,6 +31,25 @@ if [ "$pkg" != "$VERSION" ] || [ "$tauri" != "$VERSION" ] || [ "$cargo" != "$VER
   exit 1
 fi
 
+# ── Lockfile sync ───────────────────────────────────────────────────────────
+# Regenerate bun.lock so CI's `bun install --frozen-lockfile` keeps passing.
+# We don't bump dependency versions here — `bun install` is a no-op on a
+# clean lockfile and only writes out a refreshed file when package.json has
+# drifted (e.g. a previous commit added a dep without running bun install
+# locally). v0.9.24 release shipped via the workflow's npm fallback because
+# the Bun primary step kept failing on a stale lockfile; this step prevents
+# the same drift from accumulating across releases.
+#
+# Skip silently if bun isn't on PATH — the operator can also run on a
+# machine without Bun (the workflow's npm fallback still works), we just
+# can't refresh the lockfile from there.
+if command -v bun >/dev/null 2>&1; then
+  echo "Refreshing bun.lock..."
+  bun install --silent
+else
+  echo "[skip] bun not on PATH — bun.lock not refreshed."
+fi
+
 # ── Changelog generation ─────────────────────────────────────────────────────
 # Conventional-commits → Keep-a-Changelog sections. `chore:`, `ci:`, `build:`,
 # `style:` are skipped — internal noise that doesn't belong in user-facing
@@ -115,6 +134,11 @@ echo "────────────────────────�
 # Stage all four files and commit with subject `chore(release): vX.Y.Z` and
 # body = the generated changelog block. Operator pushes + tags afterwards.
 git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml CHANGELOG.md
+# Include bun.lock if the install step above (or any prior local run)
+# changed it. Empty-stage if it's clean — `git add` no-ops on missing diff.
+if [ -f bun.lock ]; then
+  git add bun.lock
+fi
 
 # Skip the commit if nothing actually changed (e.g. re-running for the same
 # version). git diff --cached is empty when nothing is staged for commit.
