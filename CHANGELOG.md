@@ -4,6 +4,15 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.24] — 2026-05-02
+
+### Added
+- **nca:** add install flow UX to settings (NCA-INSTALL-DESIGN)
+- **nca:** add /api/nca/models route (NCA-INSTALL-DEV)
+
+### Fixed
+- **nca:** show hoisted CTA only when pi is active, not nca (QA W-1)
+
 ## [0.9.23] — 2026-05-02
 
 ### Added
