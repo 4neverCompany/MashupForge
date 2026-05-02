@@ -137,6 +137,55 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # NCA-BUNDLE: ship the nca.exe binary inside the Tauri installer so
+      # MashupForge users have working AI-agent support out of the box.
+      # Upstream (madebyaris/native-cli-ai) only publishes macOS + Linux
+      # release artifacts as of v0.3.0 — no Windows binary, no winget
+      # package — so we build from source pinned to that tag using the
+      # Rust toolchain already installed for the Tauri build below.
+      #
+      # Cached on the pinned tag, so subsequent runs are a no-op until we
+      # bump NCA_TAG.
+      - name: Cache nca binary
+        id: cache-nca
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/resources/nca/nca.exe
+          key: nca-windows-x86_64-v0.3.0
+
+      - name: Build nca for Windows
+        if: steps.cache-nca.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          NCA_TAG: v0.3.0
+        run: |
+          $src = Join-Path $env:RUNNER_TEMP "nca-src"
+          if (Test-Path $src) { Remove-Item -Recurse -Force $src }
+          git clone --depth 1 --branch $env:NCA_TAG https://github.com/madebyaris/native-cli-ai.git $src
+          Push-Location $src
+          try {
+            cargo build --release --locked -p nca-cli --target x86_64-pc-windows-msvc
+            $exe = Join-Path $src "target\x86_64-pc-windows-msvc\release\nca.exe"
+            if (-not (Test-Path $exe)) { throw "nca.exe not produced at $exe" }
+            $dest = Join-Path $env:GITHUB_WORKSPACE "src-tauri\resources\nca"
+            New-Item -ItemType Directory -Force -Path $dest | Out-Null
+            Copy-Item $exe (Join-Path $dest "nca.exe") -Force
+            $size = (Get-Item (Join-Path $dest "nca.exe")).Length
+            Write-Host "nca.exe built: $($size / 1MB) MB"
+          } finally {
+            Pop-Location
+          }
+
+      - name: Verify bundled nca
+        shell: pwsh
+        run: |
+          $nca = Join-Path $env:GITHUB_WORKSPACE "src-tauri\resources\nca\nca.exe"
+          if (-not (Test-Path $nca)) { throw "nca.exe missing at $nca — bundling step failed" }
+          # Don't probe with `nca doctor` (needs network); a smoke `--help`
+          # is enough to confirm the binary is loadable on this runner.
+          & $nca --help | Out-Null
+          Write-Host "nca bundled and runnable at $nca"
+
       # MUSTFIX-001: v0.2.2 CI run (24604871387) failed here with
       # "npm error could not determine executable to run". Root cause:
       # Bun does not populate node_modules/.bin the way npm does, so

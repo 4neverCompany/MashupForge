@@ -20,6 +20,7 @@ src-tauri/gen/schemas/
 src-tauri/resources/node/
 src-tauri/resources/app/
 src-tauri/resources/pi/
+src-tauri/resources/nca/
 dist/
 
 # Claude Code session files

@@ -133,6 +133,34 @@ for (const key of ['HOSTNAME', 'HOST']) {
 }
 if (!process.env.PORT) process.env.PORT = '0';
 
+// NCA-BUNDLE: point lib/nca-client at the nca.exe shipped inside the
+// installer if a user-supplied NCA_BIN isn't already set. The binary is
+// produced by the workflow's "Build nca for Windows" step (pinned to
+// v0.3.0) and copied into `src-tauri/resources/nca/nca.exe`. After
+// Tauri bundles, that lands at `<install-dir>/resources/nca/nca.exe`,
+// while THIS wrapper lives at `<install-dir>/resources/app/start.js`,
+// so the bundled binary is always one directory up + into `nca/`.
+//
+// We do not override an explicitly-set NCA_BIN (e.g. config.json
+// hydration above could have set it to a custom path the user
+// preferred). existsSync gates the assignment so a missing or
+// not-yet-built bundle silently falls through to PATH lookup, which
+// is what dev / web mode wants.
+(function pinBundledNca() {
+  if (process.env.NCA_BIN) return;
+  try {
+    const candidate = path.join(__dirname, '..', 'nca', 'nca.exe');
+    if (fs.existsSync(candidate)) {
+      process.env.NCA_BIN = candidate;
+      console.log(`[tauri-wrapper] using bundled nca: ${candidate}`);
+    }
+  } catch (_) {
+    // not in Tauri or unexpected layout — leave NCA_BIN unset so
+    // lib/nca-client falls back to its own /usr/local/bin/nca / PATH
+    // resolution. No log: this is the expected dev/web path.
+  }
+})();
+
 console.log(`[tauri-wrapper] booting Next on ${process.env.HOSTNAME}:${process.env.PORT}`);
 
 require('./server.js');

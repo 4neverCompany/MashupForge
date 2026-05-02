@@ -426,23 +426,42 @@ export function SettingsModal({
 
       {ncaIsNotInstalled ? (
         // ── State 1: Not Installed ─────────────────────────────────────
-        // Primary action is procuring the binary. The API-key form is
-        // intentionally hidden — it'd just produce a dead-end "nca not
-        // found" error if the user pasted a key now.
+        // NCA-BUNDLE: nca.exe ships INSIDE the Windows installer as of
+        // v0.9.26 (built from source on the workflow runner because
+        // upstream doesn't publish Windows binaries). So this state
+        // should be rare on a desktop install — it indicates either
+        //   (a) a corrupted bundle, or
+        //   (b) running in web / dev mode without the Tauri sidecar.
+        // The API-key form stays hidden — pasting a key against a
+        // missing binary just dead-ends in /api/nca/setup.
         <div className="space-y-2">
-          <a
-            href="https://github.com/madebyaris/native-cli-ai/releases"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-gold-sm rounded-lg px-3 inline-block"
-          >
-            Install nca
-          </a>
           <p className="text-[10px] text-zinc-500 leading-relaxed">
-            Windows: <code className="font-mono text-[10px] text-zinc-400">winget install Aris.native-cli-ai</code>
-            <br />
-            macOS / Linux: download the binary from the release page and place it at <code className="font-mono text-[10px] text-zinc-400">/usr/local/bin/nca</code> (or set <code className="font-mono text-[10px] text-zinc-400">NCA_BIN</code>).
+            nca should be bundled with MashupForge on Windows. If you&apos;re seeing this:
           </p>
+          <ul className="text-[10px] text-zinc-500 leading-relaxed list-disc pl-4 space-y-1">
+            <li>
+              <strong>Desktop app:</strong> reinstall the latest release from{' '}
+              <a
+                href="https://github.com/Code4neverCompany/MashupForge/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
+              >
+                MashupForge releases
+              </a>{' '}
+              — the bundle includes <code className="font-mono">nca.exe</code>.
+            </li>
+            <li>
+              <strong>Web / dev mode:</strong> install nca yourself —
+              clone <a
+                href="https://github.com/madebyaris/native-cli-ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
+              >native-cli-ai</a>, run <code className="font-mono">cargo build --release -p nca-cli</code>,
+              place <code className="font-mono">nca</code> on PATH or set <code className="font-mono">NCA_BIN</code>.
+            </li>
+          </ul>
         </div>
       ) : (
         // ── State 2: Installed but Not Authenticated ──────────────────
