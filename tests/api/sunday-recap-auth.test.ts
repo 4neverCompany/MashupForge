@@ -79,9 +79,17 @@ describe('POST /api/cron/sunday-recap auth', () => {
       setImmediate(() => child.emit('error', new Error('ENOENT')));
       return child as never;
     });
+    // Pin `now` 1 day after the post so the 7-day window definitely
+    // includes the post regardless of when the test runs. Without the
+    // pin the route's `now ?? new Date()` made this assertion flaky:
+    // the post lives forever at 2026-04-25, so once wall-clock time
+    // drifts past 2026-05-02 the post falls out of the window and
+    // `topics` becomes []. Caught on 2026-05-02 — fixing here unsticks
+    // the precommit hook for the unrelated NCA-INTEGRATION-DEV work.
     const res = await recapPost(
       buildReq('Bearer topsecret', {
         posts: [{ id: '1', date: '2026-04-25T12:00:00Z', caption: '#x' }],
+        now: '2026-04-26T00:00:00Z',
       }),
     );
     expect(res.status).toBe(503);

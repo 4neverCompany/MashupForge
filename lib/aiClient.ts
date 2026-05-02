@@ -1,15 +1,29 @@
 /**
- * Client-side helpers for streaming AI text. Both /api/pi/prompt and
- * /api/mmx/prompt expose the same text/event-stream contract:
+ * Client-side helpers for streaming AI text. /api/pi/prompt and
+ * /api/nca/prompt expose the same text/event-stream contract:
  *
  *   data: {"text":"<delta>"}\n\n
  *   ...
  *   data: {"error":"..."}\n\n   (on failure)
  *   data: [DONE]\n\n
  *
- * MMX-ROUTING: callers pass `provider: settings.activeAiAgent` to pick
+ * AI-AGENT-ROUTING: callers pass `provider: settings.activeAiAgent` to pick
  * which backend handles the request. Default is pi for back-compat
  * with installs that haven't toggled the AI Agent setting yet.
+ *
+ * Provider history:
+ *   - 'pi'  — legacy default. Long-lived RPC subprocess via lib/pi-client.
+ *   - 'mmx' — replaced by 'nca' on 2026-05-02 (NCA-INTEGRATION-DEV).
+ *             The mmx chat path had structural bugs (wrong stdin shape,
+ *             SSE/JSON mixing); nca exposes a clean ndjson contract.
+ *             The 'mmx' alias is kept as a back-compat redirect to nca
+ *             so existing settings.activeAiAgent values keep working
+ *             without a one-shot migration. Multimodal mmx routes
+ *             (image/music/video/speech/describe) are NOT replaced —
+ *             nca is text-only.
+ *   - 'nca' — current default second provider. ndjson stream, MiniMax
+ *             by default (M2.5; M2.7 / M2.7-highspeed available via
+ *             NCA_MODEL env or per-call `model` param).
  */
 
 export type PiMode =
@@ -35,11 +49,20 @@ export interface StreamAIOptions {
   niches?: string[];
   genres?: string[];
   /**
-   * MMX-ROUTING: which AI agent backend handles this call. Mirrors
+   * AI-AGENT-ROUTING: which AI agent backend handles this call. Mirrors
    * UserSettings.activeAiAgent. Default 'pi' so callers that don't yet
-   * thread the user setting through stay on the pre-MMX behavior.
+   * thread the user setting through stay on the pre-routing behavior.
+   * 'mmx' is kept as a back-compat alias for 'nca' (see module-level
+   * comment) — existing settings values keep working post-migration.
    */
-  provider?: 'mmx' | 'pi';
+  provider?: 'pi' | 'nca' | 'mmx';
+  /**
+   * Optional per-call model override, forwarded to the underlying
+   * provider route as `body.model`. Currently only honoured by the
+   * nca route (e.g. 'MiniMax-M2.7'); pi reads its model from server
+   * env and ignores this field.
+   */
+  model?: string;
 }
 
 /**
@@ -57,11 +80,15 @@ export async function* streamAI(
   message: string,
   options?: StreamAIOptions
 ): AsyncGenerator<string, void, void> {
-  // MMX-ROUTING: pick the route based on the caller's provider hint.
-  // Both routes expose the same SSE contract, so the rest of the
+  // AI-AGENT-ROUTING: pick the route based on the caller's provider hint.
+  // 'mmx' is a back-compat alias for 'nca' — the mmx chat path was retired
+  // on 2026-05-02 (NCA-INTEGRATION-DEV) but old settings.activeAiAgent
+  // values keep working without forcing a one-shot migration. All
+  // provider routes expose the same SSE contract, so the rest of the
   // streaming/parsing loop is provider-agnostic.
   const provider = options?.provider ?? 'pi';
-  const url = provider === 'mmx' ? '/api/mmx/prompt' : '/api/pi/prompt';
+  const url =
+    provider === 'nca' || provider === 'mmx' ? '/api/nca/prompt' : '/api/pi/prompt';
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
@@ -71,6 +98,7 @@ export async function* streamAI(
       systemPrompt: options?.systemPrompt,
       niches: options?.niches,
       genres: options?.genres,
+      model: options?.model,
     }),
     signal: options?.signal,
   });
