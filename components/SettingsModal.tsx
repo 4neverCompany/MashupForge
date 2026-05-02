@@ -904,12 +904,11 @@ export function SettingsModal({
                 window as well so the install affordance never disappears: the
                 /api/mmx/status probe can take a beat on cold starts and we'd
                 rather show the button optimistically than make the user wait. */}
-            {/* Hoisted CTA: rendered when MMX is not the active agent and
-                still needs setup. Hides itself once MMX is the active agent
+            {/* Hoisted CTA: rendered when nca is not the active agent and
+                still needs setup. Hides itself once nca is the active agent
                 so the active-agent panel below owns the surface — this
-                avoids the duplicate-MMX-panel concern flagged in the
-                MMX-AGENT-CARD-UX-VISUAL-PASS brief. */}
-            {activeAiAgent !== 'mmx'
+                avoids the duplicate-nca-panel concern. */}
+            {activeAiAgent === 'pi'
               && (ncaStatus == null || !ncaStatus.available || !ncaStatus.authenticated) && (
               <div className="pt-2">{ncaSetupBlock}</div>
             )}
