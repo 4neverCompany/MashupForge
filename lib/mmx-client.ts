@@ -563,19 +563,29 @@ interface MmxMessage {
 function parseStreamLine(line: string): string | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
-  // Tolerate SSE-style "data:" prefixes mmx might emit when its --stream
-  // mode is wired through an SSE adapter.
-  const payload = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
-  if (!payload || payload === '[DONE]') return null;
+  if (trimmed === '[DONE]') return null;
   try {
-    const obj = JSON.parse(payload) as unknown;
-    if (typeof obj === 'string') return obj;
-    if (obj && typeof obj === 'object') {
+    const obj = JSON.parse(trimmed) as unknown;
+    // Non-streaming JSON: complete message object per line.
+    // Content is an array of blocks: [{ type: "text", text: "…" }, ...]
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
       const o = obj as Record<string, unknown>;
+      // Complete assistant message: extract all text blocks.
+      if (o.role === 'assistant' && Array.isArray(o.content)) {
+        const parts: string[] = [];
+        for (const block of o.content) {
+          if (block && typeof block === 'object' && (block as Record<string, unknown>).type === 'text') {
+            const text = (block as Record<string, unknown>).text;
+            if (typeof text === 'string') parts.push(text);
+          }
+        }
+        if (parts.length > 0) return parts.join('');
+      }
+      // Streaming delta shapes (legacy --stream mode).
       if (typeof o.delta === 'string') return o.delta;
       if (typeof o.text === 'string') return o.text;
       if (typeof o.content === 'string') return o.content;
-      // OpenAI-compatible chunk: { choices: [{ delta: { content: '…' } }] }
+      // OpenAI-compatible chunk.
       const choices = o.choices;
       if (Array.isArray(choices) && choices[0] && typeof choices[0] === 'object') {
         const c0 = choices[0] as Record<string, unknown>;
@@ -584,17 +594,58 @@ function parseStreamLine(line: string): string | null {
         const m = c0.message as Record<string, unknown> | undefined;
         if (m && typeof m.content === 'string') return m.content;
       }
-      // Pi-shaped relay (some mmx builds proxy through pi's event shape).
+      // Pi-shaped relay.
       const evt = o.assistantMessageEvent as Record<string, unknown> | undefined;
       if (evt && evt.type === 'text_delta' && typeof evt.delta === 'string') {
         return evt.delta;
       }
     }
+    // Plain string per line (e.g. thought blocks).
+    if (typeof obj === 'string') return obj;
     return null;
   } catch {
-    // Not JSON — treat as raw streamed text.
-    return payload;
+    // Not JSON — treat as raw streamed text (e.g. SSE "data:" prefix in --stream mode).
+    return trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
   }
+}
+
+// Old parseStreamLine and prompt functions removed 2026-05-02.
+// See new extractTextFromResponse and prompt below.
+
+/**
+ * Extract text content from a parsed mmx JSON response.
+ * Handles both streaming (delta shapes) and complete-message (non-streaming) formats.
+ */
+function extractTextFromResponse(obj: unknown): string[] {
+  const texts: string[] = [];
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return texts;
+  const o = obj as Record<string, unknown>;
+
+  // Complete assistant message (non-streaming): content is an array of blocks.
+  if (o.role === 'assistant' && Array.isArray(o.content)) {
+    for (const block of o.content) {
+      if (block && typeof block === 'object' && (block as Record<string, unknown>).type === 'text') {
+        const text = (block as Record<string, unknown>).text;
+        if (typeof text === 'string') texts.push(text);
+      }
+    }
+    return texts;
+  }
+
+  // Streaming delta shapes.
+  if (typeof o.delta === 'string') texts.push(o.delta);
+  else if (typeof o.text === 'string') texts.push(o.text);
+  else if (typeof o.content === 'string') texts.push(o.content as string);
+
+  // OpenAI-compatible chunk.
+  const choices = o.choices;
+  if (Array.isArray(choices) && choices[0] && typeof choices[0] === 'object') {
+    const c0 = choices[0] as Record<string, unknown>;
+    const d = c0.delta as Record<string, unknown> | undefined;
+    if (d && typeof d.content === 'string') texts.push(d.content);
+  }
+
+  return texts;
 }
 
 /**
@@ -603,6 +654,9 @@ function parseStreamLine(line: string): string | null {
  * so closure is the natural end signal). Throws {@link MmxSpawnError}
  * if the binary can't be launched and {@link MmxError} on a non-zero
  * exit with no parsed output.
+ *
+ * Uses non-streaming JSON output (no --stream flag) for clean, complete
+ * responses. The entire stdout is collected then parsed as one JSON object.
  */
 export async function* prompt(
   message: string,
@@ -619,7 +673,7 @@ export async function* prompt(
     const bin = mmxBin();
     child = _spawn(
       bin,
-      ['text', 'chat', '--messages-file', '-', '--stream'],
+      ['text', 'chat', '--messages-file', '-'],
       {
         stdio: ['pipe', 'pipe', 'pipe'],
         signal: options?.signal,
@@ -633,84 +687,60 @@ export async function* prompt(
   // Stream-feed the messages array. mmx's --messages-file - reads from
   // stdin until EOF, so we write once and close.
   try {
-    child.stdin?.end(JSON.stringify({ messages }));
+    child.stdin?.end(JSON.stringify(messages));
   } catch {
-    // ENOENT on the binary itself fires via the 'error' event below
+    // ENOENT on the binary fires via the 'error' event below
     // before stdin is writable; swallow the synchronous variant.
   }
 
   child.stdout?.setEncoding('utf8');
   child.stderr?.setEncoding('utf8');
 
-  let buffer = '';
+  let stdoutBuffer = '';
   let stderrTail = '';
-  const queue: string[] = [];
-  let resolveNext: (() => void) | null = null;
-  let finished = false;
-  let streamError: Error | null = null;
-
-  const wakeConsumer = () => {
-    if (resolveNext) {
-      const r = resolveNext;
-      resolveNext = null;
-      r();
-    }
-  };
 
   child.stdout?.on('data', (chunk: string) => {
-    buffer += chunk;
-    let nl: number;
-    while ((nl = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      const delta = parseStreamLine(line);
-      if (delta) {
-        queue.push(delta);
-        wakeConsumer();
-      }
-    }
+    stdoutBuffer += chunk;
   });
 
   child.stderr?.on('data', (chunk: string) => {
     stderrTail += chunk;
-    // Cap so a runaway error log doesn't OOM us.
     if (stderrTail.length > 8192) stderrTail = stderrTail.slice(-4096);
   });
 
-  child.once('error', (err) => {
-    streamError = new MmxSpawnError(`mmx spawn error: ${err.message}`);
-    finished = true;
-    wakeConsumer();
+  let streamError: Error | null = null;
+  const finish = new Promise<number>((resolve) => {
+    child.once('error', (err: Error) => {
+      streamError = new MmxSpawnError(`mmx spawn error: ${err.message}`);
+      resolve(-1);
+    });
+    child.once('close', (code: number | null) => {
+      resolve(code ?? -1);
+    });
   });
 
-  child.once('close', (code) => {
-    // Drain any unterminated tail line.
-    if (buffer.trim()) {
-      const delta = parseStreamLine(buffer);
-      if (delta) queue.push(delta);
-      buffer = '';
-    }
-    if (code !== 0 && !streamError) {
-      streamError = new MmxError(
-        code ?? -1,
-        `mmx exited code ${code}: ${stderrTail.trim() || 'no stderr'}`,
-      );
-    }
-    finished = true;
-    wakeConsumer();
-  });
+  const exitCode = await finish;
 
-  try {
-    while (!finished || queue.length > 0) {
-      if (queue.length === 0 && !finished) {
-        await new Promise<void>((resolve) => { resolveNext = resolve; });
+  if (streamError) throw streamError;
+
+  if (exitCode !== 0) {
+    throw new MmxError(
+      exitCode,
+      `mmx exited code ${exitCode}: ${stderrTail.trim() || 'no stderr'}`,
+    );
+  }
+
+  // Parse the complete stdout as a single JSON object.
+  if (stdoutBuffer.trim()) {
+    try {
+      const parsed = JSON.parse(stdoutBuffer) as unknown;
+      const texts = extractTextFromResponse(parsed);
+      for (const text of texts) {
+        if (text) yield text;
       }
-      while (queue.length > 0) yield queue.shift()!;
-    }
-    if (streamError) throw streamError;
-  } finally {
-    if (!child.killed && child.exitCode === null) {
-      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+    } catch {
+      // Not JSON — treat the whole buffer as a text response (fallback).
+      yield stdoutBuffer.trim();
     }
   }
 }
