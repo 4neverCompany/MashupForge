@@ -4,6 +4,10 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.25] — 2026-05-02
+
+_Internal-only release; no user-facing changes since v0.9.24._
+
 ## [0.9.24] — 2026-05-02
 
 ### Added
