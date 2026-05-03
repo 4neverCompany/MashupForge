@@ -420,113 +420,110 @@ export function SettingsModal({
   // hold back the API-key form until ncaStatus.available flips true.
   const ncaIsNotInstalled = ncaStatus == null || !ncaStatus.available;
 
-  const ncaSetupBlock = (
-    <div className="space-y-3">
+  // NCA-SETUP-UI-FIX: split the setup surface into two pieces. The install
+  // instructions stay below the card grid (rendered when nca isn't on PATH);
+  // the API-key form moves INSIDE the nca card so the input sits next to the
+  // amber "Not Authenticated" status it's responding to. `stopPropagation`
+  // on the wrapper is required because the card is clickable for selection
+  // — without it, focusing the input would also toggle the card.
+  const ncaInstallBlock = (
+    <div className="space-y-2">
       <p className="text-[11px] text-zinc-400">{ncaCaption}</p>
+      <p className="text-[10px] text-zinc-500 leading-relaxed">
+        nca should be bundled with MashupForge on Windows. If you&apos;re seeing this:
+      </p>
+      <ul className="text-[10px] text-zinc-500 leading-relaxed list-disc pl-4 space-y-1">
+        <li>
+          <strong>Desktop app:</strong> reinstall the latest release from{' '}
+          <a
+            href="https://github.com/Code4neverCompany/MashupForge/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
+          >
+            MashupForge releases
+          </a>{' '}
+          — the bundle includes <code className="font-mono">nca.exe</code>.
+        </li>
+        <li>
+          <strong>Web / dev mode:</strong> install nca yourself —
+          clone <a
+            href="https://github.com/madebyaris/native-cli-ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
+          >native-cli-ai</a>, run <code className="font-mono">cargo build --release -p nca-cli</code>,
+          place <code className="font-mono">nca</code> on PATH or set <code className="font-mono">NCA_BIN</code>.
+        </li>
+      </ul>
+    </div>
+  );
 
-      {ncaIsNotInstalled ? (
-        // ── State 1: Not Installed ─────────────────────────────────────
-        // NCA-BUNDLE: nca.exe ships INSIDE the Windows installer as of
-        // v0.9.26 (built from source on the workflow runner because
-        // upstream doesn't publish Windows binaries). So this state
-        // should be rare on a desktop install — it indicates either
-        //   (a) a corrupted bundle, or
-        //   (b) running in web / dev mode without the Tauri sidecar.
-        // The API-key form stays hidden — pasting a key against a
-        // missing binary just dead-ends in /api/nca/setup.
-        <div className="space-y-2">
-          <p className="text-[10px] text-zinc-500 leading-relaxed">
-            nca should be bundled with MashupForge on Windows. If you&apos;re seeing this:
-          </p>
-          <ul className="text-[10px] text-zinc-500 leading-relaxed list-disc pl-4 space-y-1">
-            <li>
-              <strong>Desktop app:</strong> reinstall the latest release from{' '}
-              <a
-                href="https://github.com/Code4neverCompany/MashupForge/releases"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
-              >
-                MashupForge releases
-              </a>{' '}
-              — the bundle includes <code className="font-mono">nca.exe</code>.
-            </li>
-            <li>
-              <strong>Web / dev mode:</strong> install nca yourself —
-              clone <a
-                href="https://github.com/madebyaris/native-cli-ai"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
-              >native-cli-ai</a>, run <code className="font-mono">cargo build --release -p nca-cli</code>,
-              place <code className="font-mono">nca</code> on PATH or set <code className="font-mono">NCA_BIN</code>.
-            </li>
-          </ul>
+  const ncaApiKeyForm = (
+    <div
+      className="space-y-3 mt-3 pt-3 border-t border-zinc-800/60"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <div className="space-y-1">
+        <label htmlFor="nca-api-key" className="block text-[10px] uppercase tracking-wider text-zinc-500">
+          MiniMax API key
+        </label>
+        <div className="flex gap-2">
+          <input
+            id="nca-api-key"
+            type="password"
+            value={ncaApiKey}
+            onChange={(e) => setNcaApiKey(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter' && ncaApiKey.trim() && !ncaBusy) {
+                e.preventDefault();
+                handleNcaApiKeySave();
+              }
+            }}
+            placeholder="sk-…"
+            disabled={ncaBusy}
+            autoComplete="off"
+            spellCheck={false}
+            aria-describedby="nca-api-key-help"
+            className="flex-1 bg-zinc-900 border border-zinc-700 focus:border-[#c5a062] outline-none rounded px-2 py-1 text-[12px] text-white font-mono disabled:opacity-60"
+          />
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); handleNcaApiKeySave(); }}
+            disabled={ncaBusy || !ncaApiKey.trim()}
+            className="btn-gold-sm rounded-lg px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {ncaBusy ? 'Saving…' : 'Save'}
+          </button>
         </div>
-      ) : (
-        // ── State 2: Installed but Not Authenticated ──────────────────
-        // Reusable api-key paste pattern — see
-        // docs/design/patterns/api-key-paste-form.md.
-        <>
-          <div className="space-y-1">
-            <label htmlFor="nca-api-key" className="block text-[10px] uppercase tracking-wider text-zinc-500">
-              MiniMax API key
-            </label>
-            <div className="flex gap-2">
-              <input
-                id="nca-api-key"
-                type="password"
-                value={ncaApiKey}
-                onChange={(e) => setNcaApiKey(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && ncaApiKey.trim() && !ncaBusy) {
-                    e.preventDefault();
-                    handleNcaApiKeySave();
-                  }
-                }}
-                placeholder="sk-…"
-                disabled={ncaBusy}
-                autoComplete="off"
-                spellCheck={false}
-                aria-describedby="nca-api-key-help"
-                className="flex-1 bg-zinc-900 border border-zinc-700 focus:border-[#c5a062] outline-none rounded px-2 py-1 text-[12px] text-white font-mono disabled:opacity-60"
-              />
-              <button
-                type="button"
-                onClick={handleNcaApiKeySave}
-                disabled={ncaBusy || !ncaApiKey.trim()}
-                className="btn-gold-sm rounded-lg px-3 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {ncaBusy ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-            <p id="nca-api-key-help" className="text-[10px] text-zinc-600">
-              Stored in your local config (read by nca via the MINIMAX_API_KEY env); never sent to MashupForge servers.
-            </p>
-          </div>
+        <p id="nca-api-key-help" className="text-[10px] text-zinc-600">
+          Stored in your local config (read by nca via the MINIMAX_API_KEY env); never sent to MashupForge servers.
+        </p>
+      </div>
 
-          {/* MMX-OAUTH-404-FIX 2026-04-30: external link to the API-key
-              procurement page (the OAuth flow upstream is currently
-              broken). See docs/bmad/discoveries/MMX-OAUTH-404-2026-04-30.md. */}
-          <div className="flex items-center gap-2 pt-1">
-            <a
-              href="https://platform.minimax.io/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[11px] text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
-            >
-              Don&apos;t have an API key? Get one at platform.minimax.io →
-            </a>
-          </div>
-        </>
-      )}
+      {/* MMX-OAUTH-404-FIX 2026-04-30: external link to the API-key
+          procurement page (the OAuth flow upstream is currently
+          broken). See docs/bmad/discoveries/MMX-OAUTH-404-2026-04-30.md. */}
+      <div className="flex items-center gap-2">
+        <a
+          href="https://platform.minimax.io/"
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-[11px] text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"
+        >
+          Don&apos;t have an API key? Get one at platform.minimax.io →
+        </a>
+      </div>
 
-      {/* Inline feedback. ncaJustAuthed is a transient confirmation that
-          auto-clears after 3.5s; ncaError persists until the next attempt. */}
+      {/* Inline feedback. ncaJustAuthed auto-clears after 3.5s; ncaError
+          persists until the next attempt. */}
       {ncaJustAuthed && (
         <p className="text-[11px] text-emerald-400 flex items-center gap-1">
           <span aria-hidden>✓</span>
-          nca authenticated. Pick a provider/model below or open the terminal.
+          nca authenticated. Pick a provider/model below.
         </p>
       )}
       {ncaError && (
@@ -818,40 +815,57 @@ export function SettingsModal({
                       updateSettings({ activeAiAgent: 'nca', aiAgentProvider: 'nca' });
                     }
                   };
+                  // NCA-SETUP-UI-FIX: card is a div (not a button) so the
+                  // inline API-key input + Save can nest legally — HTML
+                  // forbids interactive elements inside <button>. Click +
+                  // keyboard activation are wired manually for parity with
+                  // the previous button semantics.
+                  const showApiKeyForm = available === true && ncaStatus?.authenticated === false;
                   return (
-                    <button
-                      type="button"
-                      onClick={handleNcaCardClick}
+                    <div
+                      role="button"
+                      tabIndex={ncaBusy ? -1 : 0}
+                      onClick={() => { if (!ncaBusy) handleNcaCardClick(); }}
+                      onKeyDown={(e) => {
+                        if (ncaBusy) return;
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleNcaCardClick();
+                        }
+                      }}
                       aria-pressed={selected}
-                      disabled={ncaBusy}
-                    className={`text-left rounded-xl border p-4 transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
-                      selected
-                        ? 'border-[#c5a062] bg-[#c5a062]/10 shadow-[0_0_0_1px_rgba(197,160,98,0.3)]'
-                        : 'border-zinc-800/60 bg-zinc-950/40 hover:border-zinc-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Terminal className="w-4 h-4 text-[#c5a062]" />
-                        <span className="text-sm font-bold text-white">nca</span>
+                      aria-disabled={ncaBusy}
+                      className={`text-left rounded-xl border p-4 transition-all cursor-pointer ${
+                        ncaBusy ? 'opacity-60 cursor-not-allowed' : ''
+                      } ${
+                        selected
+                          ? 'border-[#c5a062] bg-[#c5a062]/10 shadow-[0_0_0_1px_rgba(197,160,98,0.3)]'
+                          : 'border-zinc-800/60 bg-zinc-950/40 hover:border-zinc-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Terminal className="w-4 h-4 text-[#c5a062]" />
+                          <span className="text-sm font-bold text-white">nca</span>
+                        </div>
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider ${selected ? 'text-[#c5a062]' : 'text-zinc-500'}`}>
+                          {selected ? '● Selected' : '○ Select'}
+                        </span>
                       </div>
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${selected ? 'text-[#c5a062]' : 'text-zinc-500'}`}>
-                        {selected ? '● Selected' : '○ Select'}
-                      </span>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+                        <span className={`text-[11px] ${labelColor}`}>{label}</span>
+                        {ncaStatus?.model && (
+                          <span className="text-[10px] text-zinc-500 ml-1 truncate">{ncaStatus.model}</span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-zinc-500 leading-relaxed">
+                        Aris&apos;s nca (native-cli-ai) — Rust-native, MiniMax-powered text agent
+                        with multi-provider support (OpenAI / Anthropic / OpenRouter via env keys).
+                      </p>
+                      {showApiKeyForm && ncaApiKeyForm}
                     </div>
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-                      <span className={`text-[11px] ${labelColor}`}>{label}</span>
-                      {ncaStatus?.model && (
-                        <span className="text-[10px] text-zinc-500 ml-1 truncate">{ncaStatus.model}</span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-zinc-500 leading-relaxed">
-                      Aris&apos;s nca (native-cli-ai) — Rust-native, MiniMax-powered text agent
-                      with multi-provider support (OpenAI / Anthropic / OpenRouter via env keys).
-                    </p>
-                  </button>
-                );
+                  );
               })()}
 
               {/* Pi.dev card */}
@@ -923,27 +937,27 @@ export function SettingsModal({
                 window as well so the install affordance never disappears: the
                 /api/mmx/status probe can take a beat on cold starts and we'd
                 rather show the button optimistically than make the user wait. */}
-            {/* Hoisted CTA: rendered when nca is not the active agent and
-                still needs setup. Hides itself once nca is the active agent
-                so the active-agent panel below owns the surface — this
-                avoids the duplicate-nca-panel concern. */}
-            {activeAiAgent === 'pi'
-              && (ncaStatus == null || !ncaStatus.available || !ncaStatus.authenticated) && (
-              <div className="pt-2">{ncaSetupBlock}</div>
+            {/* NCA-SETUP-UI-FIX: API-key form moved into the nca card so
+                this hoisted block now only surfaces install instructions
+                (binary missing). When nca is installed-but-not-auth'd, the
+                inline form on the card itself is the single source of
+                truth — no duplicate input below. */}
+            {activeAiAgent === 'pi' && ncaIsNotInstalled && (
+              <div className="pt-2">{ncaInstallBlock}</div>
             )}
 
-            {/* Launch Setup — active-agent-specific status panel.
-                When MMX is the active agent we own the full surface here:
-                needs-setup states reuse the shared ncaSetupBlock (so the
-                user gets the same API-key form they'd see in the hoisted
-                CTA), and the authenticated state shows a compact ready
-                line + a reconfigure link to drop into the terminal for
-                provider/model changes. */}
+            {/* Active-agent panel. When nca is the active agent and the
+                binary is missing we still show the install instructions
+                here so the user has a clear next step. The amber
+                "needs-auth" state is handled inside the card via
+                ncaApiKeyForm — not duplicated here. */}
             <div className="pt-2">
               {(activeAiAgent === 'nca' || activeAiAgent === 'mmx') ? (
                 <>
-                  {(ncaStatus == null || !ncaStatus.available || !ncaStatus.authenticated)
-                    ? ncaSetupBlock
+                  {ncaIsNotInstalled
+                    ? ncaInstallBlock
+                    : ncaStatus?.authenticated === false
+                    ? null
                     : (
                       <div className="space-y-3">
                         <p className="text-[11px] text-emerald-400 flex items-center gap-1">
@@ -1008,14 +1022,6 @@ export function SettingsModal({
                           );
                         })()}
 
-                        <button
-                          type="button"
-                          onClick={handleNcaSetup}
-                          disabled={ncaBusy}
-                          className="text-[11px] text-zinc-400 hover:text-[#c5a062] underline underline-offset-2 disabled:opacity-50"
-                        >
-                          {ncaBusy ? 'Opening…' : 'Open nca CLI to change provider/model'}
-                        </button>
                       </div>
                     )}
                   {ncaSetupMsg && (

@@ -40,7 +40,9 @@
  */
 
 import { spawn as nodeSpawn, type spawn as SpawnFn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 // Test-injection seam, mirroring lib/mmx-client.ts. Keeps the test surface
 // in this module rather than vi.mock('node:child_process').
@@ -185,23 +187,75 @@ export async function isAvailable(): Promise<boolean> {
 }
 
 /**
- * Whether at least one provider has its api-key env var populated. nca's
- * doctor output reports `api_key_present` per provider directly — we trust
- * that probe rather than re-implementing the env-var lookup, so the answer
- * stays correct when nca adds providers we haven't enumerated.
+ * Whether at least one provider has an api-key configured.
  *
  * Synchronous so it can be called from request handlers without an extra
- * async hop: we read process.env directly here, mirroring the doctor
- * payload's logic for the providers nca currently supports. Keep this list
- * in step with nca's defaults — see runDoctor for the authoritative source.
+ * async hop. Two sources, in priority order:
+ *
+ *   1. `process.env.<PROVIDER>_API_KEY` — the env-var fast path. nca itself
+ *      reads these at run time and they win over config.toml.
+ *   2. `~/.nca/config.toml` (or `./.nca/config.toml` workspace-local, or the
+ *      `$NCA_CONFIG` override) — nca persists keys here too via
+ *      `nca auth login --method api-key`. The Next.js server process does
+ *      not inherit shell env from `nca` invocations, so the env-only check
+ *      used to falsely report unauth'd while `nca doctor` and `nca run`
+ *      were happily reading the on-disk key.
+ *
+ * The async {@link getDoctor} probe remains the authoritative source — it
+ * asks nca itself. Use this sync helper for hot-path gating; reach for the
+ * doctor when you need per-provider status (the status route does this).
  */
 export function isAuthenticated(): boolean {
-  return Boolean(
+  if (
     (process.env.MINIMAX_API_KEY && process.env.MINIMAX_API_KEY.trim()) ||
-      (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim()) ||
-      (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim()) ||
-      (process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim()),
-  );
+    (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim()) ||
+    (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim()) ||
+    (process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim())
+  ) {
+    return true;
+  }
+  return ncaConfigHasApiKey();
+}
+
+/**
+ * Sync probe of nca's config.toml for any populated `api_key` field.
+ *
+ * nca's TOML schema places `api_key = "..."` directly inside each
+ * `[provider.<name>]` block (alongside `api_key_env = "..."` which is
+ * always present and does NOT imply auth). The negative lookahead in the
+ * regex distinguishes the two so we don't get a false positive from
+ * `api_key_env`.
+ *
+ * Search order matches nca's own resolution: `$NCA_CONFIG` if set and
+ * present, then workspace-local `./.nca/config.toml`, then user-global
+ * `~/.nca/config.toml`. First file found wins; we don't merge.
+ */
+function ncaConfigHasApiKey(): boolean {
+  const candidates: string[] = [];
+  const explicit = process.env.NCA_CONFIG?.trim();
+  if (explicit) candidates.push(explicit);
+  candidates.push(join(process.cwd(), '.nca', 'config.toml'));
+  candidates.push(join(homedir(), '.nca', 'config.toml'));
+
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    let raw: string;
+    try {
+      raw = readFileSync(path, 'utf8');
+    } catch {
+      continue;
+    }
+    // `api_key(?!_)` excludes `api_key_env`. The quoted-value capture
+    // requires at least one non-quote character so we don't count
+    // `api_key = ""` as authenticated.
+    if (/^\s*api_key(?!_)\s*=\s*"[^"]+"\s*$/m.test(raw)) {
+      return true;
+    }
+    // First file found is authoritative regardless of result — match
+    // nca's own resolution semantics.
+    return false;
+  }
+  return false;
 }
 
 /** Async richer probe — fetches the full doctor payload for the status route. */
