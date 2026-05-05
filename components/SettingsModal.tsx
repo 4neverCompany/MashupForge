@@ -820,7 +820,15 @@ export function SettingsModal({
                   // forbids interactive elements inside <button>. Click +
                   // keyboard activation are wired manually for parity with
                   // the previous button semantics.
-                  const showApiKeyForm = available === true && ncaStatus?.authenticated === false;
+                  // Show the form whenever the binary is known-installed and
+                  // we don't yet have a positive auth signal. Using `!== true`
+                  // (instead of `=== false`) keeps the form visible during
+                  // the status-probe loading window — when ncaStatus is
+                  // still null but `available` is true via the
+                  // useNcaAvailability fallback, otherwise the form stays
+                  // invisible for the 300–1500ms of the network probe and
+                  // a quick-clicking user sees no input at all.
+                  const showApiKeyForm = available === true && ncaStatus?.authenticated !== true;
                   return (
                     <div
                       role="button"
@@ -957,7 +965,15 @@ export function SettingsModal({
                   {ncaIsNotInstalled
                     ? ncaInstallBlock
                     : ncaStatus?.authenticated === false
-                    ? null
+                    ? (
+                      // The API-key form lives inside the nca card above
+                      // (NCA-SETUP-UI-FIX). Without this nudge the panel
+                      // rendered `null` here and a user who didn't notice
+                      // the form embedded in the card had no CTA at all.
+                      <p className="text-[11px] text-amber-300">
+                        Enter your MiniMax API key in the nca card above to authenticate.
+                      </p>
+                    )
                     : (
                       <div className="space-y-3">
                         <p className="text-[11px] text-emerald-400 flex items-center gap-1">
