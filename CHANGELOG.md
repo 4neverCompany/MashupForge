@@ -4,6 +4,13 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.30] — 2026-05-05
+
+### Fixed
+- **scheduler:** forward credentials through cron-fire path
+- **settings:** mutually exclude nca and pi.dev setup flows
+- **settings:** NCA api-key form visibility gaps post-NCA-SETUP-UI-FIX
+
 ## [0.9.29] — 2026-05-05
 
 ### Fixed
