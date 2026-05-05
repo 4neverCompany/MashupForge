@@ -18,7 +18,7 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { id, date, time, platforms, caption, mediaUrl, mediaUrls, carouselGroupId, imageId } = body;
+  const { id, date, time, platforms, caption, mediaUrl, mediaUrls, carouselGroupId, imageId, credentials } = body;
 
   if (!id || !date || !time) {
     return NextResponse.json(
@@ -57,6 +57,7 @@ export async function POST(req: Request): Promise<Response> {
     ...(mediaUrls ? { mediaUrls } : {}),
     ...(carouselGroupId ? { carouselGroupId } : {}),
     ...(imageId ? { imageId } : {}),
+    ...(credentials ? { credentials } : {}),
   };
 
   let replaced = false;

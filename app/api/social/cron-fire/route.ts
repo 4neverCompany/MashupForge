@@ -87,9 +87,11 @@ function groupForFire(posts: EnqueuedPost[]): EnqueuedPost[][] {
 
 /**
  * Fire one group (single post or carousel) via /api/social/post.
- * Credentials are intentionally empty — the route's env-fallback chain
- * (process.env.INSTAGRAM_ACCESS_TOKEN ?? body.credentials...) lets the
- * server post on the user's behalf when the env vars are configured.
+ * SCHED-CRON-CREDS-FIX: credentials come from the enqueued post's own
+ * snapshot (captured at schedule time from the browser's settings) and
+ * fall back to {} only when the post predates the credential field —
+ * /api/social/post's env-fallback chain still picks up server-side
+ * env vars when the snapshot is empty.
  */
 async function fireOne(
   group: EnqueuedPost[],
@@ -97,18 +99,19 @@ async function fireOne(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const head = group[0];
   const isCarousel = group.length > 1 || (head.mediaUrls && head.mediaUrls.length > 0);
+  const credentials = head.credentials ?? {};
   const body = isCarousel
     ? {
         caption: head.caption,
         platforms: head.platforms,
         mediaUrls: head.mediaUrls ?? group.map((g) => g.mediaUrl).filter((u): u is string => !!u),
-        credentials: {},
+        credentials,
       }
     : {
         caption: head.caption,
         platforms: head.platforms,
         mediaUrl: head.mediaUrl,
-        credentials: {},
+        credentials,
       };
 
   try {

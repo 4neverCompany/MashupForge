@@ -9,6 +9,7 @@
 // fire the post when the tab is open.
 
 import type { ScheduledPost } from '@/types/mashup';
+import type { SocialCredentials } from '@/lib/server-queue';
 
 interface SchedulePushPayload {
   id: string;
@@ -20,6 +21,12 @@ interface SchedulePushPayload {
   mediaUrls?: string[];
   carouselGroupId?: string;
   imageId?: string;
+  /** SCHED-CRON-CREDS-FIX: snapshot of the user's social credentials
+   *  taken at enqueue time. Forwarded all the way through to
+   *  /api/social/post when the cron fires; without this the scheduled
+   *  cron path lost credentials and IG/Pinterest posts failed unless
+   *  the server had matching env vars set. */
+  credentials?: SocialCredentials;
 }
 
 export async function pushScheduleToServer(payload: SchedulePushPayload): Promise<void> {

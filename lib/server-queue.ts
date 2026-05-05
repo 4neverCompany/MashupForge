@@ -19,6 +19,18 @@
 
 import { Redis } from '@upstash/redis';
 
+/** Per-platform credential snapshot the browser sends with each schedule
+ *  push so the cron path can post on the user's behalf without depending
+ *  on server env vars. Same shape as the credentials object that the
+ *  browser auto-poster sends to /api/social/post (see MainContent.tsx
+ *  buildCredentialsPayload), so /api/social/post needs no schema changes. */
+export interface SocialCredentials {
+  instagram?: { accessToken: string; igAccountId: string };
+  twitter?: { appKey: string; appSecret: string; accessToken: string; accessSecret: string };
+  pinterest?: { accessToken: string; boardId?: string };
+  discord?: { webhookUrl?: string };
+}
+
 export interface EnqueuedPost {
   /** Stable id matching the browser-side ScheduledPost.id. */
   id: string;
@@ -38,6 +50,12 @@ export interface EnqueuedPost {
   carouselGroupId?: string;
   /** Image id (for browser reconciliation back to local state). */
   imageId?: string;
+  /** Per-platform credentials captured at enqueue time. cron-fire forwards
+   *  these to /api/social/post so the route's existing
+   *  `process.env.X ?? credentials?.X` chain finds them when env vars
+   *  aren't set on the server. Without this, scheduled IG posts that
+   *  worked in the browser silently failed when the cron fired them. */
+  credentials?: SocialCredentials;
 }
 
 export interface QueueResult {

@@ -635,6 +635,7 @@ export function MainContent() {
             caption,
             mediaUrl: img.url,
             imageId: img.id,
+            credentials: buildCredentialsPayload(),
           });
         }
         return {
@@ -666,6 +667,7 @@ export function MainContent() {
           caption,
           mediaUrl: img.url,
           imageId: img.id,
+          credentials: buildCredentialsPayload(),
         });
       }
       return { scheduledPosts: [...existingPosts, scheduled] };
@@ -1046,6 +1048,7 @@ export function MainContent() {
           mediaUrl: url,
           carouselGroupId: groupId,
           imageId: p.imageId,
+          credentials: buildCredentialsPayload(),
         });
       });
       return { scheduledPosts: [...existingPosts, ...newPosts] };
@@ -3849,6 +3852,7 @@ export function MainContent() {
                                               caption: img ? formatPost(img) : oldPost.caption,
                                               mediaUrl: img?.url,
                                               imageId: oldPost.imageId,
+                                              credentials: buildCredentialsPayload(),
                                             });
                                           }
                                           updateSettings((prev) => ({
