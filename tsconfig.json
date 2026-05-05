@@ -40,6 +40,7 @@
   "exclude": [
     "node_modules",
     "dist",
-    "hermes-agent"
+    "hermes-agent",
+    "src-tauri/target/**"
   ]
 }
