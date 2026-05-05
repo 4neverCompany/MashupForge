@@ -829,22 +829,27 @@ export function SettingsModal({
                   // invisible for the 300–1500ms of the network probe and
                   // a quick-clicking user sees no input at all.
                   const showApiKeyForm = available === true && ncaStatus?.authenticated !== true;
+                  // CLI-SETUP-MUTEX: while pi.dev setup is in flight (piBusy
+                  // non-null) we lock the nca card too, otherwise a click
+                  // here would spawn a parallel tmux/setup session and the
+                  // two flows would race for the user's attention.
+                  const setupBusy = ncaBusy || piBusy !== null;
                   return (
                     <div
                       role="button"
-                      tabIndex={ncaBusy ? -1 : 0}
-                      onClick={() => { if (!ncaBusy) handleNcaCardClick(); }}
+                      tabIndex={setupBusy ? -1 : 0}
+                      onClick={() => { if (!setupBusy) handleNcaCardClick(); }}
                       onKeyDown={(e) => {
-                        if (ncaBusy) return;
+                        if (setupBusy) return;
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
                           handleNcaCardClick();
                         }
                       }}
                       aria-pressed={selected}
-                      aria-disabled={ncaBusy}
+                      aria-disabled={setupBusy}
                       className={`text-left rounded-xl border p-4 transition-all cursor-pointer ${
-                        ncaBusy ? 'opacity-60 cursor-not-allowed' : ''
+                        setupBusy ? 'opacity-60 cursor-not-allowed' : ''
                       } ${
                         selected
                           ? 'border-[#c5a062] bg-[#c5a062]/10 shadow-[0_0_0_1px_rgba(197,160,98,0.3)]'
@@ -1059,7 +1064,10 @@ export function SettingsModal({
                     <button
                       type="button"
                       onClick={handlePiSetup}
-                      disabled={piBusy !== null}
+                      // CLI-SETUP-MUTEX: also disabled while nca setup is
+                      // running so we don't open a second tmux session
+                      // concurrently. Mirrors the nca card's setupBusy lock.
+                      disabled={piBusy !== null || ncaBusy}
                       className="btn-gold-sm rounded-lg"
                     >
                       {piBusy === 'setup' ? 'Opening…' : 'Launch Pi.dev Setup'}
