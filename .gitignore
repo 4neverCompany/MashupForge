@@ -28,3 +28,6 @@ dist/
 
 # Hermes Agent source (cloned for reference)
 hermes-agent/
+
+# NCA (Nacara CLI) local session state — workspace prompt history + sockets
+.nca/
