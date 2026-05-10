@@ -97,16 +97,16 @@ export async function POST(req: Request): Promise<Response> {
   const plan = planRecap(posts, { now, windowDays });
 
   if (!(await isAvailable())) {
-    // Plan is still useful for logging / dry-run — return it even though
-    // mmx isn't here. The workflow log captures the plan output.
-    return NextResponse.json(
-      {
-        plan,
-        artifacts: null,
-        error: 'MMX CLI not available — install mmx on the runner / server.',
-      },
-      { status: 503 },
-    );
+    // mmx is not installed on this runtime (e.g., Vercel serverless). The
+    // plan is still useful — return it as a successful but degraded
+    // response so the cron workflow doesn't alarm. Artifact generation
+    // happens elsewhere (local runner / future background job).
+    return NextResponse.json({
+      plan,
+      artifacts: null,
+      degraded: true,
+      message: 'MMX CLI not available on this runtime — plan returned, artifact generation skipped.',
+    });
   }
 
   const tempDir = mkdtempSync(join(tmpdir(), 'mashupforge-recap-'));

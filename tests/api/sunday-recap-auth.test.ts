@@ -68,7 +68,7 @@ describe('POST /api/cron/sunday-recap auth', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns the plan + 503 when authed but mmx is unavailable', async () => {
+  it('returns the plan + 200 degraded when authed but mmx is unavailable', async () => {
     process.env.CRON_SHARED_SECRET = 'topsecret';
     spawnMock.mockImplementation(() => {
       // isAvailable() probe: emit 'error' to simulate ENOENT.
@@ -92,10 +92,17 @@ describe('POST /api/cron/sunday-recap auth', () => {
         now: '2026-04-26T00:00:00Z',
       }),
     );
-    expect(res.status).toBe(503);
-    const body = (await res.json()) as { plan: { topics: string[] }; artifacts: null; error: string };
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      plan: { topics: string[] };
+      artifacts: null;
+      degraded: boolean;
+      message: string;
+    };
     // Plan is returned even when mmx is missing — useful in workflow logs.
     expect(body.plan.topics).toEqual(['x']);
     expect(body.artifacts).toBeNull();
+    expect(body.degraded).toBe(true);
+    expect(body.message).toMatch(/MMX CLI not available/);
   });
 });
