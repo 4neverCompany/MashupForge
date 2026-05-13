@@ -6,6 +6,8 @@ import { NextResponse } from 'next/server';
 import { cancelPost } from '@/lib/server-queue';
 import { getErrorMessage } from '@/lib/errors';
 
+export const runtime = 'nodejs';
+
 export async function POST(req: Request): Promise<Response> {
   let body: { id?: string };
   try {

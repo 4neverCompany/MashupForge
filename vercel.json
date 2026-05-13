@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/social/cron-fire",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}

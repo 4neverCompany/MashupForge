@@ -15,6 +15,9 @@ export type InstagramCredentialSources = Readonly<Record<string, string | undefi
 export interface InstagramCredentialBody {
   igAccountId?: string;
   accessToken?: string;
+  // Unix ms when the long-lived token expires. Optional because legacy
+  // configs predate the refresh flow; resolver ignores this field.
+  expiresAt?: number;
 }
 
 export interface ResolvedInstagramCredentials {

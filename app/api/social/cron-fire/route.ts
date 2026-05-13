@@ -19,11 +19,44 @@ import { timingSafeEqual } from 'crypto';
 import { claimDuePosts, markResult, type EnqueuedPost, type QueueResult } from '@/lib/server-queue';
 import { getErrorMessage } from '@/lib/errors';
 
+// timingSafeEqual + the @upstash/redis client (via server-queue) both
+// need Node APIs that the edge runtime omits.
+export const runtime = 'nodejs';
+
+// IG-UPSTASH-FIX: surface a warning when the long-lived token is within
+// this many days of expiry. The cron response JSON bubbles up into
+// GitHub Actions logs, giving Maurice >= a week of lead time to refresh.
+const TOKEN_WARN_DAYS = 10;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
 interface FireSummary {
   claimed: number;
   posted: number;
   failed: number;
   posts: Array<{ id: string; status: 'posted' | 'failed'; error?: string }>;
+  // Present only when INSTAGRAM_TOKEN_EXPIRES_AT is set and < TOKEN_WARN_DAYS away.
+  tokenWarning?: string;
+}
+
+/**
+ * Read INSTAGRAM_TOKEN_EXPIRES_AT (Unix ms). If it's within TOKEN_WARN_DAYS
+ * of `now`, return a human-readable warning string for the response JSON.
+ * Returns undefined when the env var is missing, malformed, or comfortably
+ * far from expiry. Negative-day cases (already expired) still surface a
+ * warning so the operator can react.
+ */
+function tokenExpiryWarning(now: number): string | undefined {
+  const raw = process.env.INSTAGRAM_TOKEN_EXPIRES_AT;
+  if (!raw) return undefined;
+  const expiresAt = Number.parseInt(raw, 10);
+  if (!Number.isFinite(expiresAt)) return undefined;
+  const msLeft = expiresAt - now;
+  const daysLeft = Math.floor(msLeft / ONE_DAY_MS);
+  if (daysLeft >= TOKEN_WARN_DAYS) return undefined;
+  if (msLeft <= 0) {
+    return 'Instagram token EXPIRED — refresh immediately (POST /api/social/instagram-refresh)';
+  }
+  return `Instagram token expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'} — refresh soon (POST /api/social/instagram-refresh)`;
 }
 
 // CWE-208 fix: the prior hand-rolled XOR-fold short-circuited on a length
@@ -178,6 +211,8 @@ async function handle(req: Request): Promise<Response> {
     }
   }
 
+  const warning = tokenExpiryWarning(Date.now());
+  if (warning) summary.tokenWarning = warning;
   return NextResponse.json(summary);
 }
 

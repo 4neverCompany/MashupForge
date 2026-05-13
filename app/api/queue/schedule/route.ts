@@ -10,6 +10,11 @@ import { NextResponse } from 'next/server';
 import { computeFireAt, replacePost, type EnqueuedPost } from '@/lib/server-queue';
 import { getErrorMessage } from '@/lib/errors';
 
+// @upstash/redis is a Node.js HTTP client — edge runtime omits the
+// Node-flavoured fetch agents it relies on, so the queue ops fail
+// non-deterministically on cold starts in edge.
+export const runtime = 'nodejs';
+
 export async function POST(req: Request): Promise<Response> {
   let body: Partial<EnqueuedPost>;
   try {
