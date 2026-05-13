@@ -6,8 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to upload assets to (e.g. v0.1.5). Required for workflow_dispatch.'
-        required: true
+        description: "Release tag to upload assets to (e.g. v0.1.5). Leave as 'auto' (or blank) to derive from package.json."
+        required: false
+        default: 'auto'
 
 permissions:
   contents: write
@@ -30,6 +31,16 @@ jobs:
             TAG="${{ github.event.inputs.release_tag }}"
           else
             TAG="${{ github.ref_name }}"
+          fi
+          # TAURI-WF-AUTO-TAG: 'auto' (or empty) means "derive from package.json".
+          # A manual workflow_dispatch with the default value used to leak the
+          # literal string "auto" into the parity check below and the asset-
+          # upload URL builder further down, failing both. Normalize once here
+          # so every downstream step sees a real v-prefixed tag.
+          if [ "$TAG" = "auto" ] || [ -z "$TAG" ]; then
+            pkg=$(grep '"version"' package.json | sed 's/.*"version": "\(.*\)".*/\1/')
+            TAG="v$pkg"
+            echo "auto-resolved tag from package.json → $TAG"
           fi
           echo "value=$TAG" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG"
