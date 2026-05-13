@@ -1021,8 +1021,8 @@ export function SettingsModal({
                       )}
                     </div>
                     <p className="text-[10px] text-zinc-500 leading-relaxed">
-                      Vercel AI SDK — direct OpenAI / Anthropic / OpenRouter streaming.
-                      Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY on the server.
+                      Vercel AI SDK — direct MiniMax / OpenAI / Anthropic / OpenRouter streaming.
+                      Set MINIMAX_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY on the server.
                     </p>
                   </button>
                 );

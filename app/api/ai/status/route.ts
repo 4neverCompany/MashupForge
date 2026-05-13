@@ -19,12 +19,23 @@ export const runtime = 'nodejs';
 interface AiStatus {
   available: boolean;
   authenticated: boolean;
-  provider: 'openai' | 'anthropic' | 'openrouter' | null;
+  provider: 'minimax' | 'openai' | 'anthropic' | 'openrouter' | null;
   model: string | null;
 }
 
+// Detection priority MUST mirror resolveProvider() in
+// app/api/ai/prompt/route.ts — the status badge must agree with the
+// provider that will actually serve the next request.
 function detect(): AiStatus {
   const envModel = process.env.VERCEL_AI_MODEL?.trim() || undefined;
+  if (process.env.MINIMAX_API_KEY) {
+    return {
+      available: true,
+      authenticated: true,
+      provider: 'minimax',
+      model: envModel || 'MiniMax-M2.5',
+    };
+  }
   if (process.env.OPENAI_API_KEY) {
     return {
       available: true,

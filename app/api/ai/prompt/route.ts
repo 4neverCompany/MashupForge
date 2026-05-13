@@ -15,9 +15,16 @@
 //     route by URL alone; no client-side reader changes.
 //
 // Provider selection priority (first env var wins):
-//   1. OPENAI_API_KEY      → openai (default model: gpt-4o-mini)
-//   2. ANTHROPIC_API_KEY   → anthropic (default model: claude-3-haiku-20240307)
-//   3. OPENROUTER_API_KEY  → openrouter (default model: openai/gpt-4o-mini)
+//   1. MINIMAX_API_KEY     → minimax (default model: MiniMax-M2.5)
+//   2. OPENAI_API_KEY      → openai (default model: gpt-4o-mini)
+//   3. ANTHROPIC_API_KEY   → anthropic (default model: claude-3-haiku-20240307)
+//   4. OPENROUTER_API_KEY  → openrouter (default model: openai/gpt-4o-mini)
+//
+// MiniMax sits at the top because the project already has long-standing
+// MiniMax credentials (used by the nca subprocess path). The release/
+// production deploy starts with no key set — the user pastes one in the
+// Settings setup flow (or sets MINIMAX_API_KEY on Vercel) just like the
+// other providers.
 //
 // Per-request `model` body field, or VERCEL_AI_MODEL env var, overrides
 // the default. Per-request always wins over env.
@@ -109,7 +116,7 @@ function buildFocusBlock(niches: string[], genres: string[]): string {
 }
 
 interface ResolvedProvider {
-  name: 'openai' | 'anthropic' | 'openrouter';
+  name: 'minimax' | 'openai' | 'anthropic' | 'openrouter';
   model: LanguageModel;
   modelId: string;
 }
@@ -127,6 +134,20 @@ function resolveProvider(modelOverride?: string): ResolvedProvider | null {
   const envModel = process.env.VERCEL_AI_MODEL?.trim() || undefined;
   const requestedModel = modelOverride?.trim() || envModel;
 
+  if (process.env.MINIMAX_API_KEY) {
+    // MiniMax-M2.5 matches the nca-client default so users switching
+    // between the two backends get comparable output. Override per call
+    // for M2.7 / M2.7-highspeed via the `model` body field.
+    const modelId = requestedModel || 'MiniMax-M2.5';
+    // MiniMax serves an OpenAI-compatible Chat Completions endpoint at
+    // the international (.chat) host; the createOpenAI adapter handles
+    // the auth + request shape exactly like the OpenRouter path below.
+    const minimax = createOpenAI({
+      apiKey: process.env.MINIMAX_API_KEY,
+      baseURL: 'https://api.minimaxi.chat/v1',
+    });
+    return { name: 'minimax', model: minimax(modelId), modelId };
+  }
   if (process.env.OPENAI_API_KEY) {
     const modelId = requestedModel || 'gpt-4o-mini';
     const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -174,7 +195,7 @@ export async function POST(req: Request): Promise<Response> {
     return new Response(
       JSON.stringify({
         error:
-          'No AI provider configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY.',
+          'No AI provider configured. Set MINIMAX_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY.',
       }),
       { status: 503, headers: { 'Content-Type': 'application/json' } },
     );
