@@ -4,6 +4,15 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.31 (2026-05-13)
+
+### Features
+- feat(ai): add vercel-ai SDK provider — direct API streaming via Vercel AI SDK, no subprocess. New /api/ai/prompt and /api/ai/status routes. MiniMax first-priority provider (matches nca default); falls back to OpenAI → Anthropic → OpenRouter.
+- feat(ai): MiniMax as first-priority vercel-ai provider with MiniMax-M2.5 default model
+
+### Fixes
+- fix(social): add runtime=nodejs to all queue/cron routes (crypto.timingSafeEqual + @upstash/redis are Node-only). Adds /api/social/instagram-refresh endpoint for token renewal. vercel.json cron config. cron-fire warns in logs when Instagram token < 10 days from expiry.
+
 ## [0.9.30] — 2026-05-05
 
 ### Fixed
