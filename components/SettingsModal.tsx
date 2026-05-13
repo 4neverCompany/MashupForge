@@ -806,7 +806,7 @@ export function SettingsModal({
               Pick the backend that handles ideas, captions, prompt enhancement, and tagging. The active agent is used for every text-AI call across the app.
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {/* nca card — Aris's native-cli-ai. 'mmx' is treated as
                   selected here too so legacy persisted settings render
                   correctly; lib/aiClient.ts back-compat-aliases mmx→nca. */}
