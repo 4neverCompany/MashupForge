@@ -309,13 +309,16 @@ export interface UserSettings {
    * for one release so persisted user-settings payloads still validate;
    * read sites should fall back to it for back-compat.
    */
-  activeAiAgent?: 'pi' | 'nca' | 'mmx';
+  activeAiAgent?: 'pi' | 'nca' | 'mmx' | 'vercel-ai';
   /**
    * Canonical name for the AI agent CLI provider. Same semantics as the
    * deprecated `activeAiAgent` (kept on the type one release for
    * back-compat with persisted IDB payloads).
+   *
+   * LLM-INTEGRATION-0513 added 'vercel-ai' — direct Vercel AI SDK
+   * calls, no subprocess. Default for fresh installs.
    */
-  aiAgentProvider?: 'pi' | 'nca' | 'mmx';
+  aiAgentProvider?: 'pi' | 'nca' | 'mmx' | 'vercel-ai';
 }
 
 export type ViewType = 'studio' | 'gallery' | 'compare' | 'captioning' | 'post-ready' | 'ideas' | 'pipeline';
@@ -834,8 +837,15 @@ PROMPT QUALITY:
   serverCronEnabled: false,
   channelName: 'MultiverseMashupAI',
   savedPersonalities: [],
-  activeAiAgent: 'pi',
-  aiAgentProvider: 'pi',
+  // LLM-INTEGRATION-0513: default fresh installs to the Vercel AI SDK
+  // backend. It's stateless, has no subprocess/binary requirements, and
+  // works on Vercel and Tauri/Node alike. Users without any API key
+  // configured will see the unavailable state in Settings and can pick
+  // pi/nca instead. Existing users keep whatever activeAiAgent their
+  // IDB payload persisted — this only sets the new-install starting
+  // value.
+  activeAiAgent: 'vercel-ai',
+  aiAgentProvider: 'vercel-ai',
 };
 
 // ── Context Type ────────────────────────────────────────────────────────────

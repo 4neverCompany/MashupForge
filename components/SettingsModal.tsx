@@ -279,6 +279,16 @@ export function SettingsModal({
   const [ncaStatus, setNcaStatus] = useState<NcaStatus | null>(null);
   const [ncaBusy, setNcaBusy] = useState(false);
   const [ncaError, setNcaError] = useState<string | null>(null);
+  // LLM-INTEGRATION-0513: status for the Vercel AI SDK provider.
+  // Same shape as NcaStatus but `provider` is the resolved upstream
+  // (openai / anthropic / openrouter) so the card can render which API
+  // key is wired up. `available` ↔ at least one key is set on the server.
+  const [aiStatus, setAiStatus] = useState<{
+    available: boolean;
+    authenticated: boolean;
+    provider: string | null;
+    model: string | null;
+  } | null>(null);
   // Model list from /api/nca/models. Populated lazily once nca is
   // authenticated — there's no point fetching it before then since the
   // models endpoint will surface them per-provider regardless of which
@@ -306,6 +316,27 @@ export function SettingsModal({
         });
       })
       .catch(() => { /* leave null — card will fall back to ncaAvailable */ });
+    return () => { cancelled = true; };
+  }, [activeTab]);
+
+  // LLM-INTEGRATION-0513: probe /api/ai/status for the vercel-ai card.
+  // Same gating as the nca probe (only fires when the AI Agent tab is
+  // open) — no point burning a server hop on every tab change.
+  useEffect(() => {
+    if (activeTab !== 'aiAgent') return;
+    let cancelled = false;
+    fetch('/api/ai/status', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setAiStatus({
+          available: !!data.available,
+          authenticated: !!data.authenticated,
+          provider: typeof data.provider === 'string' ? data.provider : null,
+          model: typeof data.model === 'string' ? data.model : null,
+        });
+      })
+      .catch(() => { /* leave null — card renders "Checking…" until probe lands */ });
     return () => { cancelled = true; };
   }, [activeTab]);
 
@@ -371,7 +402,8 @@ export function SettingsModal({
   // is fully retired (see types/mashup.ts deprecation note). 'mmx' is a
   // historical value still in some IDB payloads — treated as 'nca' for
   // selection / status logic per NCA-INTEGRATION-DESIGN.
-  const activeAiAgent: 'pi' | 'nca' | 'mmx' =
+  // LLM-INTEGRATION-0513 added 'vercel-ai' — direct SDK calls.
+  const activeAiAgent: 'pi' | 'nca' | 'mmx' | 'vercel-ai' =
     settings.aiAgentProvider ?? settings.activeAiAgent ?? 'pi';
 
 
@@ -936,6 +968,61 @@ export function SettingsModal({
                     </div>
                     <p className="text-[10px] text-zinc-500 leading-relaxed">
                       pi.dev sidecar — text generation, ideas, captions, tags, vision.
+                    </p>
+                  </button>
+                );
+              })()}
+
+              {/* LLM-INTEGRATION-0513: Vercel AI SDK card — stateless direct
+                  HTTPS calls to the configured provider (OpenAI / Anthropic
+                  / OpenRouter). No subprocess, no binary, no install flow.
+                  Availability flips on the moment one of the *_API_KEY env
+                  vars is set on the server. */}
+              {(() => {
+                const selected = activeAiAgent === 'vercel-ai';
+                const available = aiStatus?.available;
+                let dot = 'bg-zinc-600';
+                let label = 'Checking…';
+                let labelColor = 'text-zinc-400';
+                if (available === true) {
+                  dot = 'bg-emerald-400';
+                  label = 'Available';
+                  labelColor = 'text-emerald-300';
+                } else if (available === false) {
+                  dot = 'bg-amber-400';
+                  label = 'No API key';
+                  labelColor = 'text-amber-300';
+                }
+                return (
+                  <button
+                    type="button"
+                    onClick={() => updateSettings({ activeAiAgent: 'vercel-ai', aiAgentProvider: 'vercel-ai' })}
+                    aria-pressed={selected}
+                    className={`text-left rounded-xl border p-4 transition-all ${
+                      selected
+                        ? 'border-[#c5a062] bg-[#c5a062]/10 shadow-[0_0_0_1px_rgba(197,160,98,0.3)]'
+                        : 'border-zinc-800/60 bg-zinc-950/40 hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Cpu className="w-4 h-4 text-[#c5a062]" />
+                        <span className="text-sm font-bold text-white">vercel-ai</span>
+                      </div>
+                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${selected ? 'text-[#c5a062]' : 'text-zinc-500'}`}>
+                        {selected ? '● Selected' : '○ Select'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+                      <span className={`text-[11px] ${labelColor}`}>{label}</span>
+                      {aiStatus?.provider && aiStatus?.model && (
+                        <span className="text-[10px] text-zinc-500 ml-1 truncate">{aiStatus.provider}/{aiStatus.model}</span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-zinc-500 leading-relaxed">
+                      Vercel AI SDK — direct OpenAI / Anthropic / OpenRouter streaming.
+                      Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY on the server.
                     </p>
                   </button>
                 );

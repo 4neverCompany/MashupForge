@@ -54,8 +54,12 @@ export interface StreamAIOptions {
    * thread the user setting through stay on the pre-routing behavior.
    * 'mmx' is kept as a back-compat alias for 'nca' (see module-level
    * comment) — existing settings values keep working post-migration.
+   *
+   * LLM-INTEGRATION-0513 added 'vercel-ai' — direct Vercel AI SDK
+   * provider, no subprocess. Same SSE wire contract as pi/nca, served
+   * by /api/ai/prompt.
    */
-  provider?: 'pi' | 'nca' | 'mmx';
+  provider?: 'pi' | 'nca' | 'mmx' | 'vercel-ai';
   /**
    * Optional per-call model override, forwarded to the underlying
    * provider route as `body.model`. Currently only honoured by the
@@ -86,9 +90,18 @@ export async function* streamAI(
   // values keep working without forcing a one-shot migration. All
   // provider routes expose the same SSE contract, so the rest of the
   // streaming/parsing loop is provider-agnostic.
+  //
+  // LLM-INTEGRATION-0513: 'vercel-ai' routes to /api/ai/prompt (direct
+  // Vercel AI SDK call, no subprocess).
   const provider = options?.provider ?? 'pi';
-  const url =
-    provider === 'nca' || provider === 'mmx' ? '/api/nca/prompt' : '/api/pi/prompt';
+  let url: string;
+  if (provider === 'vercel-ai') {
+    url = '/api/ai/prompt';
+  } else if (provider === 'nca' || provider === 'mmx') {
+    url = '/api/nca/prompt';
+  } else {
+    url = '/api/pi/prompt';
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
