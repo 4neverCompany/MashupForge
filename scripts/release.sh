@@ -106,9 +106,17 @@ if [ "$(wc -l < "${block}")" -le 1 ]; then
 fi
 
 # Insert the new block above the first existing version block. The intro
-# header (everything from line 1 up to the first `## [`) is preserved
-# verbatim. If no prior version block exists, append after the header.
-header_end="$(grep -nE '^## \[' CHANGELOG.md | head -n 1 | cut -d: -f1 || true)"
+# header (everything from line 1 up to the first version heading) is
+# preserved verbatim. If no prior version block exists, append after the
+# header.
+#
+# Accepts both heading styles the project has used:
+#   - Keep-a-Changelog default: `## [0.9.30] — 2026-05-05`  (script-generated)
+#   - Brief-driven shorthand:   `## v0.9.32 (2026-05-16)`   (recent releases)
+# A regex that only matched `^## \[` skipped past v-prefixed entries and
+# put the new block underneath them, producing reverse-chronological
+# entries below the newest one. Match either.
+header_end="$(grep -nE '^## (\[|v[0-9])' CHANGELOG.md | head -n 1 | cut -d: -f1 || true)"
 new_changelog="$(mktemp)"
 trap 'rm -f "${block}" "${new_changelog}"' EXIT
 
