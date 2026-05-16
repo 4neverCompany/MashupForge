@@ -806,6 +806,32 @@ export function SettingsModal({
               Pick the backend that handles ideas, captions, prompt enhancement, and tagging. The active agent is used for every text-AI call across the app.
             </p>
 
+            {/* FIRSTRUN-503: fresh installs default to vercel-ai (types/mashup.ts:847)
+                but ship with no API keys, so the first chat hits a 503 with no
+                explanation. Surface the missing-key state at the top of the tab
+                whenever vercel-ai is active and /api/ai/status reports
+                available=false. Keys are server-side env vars, so we point at
+                them by name instead of pretending there's an in-UI form. */}
+            {activeAiAgent === 'vercel-ai' && aiStatus?.available === false && (
+              <div
+                role="status"
+                className="flex items-start gap-2.5 rounded-xl border border-amber-400/40 bg-amber-400/10 px-3 py-2.5"
+              >
+                <AlertCircle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] font-semibold text-amber-200 mb-0.5">
+                    AI chat is unavailable — vercel-ai has no API key.
+                  </p>
+                  <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                    Set one of <code className="text-[10px] bg-amber-400/10 px-1 rounded">MINIMAX_API_KEY</code>,{' '}
+                    <code className="text-[10px] bg-amber-400/10 px-1 rounded">OPENAI_API_KEY</code>,{' '}
+                    <code className="text-[10px] bg-amber-400/10 px-1 rounded">ANTHROPIC_API_KEY</code>, or{' '}
+                    <code className="text-[10px] bg-amber-400/10 px-1 rounded">OPENROUTER_API_KEY</code> on the server, or pick a different agent below.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {/* nca card — Aris's native-cli-ai. 'mmx' is treated as
                   selected here too so legacy persisted settings render
