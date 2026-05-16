@@ -4,6 +4,11 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.32 (2026-05-16)
+
+### Fixes
+- fix(ui): show warning banner in vercel-ai Settings card when no API key is configured — prevents silent 503 on first chat for fresh installs. Banner names the required env vars (MINIMAX_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY) and disappears once any key is detected.
+
 ## v0.9.31 (2026-05-13)
 
 ### Features
