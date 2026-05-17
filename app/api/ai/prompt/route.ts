@@ -130,6 +130,92 @@ interface ResolvedProvider {
  * model name they get an opaque API error from the provider, which is
  * the right behaviour — we shouldn't second-guess the user.
  */
+/**
+ * Stream MiniMax Chat Completions directly, bypassing the ai SDK.
+ *
+ * MiniMax's HTTP API is OpenAI-compatible at the request-shape level
+ * (model + messages + stream) but only exposes `/v1/chat/completions`.
+ * The ai SDK v6 OpenAI adapter targets `/v1/responses` (the new
+ * Responses API), which MiniMax doesn't implement, so SDK requests
+ * 404 against MiniMax.
+ *
+ * Reads the SSE event-stream from MiniMax line-by-line, extracts
+ * `choices[0].delta.content` from each chunk, and re-emits each delta
+ * as our own `data: {"text":"<delta>"}\n\n` event so the outer route
+ * keeps a single SSE shape regardless of provider.
+ *
+ * The `data: [DONE]\n\n` terminator is added by the outer ReadableStream
+ * finally block — don't write it here.
+ */
+async function streamMinimaxChat(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  system: string | undefined,
+  userMessage: string,
+  modelId: string,
+): Promise<void> {
+  const baseURL =
+    process.env.MINIMAX_API_BASE_URL?.trim() || 'https://api.minimaxi.chat/v1';
+  const url = `${baseURL.replace(/\/$/, '')}/chat/completions`;
+  const messages: Array<{ role: 'system' | 'user'; content: string }> = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push({ role: 'user', content: userMessage });
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`,
+    },
+    body: JSON.stringify({ model: modelId, messages, stream: true }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`MiniMax HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+  if (!res.body) {
+    throw new Error('MiniMax response has no body');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+
+    // SSE events are separated by blank lines. We split on '\n' and
+    // parse each `data:` line independently; non-data lines (keepalive
+    // comments, event: tags) are dropped.
+    let nlIdx: number;
+    while ((nlIdx = buf.indexOf('\n')) >= 0) {
+      const rawLine = buf.slice(0, nlIdx);
+      buf = buf.slice(nlIdx + 1);
+      const line = rawLine.trim();
+      if (!line || !line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') return;
+      try {
+        const chunk = JSON.parse(payload) as {
+          choices?: Array<{ delta?: { content?: string } }>;
+        };
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string' && delta.length > 0) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ text: delta })}\n\n`),
+          );
+        }
+      } catch {
+        // Malformed chunk — skip. SSE keepalive comments and partial
+        // chunks at buffer boundaries can land here.
+      }
+    }
+  }
+}
+
 function resolveProvider(modelOverride?: string): ResolvedProvider | null {
   const envModel = process.env.VERCEL_AI_MODEL?.trim() || undefined;
   const requestedModel = modelOverride?.trim() || envModel;
@@ -222,19 +308,30 @@ export async function POST(req: Request): Promise<Response> {
   // AsyncIterable<string>, which makes the per-delta SSE wrap trivial
   // and keeps the route's wire shape identical to /api/pi/prompt and
   // /api/nca/prompt without depending on Vercel's data-protocol wrapper.
+  //
+  // MiniMax exception: the ai SDK v6 OpenAI adapter calls /v1/responses
+  // (the new OpenAI Responses API), but MiniMax only exposes the older
+  // /v1/chat/completions endpoint. So for MiniMax we bypass streamText
+  // and call the chat endpoint directly. The output SSE wire shape is
+  // unchanged — every chunk still leaves this route as
+  // `data: {"text":"<delta>"}\n\n`.
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        const result = streamText({
-          model: provider.model,
-          system,
-          prompt: message,
-        });
-        for await (const delta of result.textStream) {
-          if (!delta) continue;
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ text: delta })}\n\n`),
-          );
+        if (provider.name === 'minimax') {
+          await streamMinimaxChat(controller, encoder, system, message, provider.modelId);
+        } else {
+          const result = streamText({
+            model: provider.model,
+            system,
+            prompt: message,
+          });
+          for await (const delta of result.textStream) {
+            if (!delta) continue;
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify({ text: delta })}\n\n`),
+            );
+          }
         }
       } catch (e: unknown) {
         controller.enqueue(
