@@ -1322,6 +1322,12 @@ export function SettingsModal({
               </p>
             )}
 
+            {/* pi.dev-specific status + controls. Hidden entirely when the
+                vercel-ai backend is the active agent — vercel-ai has no
+                subprocess to install, start, authenticate, or surface
+                errors from, so the whole sub-block is pi-only. */}
+            {activeAiAgent !== 'vercel-ai' && (
+              <>
             {/* Status row */}
             <div className="flex items-center gap-3">
               {(() => {
@@ -1411,6 +1417,8 @@ export function SettingsModal({
               <p className="text-[11px] text-red-400 whitespace-pre-wrap">
                 {piError}
               </p>
+            )}
+              </>
             )}
 
             <p className="text-[10px] text-zinc-500 pt-2 border-t border-zinc-800/60">
