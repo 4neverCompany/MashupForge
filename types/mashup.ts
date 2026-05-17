@@ -496,6 +496,30 @@ export const LEONARDO_MODELS: LeonardoModelConfig[] = [
       { label: '3:2', width: 1536, height: 1024 },
     ],
   },
+  {
+    id: 'gpt-image-2',
+    name: 'GPT Image-2',
+    apiModelId: 'gpt-image-2',
+    version: 'v2',
+    // Same capability profile as gpt-image-1.5: no style_ids, accepts the
+    // quality parameter (LOW/MEDIUM/HIGH), guidance-friendly. Quantity
+    // cap raised to 8 per Leonardo docs for the newer model.
+    supportsStyleIds: false,
+    supportsQuality: true,
+    supportsGuidance: true,
+    maxQuantity: 8,
+    // 5 ratios: 3 baseline shared with gpt-image-1.5 + 16:9/9:16. If
+    // Leonardo rejects the wide/tall pair with a v2 VALIDATION_ERROR,
+    // swap them to 4:5 (896x1152) and 5:4 (1152x896) — every 1.5/Nano
+    // model already accepts that pair so it's a known-safe fallback.
+    aspectRatios: [
+      { label: '1:1', width: 1024, height: 1024 },
+      { label: '2:3', width: 1024, height: 1536 },
+      { label: '3:2', width: 1536, height: 1024 },
+      { label: '16:9', width: 1344, height: 768 },
+      { label: '9:16', width: 768, height: 1344 },
+    ],
+  },
 ];
 
 /**
@@ -535,6 +559,20 @@ export const MODEL_PROMPT_GUIDES: Record<string, string> = {
 - Use natural language descriptions — this model understands context well
 - Specify text/labels/logos explicitly and they will render correctly
 - Avoid negative prompts — not well supported`,
+
+  'gpt-image-2': `GPT Image-2 is OpenAI's GPT-architecture image model
+(same family as DALL-E 3). Prompts can be longer and more detailed than
+Nano Banana models.
+- Include character descriptions, setting, lighting/style tags,
+  composition notes
+- Text rendering is significantly better than other models — spell out
+  text/labels/logos literally
+- Do not use leetspeak or obfuscation
+- Keep trademark names as-is — they pass fine
+- Best results with 60-100 word detailed prompts containing clear scene
+  description, subject detail, and quality tags (cinematic, 8k, etc.)
+- Avoid stacking violence vocabulary — keep grimdark tone from lighting
+  and atmosphere, not gore descriptions`,
 };
 
 // V030-007-followup: Authoritative per-model API parameter spec from
@@ -586,6 +624,18 @@ export const LEONARDO_MODEL_PARAMS: Record<string, LeonardoModelSpec> = {
     // to decide whether to assign a style. Leaving it undefined would still
     // be falsy but invites accidental regressions; spelling it out is the
     // canonical capability declaration.
+    style_ids: false,
+    prompt_enhance: 'ON',
+    supports_image_reference: true,
+  },
+  'gpt-image-2': {
+    type: 'image',
+    width: 1024,
+    height: 1024,
+    supported_sizes: ['1024x1024'],
+    quality: ['LOW', 'MEDIUM', 'HIGH'],
+    // Same style_ids posture as gpt-image-1.5 — GPT family has no style
+    // parameter. param-suggest reads this flag to skip style assignment.
     style_ids: false,
     prompt_enhance: 'ON',
     supports_image_reference: true,

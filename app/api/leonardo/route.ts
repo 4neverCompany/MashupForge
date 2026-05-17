@@ -80,8 +80,9 @@ export async function POST(req: Request) {
       quantity,
     } = await req.json();
     // Note: negative_prompt is intentionally not destructured. None of the v2
-    // models supported by this route (nano-banana-2, gemini-image-2, gpt-image-1.5)
-    // accept negative_prompt — sending it triggers a v2 VALIDATION_ERROR (400).
+    // models supported by this route (nano-banana-2, gemini-image-2, gpt-image-1.5,
+    // gpt-image-2) accept negative_prompt — sending it triggers a v2
+    // VALIDATION_ERROR (400).
 
     const apiKey = customApiKey || process.env.LEONARDO_API_KEY;
 
