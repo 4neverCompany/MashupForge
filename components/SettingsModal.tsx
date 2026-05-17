@@ -1304,13 +1304,23 @@ export function SettingsModal({
 
           {activeTab === 'aiEngine' && (
           <>
-          {/* Pi.dev — the AI engine for chat, ideas, captions, tags */}
+          {/* AI Engine — shows whichever backend is the active agent */}
           <div className="space-y-4 pt-4 border-t border-zinc-800">
-            <h4 className="text-lg font-medium text-white mb-2">Pi.dev AI Engine</h4>
-            <p className="text-[11px] text-zinc-500 -mt-2">
-              All text AI runs through <code>pi</code> as a subprocess.
-              Pick a provider + model below in <span className="text-zinc-300">Desktop Configuration</span>; API keys are stored locally in <code>config.json</code>.
-            </p>
+            <h4 className="text-lg font-medium text-white mb-2">
+              {activeAiAgent === 'vercel-ai' ? 'Vercel.ai AI Engine' : 'Pi.dev AI Engine'}
+            </h4>
+            {activeAiAgent === 'vercel-ai' ? (
+              <p className="text-[11px] text-zinc-500 -mt-2">
+                Text AI runs through Vercel&apos;s AI gateway — no local subprocess. Model:{' '}
+                <code className="text-[#00e6ff]">MiniMax-M2.7</code>.
+                Provider keys are stored in <code>.env.local</code>.
+              </p>
+            ) : (
+              <p className="text-[11px] text-zinc-500 -mt-2">
+                All text AI runs through <code>pi</code> as a subprocess.
+                Pick a provider + model below in <span className="text-zinc-300">Desktop Configuration</span>; API keys are stored locally in <code>config.json</code>.
+              </p>
+            )}
 
             {/* Status row */}
             <div className="flex items-center gap-3">
@@ -1404,7 +1414,9 @@ export function SettingsModal({
             )}
 
             <p className="text-[10px] text-zinc-500 pt-2 border-t border-zinc-800/60">
-              The AI System Prompt lives below in this same tab. Restart pi (stop + start) after changing it for the new prompt to take effect.
+              {activeAiAgent === 'vercel-ai'
+                ? 'This prompt shapes every AI interaction across the app. Changes apply immediately.'
+                : 'The AI System Prompt lives below in this same tab. Restart pi (stop + start) after changing it for the new prompt to take effect.'}
             </p>
           </div>
           </>
@@ -1631,7 +1643,9 @@ export function SettingsModal({
                   className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 min-h-[220px] resize-y leading-relaxed font-mono"
                 />
                 <p className="text-[10px] text-zinc-500 leading-tight">
-                  This prompt shapes every AI interaction: idea generation, prompt enhancement, captions, and parameter selection. Applied to every pi request on top of the mode directive. Restart pi (Settings → Pi.dev AI Engine → Stop + Start) after editing.
+                  {activeAiAgent === 'vercel-ai'
+                    ? 'This prompt shapes every AI interaction: idea generation, prompt enhancement, captions, and parameter selection. Changes apply immediately to the active Vercel.ai backend.'
+                    : 'This prompt shapes every AI interaction: idea generation, prompt enhancement, captions, and parameter selection. Applied to every pi request on top of the mode directive. Restart pi (Settings → Pi.dev AI Engine → Stop + Start) after editing.'}
                 </p>
               </div>
 
