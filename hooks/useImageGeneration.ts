@@ -221,6 +221,65 @@ async function submitLeonardoAndPoll(params: LeonardoSubmitParams): Promise<Leon
   throw new Error('Timeout waiting for Leonardo generation');
 }
 
+/**
+ * Submit a MiniMax-native image generation job. Synchronous: one POST
+ * returns ready URLs or a structured error — no polling phase, no
+ * moderation-retry path (MiniMax's content-filter codes are surfaced
+ * via the route's structured `error` field instead).
+ *
+ * Returns the same `LeonardoSuccess` shape that submitLeonardoAndPoll
+ * produces so the downstream watermark/state/tag pipeline doesn't need
+ * to branch on provider.
+ */
+interface MinimaxImageParams {
+  prompt: string;
+  width: number;
+  height: number;
+  aspectRatio?: string;
+  quantity?: number;
+  promptOptimizer?: boolean;
+  seed?: number;
+}
+
+async function submitMinimaxImage(params: MinimaxImageParams): Promise<LeonardoSuccess> {
+  const res = await fetchWithRetry('/api/minimax-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt: params.prompt,
+      aspectRatio: params.aspectRatio,
+      width: params.width,
+      height: params.height,
+      n: params.quantity ?? 1,
+      promptOptimizer: params.promptOptimizer ?? false,
+      seed: params.seed,
+    }),
+  });
+  if (!res.ok) {
+    let errMessage = 'MiniMax image generation failed';
+    try {
+      const errData = await res.json();
+      errMessage = errData.error || errMessage;
+    } catch {
+      const text = await res.text();
+      errMessage = `Server error (${res.status}): ${text.slice(0, 100)}…`;
+    }
+    throw new Error(errMessage);
+  }
+  const data = (await res.json()) as {
+    images?: Array<{ url?: string; width?: number; height?: number }>;
+    generationId?: string;
+  };
+  const first = Array.isArray(data.images) ? data.images[0] : undefined;
+  if (!first || typeof first.url !== 'string' || !first.url) {
+    throw new Error('MiniMax returned no usable image URL');
+  }
+  return {
+    url: first.url,
+    imageId: data.generationId,
+  };
+}
+
 function buildModerationRewriteInstruction(failedPrompt: string): string {
   return `This prompt was blocked by content moderation. Rewrite it to be cleaner and shorter (40–60 words max). Remove any violence, gore, or explicit language. Keep the character names and core concept. Return ONLY the rewritten prompt.
 
@@ -535,40 +594,67 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
 
           const fallbackDims = getLeonardoDimensions(selectedModel, currentAspectRatio);
 
-          const leonardoBaseParams = {
-            negativePrompt: generatedNegativePrompt,
-            modelId: selectedModel,
-            width: enhanced.leonardo.width ?? fallbackDims.width,
-            height: enhanced.leonardo.height ?? fallbackDims.height,
-            styleIds: enhanced.leonardo.styleIds ?? fallbackStyleUuids,
-            apiKey: settings.apiKeys.leonardo,
-            // User UI selection (options.quality) wins, then spec default,
-            // then HIGH baseline.
-            quality: options?.quality || enhanced.leonardo.quality || 'HIGH',
-          };
+          // Branch on the model's backend provider. MiniMax-native models
+          // skip Leonardo entirely (no styleIds, no quality, no moderation
+          // retry — MiniMax surfaces filter rejections via the route's
+          // structured error). All other models stay on the Leonardo path.
+          const modelConfig = LEONARDO_MODELS.find(m => m.id === selectedModel);
+          const imageProvider =
+            options?.imageProvider || modelConfig?.provider || 'leonardo';
 
-          const { success, finalPrompt: activePrompt, retried } = await submitWithOneRetry(
-            enhanced.prompt,
-            leonardoBaseParams,
-            {
-              onRetry: (classifications) => {
-                const reasons = classifications.join(', ');
-                const stageMsg = `Blocked by ${reasons} — rewriting and retrying once…`;
-                setLastError({
-                  message: stageMsg,
-                  classifications,
-                  retried: false,
-                });
-                setImages(prev => prev.map(img =>
-                  img.id === placeholders[i].id
-                    ? { ...img, error: stageMsg }
-                    : img
-                ));
-                setProgress(`Image ${i + 1}: ${stageMsg}`);
+          let success: LeonardoSuccess;
+          let activePrompt: string;
+          let retried: boolean;
+          if (imageProvider === 'minimax') {
+            success = await submitMinimaxImage({
+              prompt: enhanced.prompt,
+              width: enhanced.leonardo.width ?? fallbackDims.width,
+              height: enhanced.leonardo.height ?? fallbackDims.height,
+              aspectRatio: currentAspectRatio,
+              quantity: 1,
+              // Short prompts get bigger uplift from prompt_optimizer;
+              // long ones already carry their own detail and the optimizer
+              // tends to drift them off-spec.
+              promptOptimizer: enhanced.prompt.length < 180,
+            });
+            activePrompt = enhanced.prompt;
+            retried = false;
+          } else {
+            const leonardoBaseParams = {
+              negativePrompt: generatedNegativePrompt,
+              modelId: selectedModel,
+              width: enhanced.leonardo.width ?? fallbackDims.width,
+              height: enhanced.leonardo.height ?? fallbackDims.height,
+              styleIds: enhanced.leonardo.styleIds ?? fallbackStyleUuids,
+              apiKey: settings.apiKeys.leonardo,
+              // User UI selection (options.quality) wins, then spec default,
+              // then HIGH baseline.
+              quality: options?.quality || enhanced.leonardo.quality || 'HIGH',
+            };
+
+            ({ success, finalPrompt: activePrompt, retried } = await submitWithOneRetry(
+              enhanced.prompt,
+              leonardoBaseParams,
+              {
+                onRetry: (classifications) => {
+                  const reasons = classifications.join(', ');
+                  const stageMsg = `Blocked by ${reasons} — rewriting and retrying once…`;
+                  setLastError({
+                    message: stageMsg,
+                    classifications,
+                    retried: false,
+                  });
+                  setImages(prev => prev.map(img =>
+                    img.id === placeholders[i].id
+                      ? { ...img, error: stageMsg }
+                      : img
+                  ));
+                  setProgress(`Image ${i + 1}: ${stageMsg}`);
+                },
               },
-            },
-            settings.activeAiAgent,
-          );
+              settings.activeAiAgent,
+            ));
+          }
 
           let finalUrl = success.url;
           if (settings.watermark?.enabled) {
@@ -587,7 +673,7 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             style: modelStyle,
             status: 'ready',
             modelInfo: {
-              provider: 'leonardo',
+              provider: imageProvider,
               modelId: selectedModel,
               modelName: getModelName(selectedModel)
             }
@@ -722,38 +808,58 @@ The user wants to re-roll an image based on this idea: "${prompt}". Enhance this
 
         const fallbackDims = getLeonardoDimensions(selectedModel, currentAspectRatio);
 
-        const leonardoBaseParams = {
-          negativePrompt: modelNegPrompt,
-          modelId: selectedModel,
-          width: enhanced.leonardo.width ?? fallbackDims.width,
-          height: enhanced.leonardo.height ?? fallbackDims.height,
-          styleIds: enhanced.leonardo.styleIds ?? fallbackStyleUuids,
-          apiKey: settings.apiKeys.leonardo,
-          quality: options?.quality || enhanced.leonardo.quality || 'HIGH',
-        };
+        const modelConfig = LEONARDO_MODELS.find(m => m.id === selectedModel);
+        const imageProvider =
+          options?.imageProvider || modelConfig?.provider || 'leonardo';
 
-        const { success, finalPrompt: activePrompt, retried } = await submitWithOneRetry(
-          enhanced.prompt,
-          leonardoBaseParams,
-          {
-            onRetry: (classifications) => {
-              const reasons = classifications.join(', ');
-              const stageMsg = `Reroll blocked by ${reasons} — rewriting and retrying once…`;
-              setLastError({
-                message: stageMsg,
-                classifications,
-                retried: false,
-              });
-              setImages(prev => prev.map(img =>
-                img.id === id
-                  ? { ...img, error: stageMsg }
-                  : img
-              ));
-              setProgress(stageMsg);
+        let success: LeonardoSuccess;
+        let activePrompt: string;
+        let retried: boolean;
+        if (imageProvider === 'minimax') {
+          success = await submitMinimaxImage({
+            prompt: enhanced.prompt,
+            width: enhanced.leonardo.width ?? fallbackDims.width,
+            height: enhanced.leonardo.height ?? fallbackDims.height,
+            aspectRatio: currentAspectRatio,
+            quantity: 1,
+            promptOptimizer: enhanced.prompt.length < 180,
+          });
+          activePrompt = enhanced.prompt;
+          retried = false;
+        } else {
+          const leonardoBaseParams = {
+            negativePrompt: modelNegPrompt,
+            modelId: selectedModel,
+            width: enhanced.leonardo.width ?? fallbackDims.width,
+            height: enhanced.leonardo.height ?? fallbackDims.height,
+            styleIds: enhanced.leonardo.styleIds ?? fallbackStyleUuids,
+            apiKey: settings.apiKeys.leonardo,
+            quality: options?.quality || enhanced.leonardo.quality || 'HIGH',
+          };
+
+          ({ success, finalPrompt: activePrompt, retried } = await submitWithOneRetry(
+            enhanced.prompt,
+            leonardoBaseParams,
+            {
+              onRetry: (classifications) => {
+                const reasons = classifications.join(', ');
+                const stageMsg = `Reroll blocked by ${reasons} — rewriting and retrying once…`;
+                setLastError({
+                  message: stageMsg,
+                  classifications,
+                  retried: false,
+                });
+                setImages(prev => prev.map(img =>
+                  img.id === id
+                    ? { ...img, error: stageMsg }
+                    : img
+                ));
+                setProgress(stageMsg);
+              },
             },
-          },
-          settings.activeAiAgent,
-        );
+            settings.activeAiAgent,
+          ));
+        }
 
         let finalUrl = success.url;
         if (settings.watermark?.enabled) {
@@ -772,7 +878,7 @@ The user wants to re-roll an image based on this idea: "${prompt}". Enhance this
           style: modelStyle,
           status: 'ready',
           modelInfo: {
-            provider: 'leonardo',
+            provider: imageProvider,
             modelId: selectedModel,
             modelName: getModelName(selectedModel)
           }

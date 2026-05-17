@@ -48,7 +48,7 @@ export interface GeneratedImage {
   postedTo?: string[];
   postError?: string;
   modelInfo?: {
-    provider: 'leonardo';
+    provider: 'leonardo' | 'minimax';
     modelId: string;
     modelName: string;
   };
@@ -107,6 +107,14 @@ export interface GenerateOptions {
   aspectRatio?: string;
   imageSize?: string;
   provider?: 'leonardo';
+  /**
+   * Image-pipeline provider override. Defaults to the active model's
+   * `provider` field in LEONARDO_MODELS (`'leonardo'` for all classic
+   * models, `'minimax'` for MiniMax-native models like image-01). Set
+   * explicitly when the caller needs to force a route; otherwise the
+   * model entry decides.
+   */
+  imageProvider?: 'leonardo' | 'minimax';
   leonardoModel?: string;
   skipEnhance?: boolean;
   style?: string;
@@ -394,13 +402,22 @@ export interface LeonardoModelConfig {
   id: string;
   name: string;
   apiModelId: string;
-  version: 'v2';
+  version: 'v2' | 'v1';
   supportsStyleIds: boolean;
-  supportsQuality: boolean;      // GPT Image-1.5 only
+  supportsQuality: boolean;      // GPT Image-1.5 / GPT Image-2 only
   supportsGuidance: boolean;
   maxQuantity: number;
   aspectRatios: { label: string; width: number; height: number }[];
   styles?: { name: string; uuid: string }[];
+  /**
+   * Backend provider. Undefined defaults to `'leonardo'` for backwards
+   * compatibility with every model added before MiniMax-native support
+   * landed. `'minimax'` routes the request to `/api/minimax-image` and
+   * uses MiniMax's `image_generation` endpoint instead of Leonardo's v2
+   * `generations` API; the `apiModelId` is then the MiniMax model name
+   * (e.g. `'image-01'`), not a Leonardo model id.
+   */
+  provider?: 'leonardo' | 'minimax';
 }
 
 // Shared styles for Nano Banana 2 and Nano Banana Pro (API-documented, 19 styles)
@@ -518,6 +535,35 @@ export const LEONARDO_MODELS: LeonardoModelConfig[] = [
       { label: '3:2', width: 1536, height: 1024 },
       { label: '16:9', width: 1344, height: 768 },
       { label: '9:16', width: 768, height: 1344 },
+    ],
+  },
+  {
+    id: 'minimax-image-01',
+    name: 'MiniMax Image-01',
+    // MiniMax's own `image_generation` endpoint, not a Leonardo model.
+    // The route /api/minimax-image branches on this and forwards to
+    // {MINIMAX_API_BASE_URL}/image_generation with model="image-01".
+    apiModelId: 'image-01',
+    provider: 'minimax',
+    version: 'v1',
+    // image-01 has no style UUIDs, no quality enum, and no guidance
+    // knob — it's a single-config endpoint with prompt_optimizer being
+    // its only quality lever.
+    supportsStyleIds: false,
+    supportsQuality: false,
+    supportsGuidance: false,
+    // image-01 accepts n: 1-9 in one request, beating every Leonardo
+    // model's per-call cap.
+    maxQuantity: 9,
+    aspectRatios: [
+      { label: '1:1', width: 1024, height: 1024 },
+      { label: '16:9', width: 1280, height: 720 },
+      { label: '4:3', width: 1152, height: 864 },
+      { label: '3:2', width: 1248, height: 832 },
+      { label: '2:3', width: 832, height: 1248 },
+      { label: '3:4', width: 864, height: 1152 },
+      { label: '9:16', width: 720, height: 1280 },
+      { label: '21:9', width: 1344, height: 576 },
     ],
   },
 ];
