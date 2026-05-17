@@ -4,6 +4,15 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.33 (2026-05-17)
+
+### Features
+- feat(ai): WebSearch pre-enrichment now applies to `chat` mode as well as `idea` mode — vercel-ai chat answers can ground on recent web results. The user's message itself is used as the search query (capped at 400 chars; sub-8-char messages skip enrichment to avoid latency on greetings); top-3 DDG/Brave snippets are appended with a "Recent web context for the question above" label.
+
+### Fixes
+- fix(ai): MiniMax image generation no longer silently fails in the browser — MiniMax's `image_generation` endpoint returns Aliyun OSS signed URLs over plain http with a scheme-locked signature, which browsers refuse to load on the https production page (mixed-content). `/api/proxy-image` now allowlists `.aliyuncs.com` with a narrow http-permitted branch, and `/api/minimax-image` wraps every returned URL through the proxy so the frontend gets same-origin https paths.
+- fix(ai): caption generation under vercel-ai/MiniMax-M2.5 no longer silently returns nothing — reasoning models prefix output with literal `<think>…</think>` blocks before the actual JSON, which the bare `JSON.parse` in `useSocial.ts` threw on. New `stripThinkBlocks` helper in `lib/aiClient.ts` is threaded into `parseJsonFromLLM`, so every `extractJsonObjectFromLLM` / `extractJsonArrayFromLLM` caller (Sidebar idea list, pipeline daemon, MainContent prompt parsing, captioning) transparently handles reasoning-model output.
+
 ## v0.9.32 (2026-05-16)
 
 ### Fixes
