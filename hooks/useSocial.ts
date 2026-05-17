@@ -1,7 +1,7 @@
 'use client';
 
 import { type GeneratedImage, type UserSettings } from '../types/mashup';
-import { streamAIToString } from '@/lib/aiClient';
+import { streamAIToString, extractJsonObjectFromLLM } from '@/lib/aiClient';
 
 interface UseSocialDeps {
   settings: UserSettings;
@@ -31,19 +31,27 @@ Return ONLY a JSON object with exactly two keys: "caption" (string) and "hashtag
         }
       );
 
-      const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-      const data = JSON.parse(cleaned || '{}');
-      if (data.caption) {
+      // extractJsonObjectFromLLM strips <think>…</think> reasoning
+      // blocks (MiniMax-M2.5 et al.), markdown fences, and slices
+      // first-`{` to last-`}`. Going through bare `JSON.parse` here
+      // silently fails on reasoning-model output and the caption
+      // never appears — see commit fixing MXIMG-001.
+      const data = extractJsonObjectFromLLM(text);
+      const caption = typeof data.caption === 'string' ? data.caption : '';
+      const hashtags = Array.isArray(data.hashtags)
+        ? data.hashtags.filter((t): t is string => typeof t === 'string')
+        : [];
+      if (caption) {
         const updatedImg = {
           ...image,
-          postCaption: data.caption,
-          postHashtags: data.hashtags || [],
+          postCaption: caption,
+          postHashtags: hashtags,
         };
         saveImage(updatedImg);
         setImages((prev) =>
           prev.map((img) =>
             img.id === image.id
-              ? { ...img, postCaption: data.caption, postHashtags: data.hashtags || [] }
+              ? { ...img, postCaption: caption, postHashtags: hashtags }
               : img
           )
         );

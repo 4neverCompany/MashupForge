@@ -4,8 +4,20 @@ import { NextResponse } from 'next/server';
 // cdn.leonardo.ai           — Leonardo image CDN
 // *.storage.googleapis.com  — Leonardo's underlying GCS bucket
 // i.uguu.se                 — uguu image host (used by Pinterest upload path)
+// *.aliyuncs.com             — MiniMax `image_generation` signed URLs
 const ALLOWED_HOSTS = new Set<string>(['cdn.leonardo.ai', 'i.uguu.se']);
-const ALLOWED_HOST_SUFFIXES = ['.storage.googleapis.com'];
+const ALLOWED_HOST_SUFFIXES = ['.storage.googleapis.com', '.aliyuncs.com'];
+
+// Hosts that may also be fetched over plain HTTP (in addition to
+// HTTPS). MiniMax's image_generation endpoint returns Aliyun OSS
+// signed URLs whose signature is scheme-locked to http; the same URL
+// over https returns 403. Browsers won't load http content from an
+// https page (mixed-content), so the only way to surface MiniMax
+// images in the production UI is to proxy them server-side, fetching
+// over http and re-serving the bytes over the page's https origin.
+// Keep this list as narrow as possible — every entry weakens
+// transport security for that specific host.
+const HTTP_ALLOWED_HOST_SUFFIXES = ['.aliyuncs.com'];
 
 // In-memory LRU image cache — avoids re-fetching the same Leonardo CDN URLs
 // during parallel pipeline runs. Entries are FRESH for FRESH_TTL_MS; past that
@@ -76,10 +88,15 @@ export function isAllowedUrl(raw: string): boolean {
   } catch {
     return false;
   }
-  if (parsed.protocol !== 'https:') return false;
   const host = parsed.hostname.toLowerCase();
-  if (ALLOWED_HOSTS.has(host)) return true;
-  return ALLOWED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
+  if (parsed.protocol === 'https:') {
+    if (ALLOWED_HOSTS.has(host)) return true;
+    return ALLOWED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
+  }
+  if (parsed.protocol === 'http:') {
+    return HTTP_ALLOWED_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix));
+  }
+  return false;
 }
 
 const SAFE_IMAGE_TYPES = new Set([

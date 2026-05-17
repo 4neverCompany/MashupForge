@@ -246,8 +246,17 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
+  // Wrap each Aliyun OSS URL through /api/proxy-image so the browser
+  // can render it on an https page. MiniMax signs URLs with the http
+  // scheme baked into the signature — fetching the same URL over https
+  // returns 403, and the browser's mixed-content policy refuses to
+  // load http resources from an https origin (silent fail in the UI,
+  // which is the original MXIMG-001 symptom). The proxy fetches over
+  // http server-side and re-serves the bytes over the page's https
+  // origin; it also adds 1h fresh / 7d stale caching so the gallery
+  // keeps working past the 24h Aliyun signed-URL expiry.
   const images: ImageOut[] = urls.map((u) => ({
-    url: u,
+    url: `/api/proxy-image?url=${encodeURIComponent(u)}`,
     width: outWidth,
     height: outHeight,
   }));

@@ -180,17 +180,50 @@ export async function streamAIToString(
 }
 
 /**
+ * Strip `<think>…</think>` reasoning blocks from a model response.
+ *
+ * MiniMax-M2.5 (and other reasoning models — GLM-5.1, DeepSeek-R1
+ * family, etc.) emit their chain-of-thought wrapped in literal
+ * `<think>…</think>` tags before the actual answer. The reasoning
+ * block can itself contain JSON-like text or stray brace characters,
+ * which trips up the first-open/last-close brace-slice strategy in
+ * `parseJsonFromLLM` and produces a swallowed `JSON.parse` error.
+ *
+ * Exported so server-side helpers (e.g. /api/ai/image's prompt
+ * cleaner) can share the same logic. Greedy across newlines because
+ * a single `<think>` block can span dozens of lines. Tolerates a
+ * runaway opening tag without a closing tag — that's the model
+ * truncating mid-reasoning; we discard everything from the unmatched
+ * `<think>` to end-of-string rather than parse partial reasoning as
+ * the answer.
+ */
+export function stripThinkBlocks(raw: string): string {
+  let out = raw.replace(/<think>[\s\S]*?<\/think>/g, '');
+  // Drop any unterminated leading <think>… block (model truncated
+  // before emitting the closing tag).
+  const openIdx = out.indexOf('<think>');
+  if (openIdx !== -1 && !out.slice(openIdx).includes('</think>')) {
+    out = out.slice(0, openIdx);
+  }
+  return out.trim();
+}
+
+/**
  * Robust JSON extraction from an LLM response.
  *
- * Reasoning models (GLM-5.1 et al.) frequently wrap their output in
- * markdown code fences AND append explanatory commentary after the
- * closing bracket. JSON.parse rejects anything after the top-level
- * value, so this helper strips fences, then slices from the first
- * `[` to the last `]` (or `{` / `}` for objects) before parsing.
- * Falls back to an empty array / object on empty input.
+ * Reasoning models (GLM-5.1, MiniMax-M2.5, et al.) frequently wrap
+ * their output in `<think>…</think>` blocks AND markdown code fences,
+ * sometimes append explanatory commentary after the closing bracket.
+ * JSON.parse rejects anything around the top-level value, so this
+ * helper strips think blocks, strips fences, then slices from the
+ * first `[` to the last `]` (or `{` / `}` for objects) before
+ * parsing. Falls back to an empty array / object on empty input.
  */
 function parseJsonFromLLM(raw: string, kind: 'array' | 'object'): unknown {
-  let text = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  let text = stripThinkBlocks(raw)
+    .replace(/```json\n?/g, '')
+    .replace(/```\n?/g, '')
+    .trim();
   const fallback = kind === 'array' ? [] : {};
   if (!text) return fallback;
   const open = kind === 'array' ? '[' : '{';
