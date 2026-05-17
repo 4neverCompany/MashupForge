@@ -301,43 +301,70 @@ export async function POST(req: Request): Promise<Response> {
       .filter((s): s is string => typeof s === 'string' && s.length > 0)
       .join('\n\n') || undefined;
 
-  // Web-search pre-enrichment for `idea` mode. MiniMax / OpenAI /
-  // Anthropic / OpenRouter don't have built-in browsing on the vercel
-  // AI SDK adapter (pi.dev and nca route their own search), so we
-  // pre-fetch a short trending snippet block and append it to the
-  // user's message before the model sees it. Strictly best-effort:
-  // any failure falls through with no enrichment so a flaky search
-  // backend can't break idea generation.
+  // Web-search pre-enrichment. MiniMax / OpenAI / Anthropic / OpenRouter
+  // don't have built-in browsing on the vercel AI SDK adapter (pi.dev
+  // and nca route their own search), so we pre-fetch a short snippet
+  // block and append it to the user's message before the model sees
+  // it. Strictly best-effort: any failure falls through with no
+  // enrichment so a flaky search backend can't break the request.
   //
-  // Only fires for `idea` mode — every other mode (chat, enhance,
-  // caption, tag, etc.) gets a smaller benefit and doesn't justify
-  // the latency cost or the rate-limit footprint.
+  // Two modes get enrichment:
+  //   - `idea`: query built from niches + genres + trending keywords,
+  //     surfaces what's currently hot in the user's fandom areas.
+  //   - `chat`: query is the user's message itself, gives the model
+  //     a snapshot of recent web context for whatever they asked
+  //     about (news, releases, "what's the latest on X").
+  //
+  // Other modes (enhance, caption, tag, etc.) skip enrichment — the
+  // benefit doesn't justify the latency cost or rate-limit footprint
+  // for prompt-rewrite / metadata generation work.
   let enrichedMessage = message;
-  if (mode === 'idea') {
-    const queryParts = [
-      'trending',
-      ...cleanNiches,
-      ...cleanGenres,
-      'fandom crossover fanart 2026',
-    ].filter((s) => s.length > 0);
-    const trendingQuery = queryParts.join(' ');
-    try {
-      const { webSearch } = await import('@/lib/web-search');
-      const results = await webSearch(trendingQuery, 5);
-      if (results.length > 0) {
-        const snippetLines = results
-          .slice(0, 3)
-          .map((r) => `- ${r.title}: ${r.snippet}`)
-          .filter((line) => line.length > 4);
-        if (snippetLines.length > 0) {
-          enrichedMessage =
-            message +
-            '\n\nTrending context for inspiration (recent search results, use as flavour, do not quote verbatim):\n' +
-            snippetLines.join('\n');
+  const shouldEnrich = mode === 'idea' || mode === 'chat';
+  if (shouldEnrich) {
+    let query: string;
+    let enrichmentLabel: string;
+    if (mode === 'idea') {
+      const queryParts = [
+        'trending',
+        ...cleanNiches,
+        ...cleanGenres,
+        'fandom crossover fanart 2026',
+      ].filter((s) => s.length > 0);
+      query = queryParts.join(' ');
+      enrichmentLabel = 'Trending context for inspiration (recent search results, use as flavour, do not quote verbatim):';
+    } else {
+      // chat mode — search backends (DDG/Brave) truncate around 400-500
+      // chars; cap the query so long chat messages still produce useful
+      // matches instead of being dropped.
+      query = message.trim().slice(0, 400);
+      enrichmentLabel = 'Recent web context for the question above (cite naturally only if relevant, do not invent URLs):';
+    }
+
+    // Skip enrichment for trivially short chat messages (greetings,
+    // acknowledgements). Idea mode always runs even with empty niches
+    // because the trending-fandom suffix is itself a useful seed.
+    const minLength = mode === 'chat' ? 8 : 1;
+    if (query.length >= minLength) {
+      try {
+        const { webSearch } = await import('@/lib/web-search');
+        const results = await webSearch(query, 5);
+        if (results.length > 0) {
+          const snippetLines = results
+            .slice(0, 3)
+            .map((r) => `- ${r.title}: ${r.snippet}`)
+            .filter((line) => line.length > 4);
+          if (snippetLines.length > 0) {
+            enrichedMessage =
+              message +
+              '\n\n' +
+              enrichmentLabel +
+              '\n' +
+              snippetLines.join('\n');
+          }
         }
+      } catch {
+        // Non-critical — leave enrichedMessage as the original message.
       }
-    } catch {
-      // Non-critical — leave enrichedMessage as the original message.
     }
   }
 
