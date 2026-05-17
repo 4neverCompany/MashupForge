@@ -21,6 +21,7 @@ interface Message {
   id: string;
   role: 'user' | 'model';
   text: string;
+  streaming?: boolean; // true while AI is still typing
   groundingChunks?: unknown[];
   recommendations?: string[];
   trendingSources?: TrendSource[];
@@ -58,7 +59,7 @@ export function Sidebar() {
       setChatMessages((prev) => [
         ...prev,
         userMsgObj,
-        { id: modelMsgId, role: 'model', text: '' },
+        { id: modelMsgId, role: 'model', text: '', streaming: true },
       ]);
       try {
         const systemInstruction = `${settings.agentPrompt || 'You are an expert on all fantasy and sci-fi universes (Marvel, DC, Star Wars, Warhammer 40k, etc.). Help the user brainstorm crossover ideas and answer questions.'}
@@ -69,6 +70,7 @@ export function Sidebar() {
         for await (const delta of streamAI(userMsg, {
           mode: 'chat',
           systemPrompt: systemInstruction,
+          provider: settings.activeAiAgent,
         })) {
           acc += delta;
           setChatMessages((prev) =>
@@ -78,15 +80,19 @@ export function Sidebar() {
         if (!acc) {
           setChatMessages((prev) =>
             prev.map((m) =>
-              m.id === modelMsgId ? { ...m, text: '(no response)' } : m
+              m.id === modelMsgId ? { ...m, text: '(no response)', streaming: false } : m
             )
+          );
+        } else {
+          setChatMessages((prev) =>
+            prev.map((m) => (m.id === modelMsgId ? { ...m, streaming: false } : m))
           );
         }
       } catch {
         setChatMessages((prev) =>
           prev.map((m) =>
             m.id === modelMsgId
-              ? { ...m, text: 'Error: Could not get response.' }
+              ? { ...m, text: 'Error: Could not get response.', streaming: false }
               : m
           )
         );
@@ -100,7 +106,7 @@ export function Sidebar() {
       setContentMessages((prev) => [
         ...prev,
         userMsgObj,
-        { id: modelMsgId, role: 'model', text: '⏳ Researching trending topics…' },
+        { id: modelMsgId, role: 'model', text: '⏳ Researching trending topics…', streaming: true },
       ]);
 
       try {
@@ -154,12 +160,17 @@ Return ONLY the JSON array, no prose.`;
         );
 
         let acc = '';
-        for await (const delta of streamAI(message, { mode: 'idea' })) {
+        for await (const delta of streamAI(message, { mode: 'idea', provider: settings.activeAiAgent })) {
           acc += delta;
           setContentMessages((prev) =>
-            prev.map((m) => (m.id === modelMsgId ? { ...m, text: acc } : m))
+            prev.map((m) => (m.id === modelMsgId ? { ...m, text: acc, streaming: true } : m))
           );
         }
+        // Clear streaming flag when done
+        const finalAcc = acc;
+        setContentMessages((prev) =>
+          prev.map((m) => (m.id === modelMsgId ? { ...m, streaming: false } : m))
+        );
 
         let ideaCount = 0;
         let parsedIdeas: Array<{ context: string; concept: string }> = [];
@@ -334,11 +345,14 @@ Return ONLY the JSON array, no prose.`;
             >
               {msg.role === 'user' ? (
                 msg.text
-              ) : (
+              ) : msg.role === 'model' ? (
                 <div className="prose prose-invert prose-sm max-w-none">
                   <ReactMarkdown>{msg.text}</ReactMarkdown>
+                  {msg.streaming && (
+                    <span className="inline-block w-2 h-4 bg-[#00e6ff] ml-0.5 animate-pulse align-middle" />
+                  )}
                 </div>
-              )}
+              ) : null}
             </div>
             <div className="flex items-center gap-2 mt-0.5">
               <span className="text-[10px] text-zinc-600 select-none">
