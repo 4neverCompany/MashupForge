@@ -288,10 +288,9 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const directive = directiveFor(mode);
-  const focusBlock = buildFocusBlock(
-    sanitizeStringArray(niches),
-    sanitizeStringArray(genres),
-  );
+  const cleanNiches = sanitizeStringArray(niches);
+  const cleanGenres = sanitizeStringArray(genres);
+  const focusBlock = buildFocusBlock(cleanNiches, cleanGenres);
   const userSystem = typeof systemPrompt === 'string' ? systemPrompt.trim() : '';
   // Ordering matches the pi route: directive sets the role, user prompt
   // refines it, focus block targets niches. BASE_SYSTEM_PROMPT anchors
@@ -301,6 +300,46 @@ export async function POST(req: Request): Promise<Response> {
     [BASE_SYSTEM_PROMPT, directive, userSystem, focusBlock]
       .filter((s): s is string => typeof s === 'string' && s.length > 0)
       .join('\n\n') || undefined;
+
+  // Web-search pre-enrichment for `idea` mode. MiniMax / OpenAI /
+  // Anthropic / OpenRouter don't have built-in browsing on the vercel
+  // AI SDK adapter (pi.dev and nca route their own search), so we
+  // pre-fetch a short trending snippet block and append it to the
+  // user's message before the model sees it. Strictly best-effort:
+  // any failure falls through with no enrichment so a flaky search
+  // backend can't break idea generation.
+  //
+  // Only fires for `idea` mode — every other mode (chat, enhance,
+  // caption, tag, etc.) gets a smaller benefit and doesn't justify
+  // the latency cost or the rate-limit footprint.
+  let enrichedMessage = message;
+  if (mode === 'idea') {
+    const queryParts = [
+      'trending',
+      ...cleanNiches,
+      ...cleanGenres,
+      'fandom crossover fanart 2026',
+    ].filter((s) => s.length > 0);
+    const trendingQuery = queryParts.join(' ');
+    try {
+      const { webSearch } = await import('@/lib/web-search');
+      const results = await webSearch(trendingQuery, 5);
+      if (results.length > 0) {
+        const snippetLines = results
+          .slice(0, 3)
+          .map((r) => `- ${r.title}: ${r.snippet}`)
+          .filter((line) => line.length > 4);
+        if (snippetLines.length > 0) {
+          enrichedMessage =
+            message +
+            '\n\nTrending context for inspiration (recent search results, use as flavour, do not quote verbatim):\n' +
+            snippetLines.join('\n');
+        }
+      }
+    } catch {
+      // Non-critical — leave enrichedMessage as the original message.
+    }
+  }
 
   const encoder = new TextEncoder();
 
@@ -319,12 +358,12 @@ export async function POST(req: Request): Promise<Response> {
     async start(controller) {
       try {
         if (provider.name === 'minimax') {
-          await streamMinimaxChat(controller, encoder, system, message, provider.modelId);
+          await streamMinimaxChat(controller, encoder, system, enrichedMessage, provider.modelId);
         } else {
           const result = streamText({
             model: provider.model,
             system,
-            prompt: message,
+            prompt: enrichedMessage,
           });
           for await (const delta of result.textStream) {
             if (!delta) continue;
