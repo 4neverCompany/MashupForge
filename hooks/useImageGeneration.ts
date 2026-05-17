@@ -158,6 +158,52 @@ export type LeonardoGenerationError = Error & {
   moderation?: unknown;
 };
 
+/**
+ * Poll Leonardo's status endpoint until the generation is COMPLETE,
+ * FAILED, or we hit the attempt cap. Shared by `submitLeonardoAndPoll`
+ * (Leonardo-only path) and `submitViaAiImage` (vercel-ai orchestrator
+ * path). On FAILED, the thrown error is annotated with the moderation
+ * classifications + failedPrompt so the caller can decide whether to
+ * rewrite + retry.
+ */
+async function pollLeonardoGeneration(
+  generationId: string,
+  promptForErrorContext: string,
+): Promise<LeonardoSuccess> {
+  // Initial delay: Leonardo's Hasura layer needs ~3s to commit the
+  // generation before status polls return a usable result.
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  let attempts = 0;
+  while (attempts < 150) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    attempts++;
+    const statusRes = await fetch(`/api/leonardo/${generationId}`);
+    if (!statusRes.ok) {
+      const errText = await statusRes.text();
+      throw new Error(`Failed to check status: ${errText.slice(0, 100)}`);
+    }
+    const statusData = await statusRes.json();
+    if (statusData.status === 'COMPLETE') {
+      return {
+        url: statusData.url,
+        imageId: statusData.imageId,
+        seed: statusData.seed,
+      };
+    }
+    if (statusData.status === 'FAILED') {
+      const classifications: string[] = Array.isArray(statusData.moderation?.moderationClassification)
+        ? statusData.moderation.moderationClassification
+        : [];
+      const err = new Error(statusData.error || 'Leonardo generation failed') as LeonardoGenerationError;
+      err.moderationClassification = classifications;
+      err.failedPrompt = statusData.failedPrompt || promptForErrorContext;
+      err.moderation = statusData.moderation;
+      throw err;
+    }
+  }
+  throw new Error('Timeout waiting for Leonardo generation');
+}
+
 async function submitLeonardoAndPoll(params: LeonardoSubmitParams): Promise<LeonardoSuccess> {
   const res = await fetchWithRetry('/api/leonardo', {
     method: 'POST',
@@ -187,38 +233,76 @@ async function submitLeonardoAndPoll(params: LeonardoSubmitParams): Promise<Leon
   const data = await res.json();
   if (!data.generationId) throw new Error('Leonardo returned no generationId');
 
-  // Initial delay: Leonardo's Hasura layer needs ~3s to commit the
-  // generation before status polls return a usable result.
-  await new Promise(resolve => setTimeout(resolve, 3000));
-  let attempts = 0;
-  while (attempts < 150) {
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    attempts++;
-    const statusRes = await fetch(`/api/leonardo/${data.generationId}`);
-    if (!statusRes.ok) {
-      const errText = await statusRes.text();
-      throw new Error(`Failed to check status: ${errText.slice(0, 100)}`);
+  return pollLeonardoGeneration(data.generationId, params.prompt);
+}
+
+/**
+ * vercel-ai orchestrator path. Submits via `/api/ai/image` which
+ * server-side runs MiniMax-enhance + Leonardo-submit, then polls the
+ * existing `/api/leonardo/{id}` route just like submitLeonardoAndPoll.
+ *
+ * Set `skipEnhance: true` to bypass MiniMax (used by the moderation
+ * retry, which has already produced a rewritten prompt and just wants
+ * the Leonardo submit half).
+ */
+interface AiImageSubmitParams {
+  idea: string;
+  modelId: string;
+  width: number;
+  height: number;
+  styleIds?: string[];
+  quality?: 'LOW' | 'MEDIUM' | 'HIGH';
+  negativePrompt?: string;
+  systemPrompt?: string;
+  niches?: string[];
+  genres?: string[];
+  apiKey?: string;
+  skipEnhance?: boolean;
+}
+
+interface AiImageSubmitResult extends LeonardoSuccess {
+  enhancedPrompt: string;
+}
+
+async function submitViaAiImage(params: AiImageSubmitParams): Promise<AiImageSubmitResult> {
+  const res = await fetchWithRetry('/api/ai/image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      idea: params.idea,
+      modelId: params.modelId,
+      width: params.width,
+      height: params.height,
+      styleIds: params.styleIds,
+      quality: params.quality,
+      negativePrompt: params.negativePrompt,
+      systemPrompt: params.systemPrompt,
+      niches: params.niches,
+      genres: params.genres,
+      apiKey: params.apiKey,
+      skipEnhance: params.skipEnhance === true,
+    }),
+  });
+  if (!res.ok) {
+    let errMessage = 'vercel-ai image orchestrator failed';
+    try {
+      const errData = await res.json();
+      errMessage = errData.error || errMessage;
+    } catch {
+      const text = await res.text();
+      errMessage = `Server error (${res.status}): ${text.slice(0, 100)}…`;
     }
-    const statusData = await statusRes.json();
-    if (statusData.status === 'COMPLETE') {
-      return {
-        url: statusData.url,
-        imageId: statusData.imageId,
-        seed: statusData.seed,
-      };
-    }
-    if (statusData.status === 'FAILED') {
-      const classifications: string[] = Array.isArray(statusData.moderation?.moderationClassification)
-        ? statusData.moderation.moderationClassification
-        : [];
-      const err = new Error(statusData.error || 'Leonardo generation failed') as LeonardoGenerationError;
-      err.moderationClassification = classifications;
-      err.failedPrompt = statusData.failedPrompt || params.prompt;
-      err.moderation = statusData.moderation;
-      throw err;
-    }
+    throw new Error(errMessage);
   }
-  throw new Error('Timeout waiting for Leonardo generation');
+  const data = (await res.json()) as {
+    generationId?: string;
+    prompt?: string;
+  };
+  if (!data.generationId || typeof data.prompt !== 'string') {
+    throw new Error('Orchestrator returned no generationId/prompt');
+  }
+  const success = await pollLeonardoGeneration(data.generationId, data.prompt);
+  return { ...success, enhancedPrompt: data.prompt };
 }
 
 /**
@@ -336,6 +420,58 @@ async function submitWithOneRetry(
 
     const success = await submitLeonardoAndPoll({ prompt: activePrompt, ...baseParams });
     return { success, finalPrompt: activePrompt, retried: true };
+  }
+}
+
+/**
+ * Same one-shot moderation-retry shape as `submitWithOneRetry`, but
+ * the underlying submit goes through `/api/ai/image` (server-side
+ * MiniMax-enhance + Leonardo-submit). On retry, the client asks
+ * MiniMax for a clean rewrite of the failed prompt, then re-submits
+ * via `/api/ai/image` with `skipEnhance: true` so the orchestrator
+ * doesn't re-enhance the already-rewritten text.
+ */
+interface AiImageContext {
+  systemPrompt?: string;
+  niches?: string[];
+  genres?: string[];
+  apiKey?: string;
+}
+
+async function submitViaAiImageWithOneRetry(
+  initialIdea: string,
+  baseParams: Omit<AiImageSubmitParams, 'idea' | 'skipEnhance'>,
+  context: AiImageContext,
+  callbacks: ModerationRetryCallback,
+): Promise<SubmitResult> {
+  try {
+    const r = await submitViaAiImage({
+      ...baseParams,
+      ...context,
+      idea: initialIdea,
+      skipEnhance: false,
+    });
+    return { success: r, finalPrompt: r.enhancedPrompt, retried: false };
+  } catch (err) {
+    const lErr = err as LeonardoGenerationError;
+    const classifications = lErr.moderationClassification || [];
+    if (classifications.length === 0) throw err;
+
+    callbacks.onRetry(classifications);
+
+    const rewritten = await streamAIToString(
+      buildModerationRewriteInstruction(lErr.failedPrompt || initialIdea),
+      { mode: 'enhance', provider: 'vercel-ai' },
+    );
+    const activePrompt = (rewritten || '').trim() || initialIdea;
+
+    const r = await submitViaAiImage({
+      ...baseParams,
+      ...context,
+      idea: activePrompt,
+      skipEnhance: true,
+    });
+    return { success: r, finalPrompt: r.enhancedPrompt, retried: true };
   }
 }
 
@@ -602,14 +738,34 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
           const imageProvider =
             options?.imageProvider || modelConfig?.provider || 'leonardo';
 
+          const sharedWidth = enhanced.leonardo.width ?? fallbackDims.width;
+          const sharedHeight = enhanced.leonardo.height ?? fallbackDims.height;
+          const sharedStyleIds = enhanced.leonardo.styleIds ?? fallbackStyleUuids;
+          const rawQuality = options?.quality || enhanced.leonardo.quality || 'HIGH';
+          const sharedQuality: 'LOW' | 'MEDIUM' | 'HIGH' =
+            rawQuality === 'LOW' || rawQuality === 'MEDIUM' || rawQuality === 'HIGH'
+              ? rawQuality
+              : 'HIGH';
+          const onModerationBlock = (classifications: string[]) => {
+            const reasons = classifications.join(', ');
+            const stageMsg = `Blocked by ${reasons} — rewriting and retrying once…`;
+            setLastError({ message: stageMsg, classifications, retried: false });
+            setImages(prev => prev.map(img =>
+              img.id === placeholders[i].id
+                ? { ...img, error: stageMsg }
+                : img
+            ));
+            setProgress(`Image ${i + 1}: ${stageMsg}`);
+          };
+
           let success: LeonardoSuccess;
           let activePrompt: string;
           let retried: boolean;
           if (imageProvider === 'minimax') {
             success = await submitMinimaxImage({
               prompt: enhanced.prompt,
-              width: enhanced.leonardo.width ?? fallbackDims.width,
-              height: enhanced.leonardo.height ?? fallbackDims.height,
+              width: sharedWidth,
+              height: sharedHeight,
               aspectRatio: currentAspectRatio,
               quantity: 1,
               // Short prompts get bigger uplift from prompt_optimizer;
@@ -619,39 +775,41 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             });
             activePrompt = enhanced.prompt;
             retried = false;
+          } else if (settings.activeAiAgent === 'vercel-ai') {
+            // Hybrid orchestrator path: server-side MiniMax-enhance +
+            // Leonardo-submit via /api/ai/image, then poll via the
+            // existing /api/leonardo/{id} route.
+            ({ success, finalPrompt: activePrompt, retried } = await submitViaAiImageWithOneRetry(
+              enhanced.prompt,
+              {
+                modelId: selectedModel,
+                width: sharedWidth,
+                height: sharedHeight,
+                styleIds: sharedStyleIds,
+                quality: sharedQuality,
+                negativePrompt: generatedNegativePrompt,
+              },
+              {
+                systemPrompt: settings.agentPrompt,
+                niches: settings.agentNiches,
+                genres: settings.agentGenres,
+                apiKey: settings.apiKeys.leonardo,
+              },
+              { onRetry: onModerationBlock },
+            ));
           } else {
-            const leonardoBaseParams = {
-              negativePrompt: generatedNegativePrompt,
-              modelId: selectedModel,
-              width: enhanced.leonardo.width ?? fallbackDims.width,
-              height: enhanced.leonardo.height ?? fallbackDims.height,
-              styleIds: enhanced.leonardo.styleIds ?? fallbackStyleUuids,
-              apiKey: settings.apiKeys.leonardo,
-              // User UI selection (options.quality) wins, then spec default,
-              // then HIGH baseline.
-              quality: options?.quality || enhanced.leonardo.quality || 'HIGH',
-            };
-
             ({ success, finalPrompt: activePrompt, retried } = await submitWithOneRetry(
               enhanced.prompt,
-              leonardoBaseParams,
               {
-                onRetry: (classifications) => {
-                  const reasons = classifications.join(', ');
-                  const stageMsg = `Blocked by ${reasons} — rewriting and retrying once…`;
-                  setLastError({
-                    message: stageMsg,
-                    classifications,
-                    retried: false,
-                  });
-                  setImages(prev => prev.map(img =>
-                    img.id === placeholders[i].id
-                      ? { ...img, error: stageMsg }
-                      : img
-                  ));
-                  setProgress(`Image ${i + 1}: ${stageMsg}`);
-                },
+                negativePrompt: generatedNegativePrompt,
+                modelId: selectedModel,
+                width: sharedWidth,
+                height: sharedHeight,
+                styleIds: sharedStyleIds,
+                apiKey: settings.apiKeys.leonardo,
+                quality: sharedQuality,
               },
+              { onRetry: onModerationBlock },
               settings.activeAiAgent,
             ));
           }
@@ -812,51 +970,70 @@ The user wants to re-roll an image based on this idea: "${prompt}". Enhance this
         const imageProvider =
           options?.imageProvider || modelConfig?.provider || 'leonardo';
 
+        const sharedWidth = enhanced.leonardo.width ?? fallbackDims.width;
+        const sharedHeight = enhanced.leonardo.height ?? fallbackDims.height;
+        const sharedStyleIds = enhanced.leonardo.styleIds ?? fallbackStyleUuids;
+        const rawQuality = options?.quality || enhanced.leonardo.quality || 'HIGH';
+        const sharedQuality: 'LOW' | 'MEDIUM' | 'HIGH' =
+          rawQuality === 'LOW' || rawQuality === 'MEDIUM' || rawQuality === 'HIGH'
+            ? rawQuality
+            : 'HIGH';
+        const onModerationBlock = (classifications: string[]) => {
+          const reasons = classifications.join(', ');
+          const stageMsg = `Reroll blocked by ${reasons} — rewriting and retrying once…`;
+          setLastError({ message: stageMsg, classifications, retried: false });
+          setImages(prev => prev.map(img =>
+            img.id === id ? { ...img, error: stageMsg } : img
+          ));
+          setProgress(stageMsg);
+        };
+
         let success: LeonardoSuccess;
         let activePrompt: string;
         let retried: boolean;
         if (imageProvider === 'minimax') {
           success = await submitMinimaxImage({
             prompt: enhanced.prompt,
-            width: enhanced.leonardo.width ?? fallbackDims.width,
-            height: enhanced.leonardo.height ?? fallbackDims.height,
+            width: sharedWidth,
+            height: sharedHeight,
             aspectRatio: currentAspectRatio,
             quantity: 1,
             promptOptimizer: enhanced.prompt.length < 180,
           });
           activePrompt = enhanced.prompt;
           retried = false;
+        } else if (settings.activeAiAgent === 'vercel-ai') {
+          ({ success, finalPrompt: activePrompt, retried } = await submitViaAiImageWithOneRetry(
+            enhanced.prompt,
+            {
+              modelId: selectedModel,
+              width: sharedWidth,
+              height: sharedHeight,
+              styleIds: sharedStyleIds,
+              quality: sharedQuality,
+              negativePrompt: modelNegPrompt,
+            },
+            {
+              systemPrompt: settings.agentPrompt,
+              niches: settings.agentNiches,
+              genres: settings.agentGenres,
+              apiKey: settings.apiKeys.leonardo,
+            },
+            { onRetry: onModerationBlock },
+          ));
         } else {
-          const leonardoBaseParams = {
-            negativePrompt: modelNegPrompt,
-            modelId: selectedModel,
-            width: enhanced.leonardo.width ?? fallbackDims.width,
-            height: enhanced.leonardo.height ?? fallbackDims.height,
-            styleIds: enhanced.leonardo.styleIds ?? fallbackStyleUuids,
-            apiKey: settings.apiKeys.leonardo,
-            quality: options?.quality || enhanced.leonardo.quality || 'HIGH',
-          };
-
           ({ success, finalPrompt: activePrompt, retried } = await submitWithOneRetry(
             enhanced.prompt,
-            leonardoBaseParams,
             {
-              onRetry: (classifications) => {
-                const reasons = classifications.join(', ');
-                const stageMsg = `Reroll blocked by ${reasons} — rewriting and retrying once…`;
-                setLastError({
-                  message: stageMsg,
-                  classifications,
-                  retried: false,
-                });
-                setImages(prev => prev.map(img =>
-                  img.id === id
-                    ? { ...img, error: stageMsg }
-                    : img
-                ));
-                setProgress(stageMsg);
-              },
+              negativePrompt: modelNegPrompt,
+              modelId: selectedModel,
+              width: sharedWidth,
+              height: sharedHeight,
+              styleIds: sharedStyleIds,
+              apiKey: settings.apiKeys.leonardo,
+              quality: sharedQuality,
             },
+            { onRetry: onModerationBlock },
             settings.activeAiAgent,
           ));
         }
