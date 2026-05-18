@@ -4,6 +4,7 @@
   "type": "video",
   "provider": "leonardo",
   "endpoint": "POST /api/rest/v2/generations",
+
   "parameters": {
     "prompt": {
       "type": "string",
@@ -20,20 +21,14 @@
     "duration": {
       "type": "number",
       "required": false,
-      "range": [
-        3,
-        15
-      ],
+      "range": [3, 15],
       "maxWithDurationRef": 10,
       "description": "Video length in seconds. Max 10 when video_reference_base is specified."
     },
     "mode": {
       "type": "string",
       "required": false,
-      "allowedValues": [
-        "RESOLUTION_720",
-        "RESOLUTION_1080"
-      ],
+      "allowedValues": ["RESOLUTION_720", "RESOLUTION_1080"],
       "default": "RESOLUTION_1080",
       "description": "Quality mode. RESOLUTION_720 for 720p, RESOLUTION_1080 for 1080p."
     },
@@ -65,7 +60,7 @@
       "maxItems": 1,
       "description": "Start frame image. Cannot coexist with image_reference or video_reference_base.",
       "itemSchema": {
-        "image.id": "string \u2014 Leonardo image ID",
+        "image.id": "string — Leonardo image ID",
         "image.type": "GENERATED | UPLOADED"
       }
     },
@@ -75,7 +70,7 @@
       "maxItems": 1,
       "description": "End frame image. Requires start_frame. Cannot coexist with image_reference or video_reference_base.",
       "itemSchema": {
-        "image.id": "string \u2014 Leonardo image ID",
+        "image.id": "string — Leonardo image ID",
         "image.type": "GENERATED | UPLOADED"
       }
     },
@@ -85,7 +80,7 @@
       "maxItems": 7,
       "description": "Reference images for style/content guidance. Cannot coexist with start_frame or end_frame. Can coexist with video_reference_base.",
       "itemSchema": {
-        "image.id": "string \u2014 Leonardo image ID",
+        "image.id": "string — Leonardo image ID",
         "image.type": "GENERATED | UPLOADED"
       }
     },
@@ -95,41 +90,25 @@
       "maxItems": 1,
       "description": "Existing video to edit. Can coexist with image_reference (video editing). Cannot coexist with start_frame or end_frame.",
       "itemSchema": {
-        "video.id": "string \u2014 Leonardo video ID",
+        "video.id": "string — Leonardo video ID",
         "video.type": "GENERATED"
       }
     }
   },
+
   "aspectRatios": {
     "720p": {
-      "16:9": {
-        "width": 1280,
-        "height": 720
-      },
-      "1:1": {
-        "width": 960,
-        "height": 960
-      },
-      "9:16": {
-        "width": 720,
-        "height": 1280
-      }
+      "16:9": { "width": 1280, "height": 720 },
+      "1:1":  { "width": 960,  "height": 960 },
+      "9:16": { "width": 720,  "height": 1280 }
     },
     "1080p": {
-      "16:9": {
-        "width": 1920,
-        "height": 1080
-      },
-      "1:1": {
-        "width": 1440,
-        "height": 1440
-      },
-      "9:16": {
-        "width": 1080,
-        "height": 1920
-      }
+      "16:9": { "width": 1920, "height": 1080 },
+      "1:1":  { "width": 1440, "height": 1440 },
+      "9:16": { "width": 1080, "height": 1920 }
     }
   },
+
   "capabilities": {
     "styles": false,
     "negativePrompt": false,
@@ -141,13 +120,14 @@
     "imageReference": true,
     "videoReference": true
   },
+
   "rules": [
-    "VIDEO model \u2014 duration is 3-15 seconds. Max 10s when video_reference_base is used.",
-    "DO NOT set style \u2014 not available for video models.",
-    "DO NOT set negativePrompt \u2014 not available for this model.",
-    "DO NOT set prompt_enhance \u2014 not available for this model.",
+    "VIDEO model — duration is 3-15 seconds. Max 10s when video_reference_base is used.",
+    "DO NOT set style — not available for video models.",
+    "DO NOT set negativePrompt — not available for this model.",
+    "DO NOT set prompt_enhance — not available for this model.",
     "Prompt max 1500 characters.",
-    "MUTUAL EXCLUSION \u2014 pick ONE guidance mode:",
+    "MUTUAL EXCLUSION — pick ONE guidance mode:",
     "  Mode A: start_frame + optional end_frame (image-to-video, 2+3 excluded)",
     "  Mode B: image_reference alone (style/content guidance, no frames)",
     "  Mode C: video_reference_base + optional image_reference (video editing)",
@@ -155,7 +135,7 @@
     "  end_frame REQUIRES start_frame.",
     "  video_reference_base CAN combine with image_reference for video editing.",
     "When start_frame is set and width/height are omitted, dimensions auto-match the start_frame image.",
-    "3 aspect ratios \u00d7 2 resolutions = 6 valid dimension combos.",
+    "3 aspect ratios × 2 resolutions = 6 valid dimension combos.",
     "motion_has_audio: set true for music videos. Audio is NOT kept when editing via video_reference_base.",
     "Default mode is RESOLUTION_1080 (1080p). Use 720p only for fast previews."
   ]
