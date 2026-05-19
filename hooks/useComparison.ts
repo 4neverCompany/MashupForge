@@ -3,6 +3,9 @@
 import { useState, useEffect } from 'react';
 import { get, set } from 'idb-keyval';
 import { enhancePromptForModel } from '@/lib/modelOptimizer';
+import { buildEnhancedPrompt } from '@/lib/image-prompt-builder';
+import { streamAIToString } from '@/lib/aiClient';
+import { buildModerationRewriteInstruction } from './useImageGeneration';
 import { getErrorMessage } from '@/lib/errors';
 import {
   type GeneratedImage,
@@ -158,14 +161,28 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
         setProgress(`Generating with ${modelName}...`);
 
         try {
-          let imageUrl = '';
-          let imageId = '';
-          let seed = 0;
+          // STORY-MMX-PROMPT-WIRE: route per-spec details (style UUID,
+          // dimensions, quality default) through buildEnhancedPrompt so
+          // the prompt + Leonardo params see the same spec-validated
+          // inputs as everywhere else. Mirrors the wiring in
+          // useImageGeneration.ts; until this commit the live
+          // generateComparison path used a thinner enhancePromptForModel
+          // only, so the rich lib/model-specs JSON registry wasn't
+          // consulted for actual submits.
+          const enhanced = buildEnhancedPrompt(modelPrompt, {
+            modelId,
+            styleName: modelStyle,
+            aspectRatio: modelRatio,
+            count: 1,
+          });
 
-          const dims = getLeonardoDimensions(modelId, modelRatio);
+          const dimsFallback = getLeonardoDimensions(modelId, modelRatio);
 
-          // Map art style name → Leonardo UUID (reuses modelConfig from above)
-          const leonardoStyleUuids = (() => {
+          // Map art style name → Leonardo UUID. buildEnhancedPrompt
+          // already provides this when the model has a registered spec;
+          // we keep the fuzzy-match fallback so unspec'd / pre-MXIMG-001
+          // models still get a styleId pick.
+          const fuzzyStyleUuids = (() => {
             if (!modelStyle) return undefined;
             if (!modelConfig?.styles) return undefined;
             const match = modelConfig.styles.find(s =>
@@ -174,6 +191,11 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
             );
             return match ? [match.uuid] : undefined;
           })();
+
+          const submitWidth = enhanced.leonardo.width ?? dimsFallback.width;
+          const submitHeight = enhanced.leonardo.height ?? dimsFallback.height;
+          const submitStyleIds = enhanced.leonardo.styleIds ?? fuzzyStyleUuids;
+          const submitPrompt = enhanced.prompt;
 
           // Provider branch — minimax-image-01 (and any future MiniMax
           // image models) route to /api/minimax-image, which calls
@@ -188,98 +210,178 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
           const submitProvider: 'leonardo' | 'minimax' =
             modelConfig?.provider ?? 'leonardo';
 
-          if (submitProvider === 'minimax') {
-            const res = await fetch('/api/minimax-image', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                prompt: modelPrompt,
-                aspectRatio: modelRatio,
-                width: dims.width,
-                height: dims.height,
-                n: 1,
-                // Short prompts get a bigger uplift from MiniMax's
-                // server-side prompt_optimizer; long ones already
-                // carry their own detail. Mirrors the threshold used
-                // in useImageGeneration.submitMinimaxImage.
-                promptOptimizer: modelPrompt.length < 180,
-              }),
-            });
-            if (res.ok) {
+          // Single-attempt submit. Throws on any failure; on Leonardo
+          // FAILED-with-moderation it annotates the Error with
+          // `moderationClassification` + `failedPrompt` so the outer
+          // one-retry wrapper can decide whether to rewrite + retry.
+          type SubmitSuccess = { imageUrl: string; imageId: string; seed: number };
+          type SubmitError = Error & {
+            moderationClassification?: string[];
+            failedPrompt?: string;
+          };
+          const submitOnce = async (prompt: string): Promise<SubmitSuccess> => {
+            if (submitProvider === 'minimax') {
+              const res = await fetch('/api/minimax-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  prompt,
+                  aspectRatio: modelRatio,
+                  width: submitWidth,
+                  height: submitHeight,
+                  n: 1,
+                  // Short prompts get a bigger uplift from MiniMax's
+                  // server-side prompt_optimizer; long ones carry their
+                  // own detail. Threshold matches submitMinimaxImage in
+                  // useImageGeneration.ts.
+                  promptOptimizer: prompt.length < 180,
+                }),
+              });
+              if (!res.ok) {
+                let detail = `MiniMax request failed (${res.status})`;
+                try {
+                  const j = await res.json();
+                  if (typeof j?.error === 'string') detail = j.error;
+                } catch { /* non-JSON */ }
+                throw new Error(detail);
+              }
               const data = (await res.json()) as {
-                images?: Array<{ url?: string; width?: number; height?: number }>;
+                images?: Array<{ url?: string }>;
                 generationId?: string;
               };
               const first = Array.isArray(data.images) ? data.images[0] : undefined;
-              if (first && typeof first.url === 'string' && first.url) {
-                imageUrl = first.url;
-                imageId = data.generationId ?? '';
-              }
+              if (!first?.url) throw new Error('MiniMax returned no image URL');
+              return { imageUrl: first.url, imageId: data.generationId ?? '', seed: 0 };
             }
-          } else {
+
+            // Leonardo branch — POST then poll until COMPLETE / FAILED.
             const res = await fetch('/api/leonardo', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                prompt: modelPrompt,
+                prompt,
                 modelId,
-                width: dims.width,
-                height: dims.height,
+                width: submitWidth,
+                height: submitHeight,
                 negative_prompt: modelNegPrompt,
-                styleIds: leonardoStyleUuids,
-                apiKey: settings.apiKeys.leonardo
+                styleIds: submitStyleIds,
+                quality: enhanced.leonardo.quality,
+                apiKey: settings.apiKeys.leonardo,
               }),
             });
-
-            if (res.ok) {
-              const data = await res.json();
-              if (data.generationId) {
-                let status = 'PENDING';
-                let attempts = 0;
-                while (status !== 'COMPLETE' && attempts < 150) {
-                  await new Promise(resolve => setTimeout(resolve, 2000));
-                  attempts++;
-                  const statusRes = await fetch(`/api/leonardo/${data.generationId}`);
-                  if (!statusRes.ok) break;
-                  const statusData = await statusRes.json();
-                  status = statusData.status;
-                  if (status === 'COMPLETE') {
-                    imageUrl = statusData.url;
-                    imageId = statusData.imageId;
-                    seed = statusData.seed;
-                  } else if (status === 'FAILED') {
-                    break;
-                  }
-                }
+            if (!res.ok) {
+              let detail = `Leonardo submit failed (${res.status})`;
+              try {
+                const j = await res.json();
+                if (typeof j?.error === 'string') detail = j.error;
+              } catch { /* non-JSON */ }
+              throw new Error(detail);
+            }
+            const data = await res.json();
+            if (!data.generationId) throw new Error('Leonardo returned no generationId');
+            let attempts = 0;
+            while (attempts < 150) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              attempts++;
+              const statusRes = await fetch(`/api/leonardo/${data.generationId}`);
+              if (!statusRes.ok) continue; // tolerate transient 5xx / Hasura layer hiccups
+              const statusData = await statusRes.json();
+              if (statusData.status === 'COMPLETE') {
+                return {
+                  imageUrl: statusData.url,
+                  imageId: statusData.imageId ?? '',
+                  seed: statusData.seed ?? 0,
+                };
+              }
+              if (statusData.status === 'FAILED') {
+                const cls: string[] = Array.isArray(statusData.moderation?.moderationClassification)
+                  ? statusData.moderation.moderationClassification
+                  : [];
+                const e = new Error(
+                  statusData.error || 'Leonardo generation failed',
+                ) as SubmitError;
+                e.moderationClassification = cls;
+                e.failedPrompt = statusData.failedPrompt || prompt;
+                throw e;
               }
             }
-          }
+            throw new Error('Timeout polling Leonardo generation');
+          };
 
-          if (imageUrl) {
-            const newImg: GeneratedImage = {
-              id: `comp-${Date.now()}-${modelId}`,
-              comparisonId,
-              url: imageUrl,
-              // Store the model-tuned prompt + the resolved parameters
-              // so the user can see exactly what was sent to Leonardo,
-              // not the original form.
-              prompt: modelPrompt,
-              imageId,
-              seed,
-              status: 'ready',
-              negativePrompt: modelNegPrompt,
-              aspectRatio: modelRatio,
-              imageSize: options?.imageSize,
-              style: modelStyle,
-              modelInfo: { provider: submitProvider, modelId, modelName }
-            };
-            setComparisonResults(prev => prev.map(img => img.id === placeholders[i].id ? newImg : img));
-            readyImages.push(newImg);
-          } else {
-            setComparisonResults(prev => prev.filter(img => img.id !== placeholders[i].id));
+          // One-retry on moderation block. MXIMG-001's
+          // `submitWithOneRetry` doctrine lives in useImageGeneration.ts
+          // but never reaches production — porting the pattern here so
+          // the live Compare/Pipeline path stops silently dropping
+          // moderated generations.
+          let activePrompt = submitPrompt;
+          let result: SubmitSuccess;
+          let retried = false;
+          try {
+            result = await submitOnce(activePrompt);
+          } catch (err) {
+            const e = err as SubmitError;
+            const cls = e.moderationClassification ?? [];
+            if (cls.length === 0) throw err;
+            setProgress(
+              `Blocked by ${cls.join(', ')} — rewriting for ${modelName}…`,
+            );
+            // Surface the in-flight error on the placeholder so the user
+            // sees what's happening instead of a frozen spinner.
+            setComparisonResults(prev => prev.map(img =>
+              img.id === placeholders[i].id
+                ? { ...img, error: `Blocked by ${cls.join(', ')} — rewriting…` }
+                : img
+            ));
+            const rewritten = await streamAIToString(
+              buildModerationRewriteInstruction(e.failedPrompt ?? activePrompt),
+              { mode: 'enhance', provider: settings.activeAiAgent, model: settings.activeTextModel },
+            );
+            activePrompt = (rewritten || '').trim() || activePrompt;
+            retried = true;
+            result = await submitOnce(activePrompt);
           }
-        } catch {
-          setComparisonResults(prev => prev.filter(img => img.id !== placeholders[i].id));
+          const { imageUrl, imageId, seed } = result;
+
+          const newImg: GeneratedImage = {
+            id: `comp-${Date.now()}-${modelId}`,
+            comparisonId,
+            url: imageUrl,
+            // Persist whichever prompt actually produced the image —
+            // on a moderation rewrite that's the cleaned version, not
+            // the original blocked text.
+            prompt: activePrompt,
+            imageId,
+            seed,
+            status: 'ready',
+            negativePrompt: modelNegPrompt,
+            aspectRatio: modelRatio,
+            imageSize: options?.imageSize,
+            style: modelStyle,
+            modelInfo: { provider: submitProvider, modelId, modelName },
+          };
+          if (retried) {
+            // Cheap breadcrumb on the result card so the user knows
+            // why their final prompt differs from what they typed.
+            (newImg as GeneratedImage & { retried?: boolean }).retried = true;
+          }
+          setComparisonResults(prev => prev.map(img => img.id === placeholders[i].id ? newImg : img));
+          readyImages.push(newImg);
+        } catch (imgErr: unknown) {
+          // Surface the failure on the placeholder instead of silently
+          // dropping it (the prior catch{} just filtered the placeholder
+          // out of the UI list — that's the silent-fail UX Maurice
+          // flagged). Differentiate moderation blocks (with
+          // classifications) from network / validation errors.
+          const e = imgErr as Error & { moderationClassification?: string[] };
+          const cls = e?.moderationClassification ?? [];
+          const errMsg = cls.length > 0
+            ? `Blocked after rewrite: ${cls.join(', ')}. Edit the prompt or switch model.`
+            : (getErrorMessage(imgErr) || 'Generation failed');
+          setComparisonResults(prev => prev.map(img =>
+            img.id === placeholders[i].id
+              ? { ...img, status: 'error', error: errMsg }
+              : img
+          ));
         }
       }
     } catch (e: unknown) {

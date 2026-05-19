@@ -364,7 +364,7 @@ async function submitMinimaxImage(params: MinimaxImageParams): Promise<LeonardoS
   };
 }
 
-function buildModerationRewriteInstruction(failedPrompt: string): string {
+export function buildModerationRewriteInstruction(failedPrompt: string): string {
   return `This prompt was blocked by content moderation. Rewrite it to be cleaner and shorter (40–60 words max). Remove any violence, gore, or explicit language. Keep the character names and core concept. Return ONLY the rewritten prompt.
 
 BLOCKED PROMPT:
