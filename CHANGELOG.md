@@ -4,6 +4,20 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.37 (2026-05-16)
+
+Simplification: strip the entire server-side scheduling stack — Upstash Redis queue, GitHub Actions cron, QStash push trigger — and revert Instagram posting to the browser-only path that predated SCHED-POST-ROBUST. Scheduled posts now fire from the open-tab auto-poster in `MainContent.tsx`; manual posts still go directly through `/api/social/post`. The body-first credential resolver from v0.9.34 (commit 48ed1b2) is kept. Trade-off accepted: scheduled posts no longer fire when the browser is closed, in exchange for zero server-side state and zero cron dependency.
+
+### Removed
+- `lib/server-queue.ts`, `lib/server-queue-client.ts`, `lib/qstash-client.ts` and all their tests.
+- `/api/queue/schedule`, `/api/queue/cancel`, `/api/queue/results` routes.
+- `/api/social/cron-fire` and `/api/social/qstash-deliver` routes.
+- `.github/workflows/cron-fire-scheduled-posts.yml`.
+- `Settings.serverCronEnabled` field, default, and SettingsModal toggle.
+- All `pushScheduleToServer` / `cancelScheduleOnServer` / `fetchQueueResults` / `ackQueueResults` / `reconcileResults` call sites in `MainContent.tsx`.
+- `@upstash/qstash` (v0.9.36 addition) and `@upstash/redis` (v0.9.30 addition) dependencies.
+- Env vars no longer needed: `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`. (`CRON_SHARED_SECRET` is retained — the Sunday-recap cron and the Instagram-refresh route still use it.)
+
 ## v0.9.36 (2026-05-16)
 
 Auto-post reliability: scheduled Instagram posts now fire on a push trigger instead of polling. Replaces the GitHub Actions cron (which the free tier was throttling to ~5 runs/day instead of the configured 288, leaving posts stranded in the Upstash Redis queue) with an Upstash QStash delayed HTTP callback. The cron stays as a defense-in-depth safety net, deduplicated via the existing atomic ZREM claim. Free-tier QStash (500 msgs/day) covers the 3–5 posts/day target with retry headroom.

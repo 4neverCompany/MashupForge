@@ -126,13 +126,6 @@ import { PostReadyCard } from './postready/PostReadyCard';
 import { PostReadyCarouselCard } from './postready/PostReadyCarouselCard';
 import { PostReadyDndGrid, DraggableSingleWrapper, CarouselReorderSlot, type DndMoveHandler } from './postready/PostReadyDndGrid';
 import { DndUndoToast } from './postready/DndUndoToast';
-import {
-  pushScheduleToServer,
-  cancelScheduleOnServer,
-  fetchQueueResults,
-  ackQueueResults,
-  reconcileResults,
-} from '@/lib/server-queue-client';
 import { EmptyGalleryState } from './EmptyGalleryState';
 import { GalleryCard } from './GalleryCard';
 // V050-002 Phase 1: per-view modules under components/views. Phase 1
@@ -622,22 +615,6 @@ export function MainContent() {
       if (editableIdx !== -1) {
         const reusedId = existingPosts[editableIdx].id;
         // RESCHED-FIX: mirror the in-place reschedule to the server
-        // queue too. Re-pushing the same id is the contract for "this
-        // post moved" — the queue replaces its entry so the cron fires
-        // at the new time. Without this the auto-poster kept publishing
-        // at the previous (stale) time even though the UI updated.
-        if (img.url) {
-          void pushScheduleToServer({
-            id: reusedId,
-            date,
-            time,
-            platforms,
-            caption,
-            mediaUrl: img.url,
-            imageId: img.id,
-            credentials: buildCredentialsPayload(),
-          });
-        }
         return {
           scheduledPosts: existingPosts.map((p, i) =>
             i === editableIdx
@@ -655,21 +632,6 @@ export function MainContent() {
         caption,
         status: 'scheduled',
       };
-      // SCHED-POST-ROBUST: mirror to the server queue (best-effort).
-      // Only when image.url is resolvable — server has no IDB so it
-      // can't dereference imageId on its own.
-      if (img.url) {
-        void pushScheduleToServer({
-          id: scheduled.id,
-          date,
-          time,
-          platforms,
-          caption,
-          mediaUrl: img.url,
-          imageId: img.id,
-          credentials: buildCredentialsPayload(),
-        });
-      }
       return { scheduledPosts: [...existingPosts, scheduled] };
     });
     // BUG-CRIT-013: surface the image in the Post Ready tab. Before
@@ -698,10 +660,6 @@ export function MainContent() {
   const unschedulePost = (img: GeneratedImage) => {
     // SCHED-POST-ROBUST: cancel any matching server queue entries
     // before the local filter wipes them. Best-effort.
-    const toCancel = (settings.scheduledPosts || []).filter(
-      (p) => p.imageId === img.id && p.status !== 'posted',
-    );
-    for (const p of toCancel) void cancelScheduleOnServer(p.id);
     updateSettings((prev) => ({
       scheduledPosts: (prev.scheduledPosts || []).filter(
         (p) => p.imageId !== img.id || p.status === 'posted',
@@ -1034,23 +992,6 @@ export function MainContent() {
       // member is pushed with its own mediaUrl; the cron groups by
       // carouselGroupId and assembles mediaUrls = [member1.url, ...]
       // (see app/api/social/cron-fire/route.ts:fireOne). All members
-      // are present in the queue so the result-reconciler can mark
-      // each browser-side ScheduledPost on completion.
-      newPosts.forEach((p, idx) => {
-        const url = item.images[idx]?.url;
-        if (!url) return;
-        void pushScheduleToServer({
-          id: p.id,
-          date,
-          time,
-          platforms,
-          caption,
-          mediaUrl: url,
-          carouselGroupId: groupId,
-          imageId: p.imageId,
-          credentials: buildCredentialsPayload(),
-        });
-      });
       return { scheduledPosts: [...existingPosts, ...newPosts] };
     });
     // BUG-CRIT-013: surface every image in the carousel in Post Ready,
@@ -1563,11 +1504,6 @@ export function MainContent() {
 
   // Auto-posting effect
   useEffect(() => {
-    // SCHED-POST-ROBUST: when server-side cron is the owner, the
-    // browser must not also fire — both writers + same posts = double
-    // publish. The server cron's atomic ZREM is the de-dup contract.
-    if (settings.serverCronEnabled) return;
-
     const interval = setInterval(async () => {
       if (!settings.scheduledPosts || settings.scheduledPosts.length === 0) return;
 
@@ -1779,31 +1715,7 @@ export function MainContent() {
     }, 60000); // Check every minute
 
     return () => clearInterval(interval);
-  }, [settings.scheduledPosts, settings.apiKeys, settings.serverCronEnabled, savedImages, updateSettings]);
-
-  // SCHED-POST-ROBUST: poll the server queue for results (cron-fired
-  // posts) and reconcile them into local scheduledPosts. Only runs
-  // when serverCronEnabled — otherwise the browser-side auto-poster
-  // is the owner and there's nothing to fetch.
-  useEffect(() => {
-    if (!settings.serverCronEnabled) return;
-    let cancelled = false;
-    const tick = async () => {
-      const results = await fetchQueueResults();
-      if (cancelled || results.length === 0) return;
-      const { next, appliedIds } = reconcileResults(settings.scheduledPosts || [], results);
-      if (appliedIds.length > 0) {
-        updateSettings({ scheduledPosts: next });
-        await ackQueueResults(appliedIds);
-      }
-    };
-    tick();
-    const interval = setInterval(tick, 60_000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [settings.serverCronEnabled, settings.scheduledPosts, updateSettings]);
+  }, [settings.scheduledPosts, settings.apiKeys, savedImages, updateSettings]);
 
   const allTags = useMemo(
     () => Array.from(new Set(savedImages.flatMap(img => img.tags || []))).sort(),
@@ -3287,9 +3199,6 @@ export function MainContent() {
                 const handleClearAllScheduled = () => {
                   if (allPosts.length === 0) return;
                   if (!window.confirm(`Clear all ${allPosts.length} scheduled posts? This cannot be undone.`)) return;
-                  for (const p of allPosts) {
-                    void cancelScheduleOnServer(p.id);
-                  }
                   updateSettings({ scheduledPosts: [] });
                   showToast('All scheduled posts cleared', 'success');
                 };
@@ -3839,22 +3748,6 @@ export function MainContent() {
                                           // time even though the calendar UI
                                           // had updated locally. Fire-and-
                                           // forget on both calls — local
-                                          // state always wins.
-                                          const oldPost = (settings.scheduledPosts || []).find((sp) => sp.id === postId);
-                                          if (oldPost) {
-                                            void cancelScheduleOnServer(oldPost.id);
-                                            const img = savedImages.find((i) => i.id === oldPost.imageId);
-                                            void pushScheduleToServer({
-                                              id: postId,
-                                              date: dateStr,
-                                              time: newTime,
-                                              platforms: oldPost.platforms,
-                                              caption: img ? formatPost(img) : oldPost.caption,
-                                              mediaUrl: img?.url,
-                                              imageId: oldPost.imageId,
-                                              credentials: buildCredentialsPayload(),
-                                            });
-                                          }
                                           updateSettings((prev) => ({
                                             scheduledPosts: (prev.scheduledPosts || []).map((sp) =>
                                               sp.id === postId ? { ...sp, date: dateStr, time: newTime } : sp

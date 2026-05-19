@@ -1508,24 +1508,6 @@ export function SettingsModal({
 
           {activeTab === 'general' && (
           <>
-          {/* Server-Side Scheduling — SCHED-POST-ROBUST */}
-          <div className="mt-6 pt-6 border-t border-zinc-800">
-            <h4 className="text-lg font-medium text-white mb-1">Scheduled Posts</h4>
-            <p className="text-[11px] text-zinc-500 mb-4">
-              When enabled, a GitHub Actions cron fires posts even when the browser is closed.
-              Requires UPSTASH_REDIS_REST_URL/TKN configured on Vercel.
-            </p>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-zinc-300">Server-Side Cron</span>
-              <button
-                onClick={() => updateSettings({ serverCronEnabled: !settings.serverCronEnabled })}
-                className={`w-12 h-6 rounded-full transition-colors ${settings.serverCronEnabled ? 'bg-[#00e6ff]' : 'bg-zinc-700'} relative`}
-              >
-                <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.serverCronEnabled ? 'translate-x-6' : ''}`} />
-              </button>
-            </div>
-          </div>
-
           {/* Watermark Settings */}
           <div className="mt-8 pt-6 border-t border-zinc-800">
             <h4 className="text-lg font-medium text-white mb-4">Watermark (Wasserzeichen)</h4>
