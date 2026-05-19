@@ -28,18 +28,4 @@ dist/
 
 # Hermes Agent source (cloned for reference)
 hermes-agent/
-
-# NCA (Nacara CLI) local session state — workspace prompt history + sockets
-.nca/
-
-# npx skills (vercel-labs/agent-skills) install artifacts — discovered during
-# the agent-tools spike. We don't use these globally; left behind by
-# `npx skills add … --list` autodetecting Claude Code and bootstrapping
-# install dirs. See docs/bmad/reviews/spike-vercel-labs-tools.md.
-.agents/
-skills-lock.json
-
-# Stray repo-local `~/.hermes/` leak — fleet scripts occasionally create
-# `.hermes/...` as a relative path when $HOME expansion drops out. Not part
-# of the project; the canonical fleet state lives in ~/.hermes/.
-.hermes/
+.env*.local
