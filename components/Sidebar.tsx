@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Send, Search, MessageSquare, Loader2, ExternalLink, Image as ImageIcon, Sparkles, Columns, RefreshCw, History } from 'lucide-react';
 import { useMashup, LEONARDO_MODELS } from './MashupContext';
-import { streamAI, extractJsonArrayFromLLM } from '@/lib/aiClient';
+import { streamAI, extractJsonArrayFromLLM, stripThinkBlocks } from '@/lib/aiClient';
 import { HealthStrip } from './platform/HealthStrip';
 import { ReadAloudButton } from './mmx/ReadAloudButton';
 
@@ -103,8 +103,14 @@ export function Sidebar() {
           },
         })) {
           acc += delta;
+          // Strip MiniMax-M2.5/M2.7 reasoning prefix before display.
+          // `stripThinkBlocks` handles in-flight unterminated `<think>`
+          // blocks too — while the model is mid-reasoning the bubble
+          // stays empty, then snaps to the real answer once `</think>`
+          // arrives. Same helper that `parseJsonFromLLM` uses, so the
+          // chat path matches the JSON-extract paths.
           setChatMessages((prev) =>
-            prev.map((m) => (m.id === modelMsgId ? { ...m, text: acc } : m))
+            prev.map((m) => (m.id === modelMsgId ? { ...m, text: stripThinkBlocks(acc) } : m))
           );
         }
         if (!acc) {
@@ -206,8 +212,13 @@ Return ONLY the JSON array, no prose.`;
           },
         })) {
           acc += delta;
+          // Same think-block strip as the chat handler above — keeps
+          // MiniMax reasoning out of the visible idea-stream while it's
+          // still thinking. extractJsonArrayFromLLM already strips for
+          // the final parse pass, this just keeps the streaming bubble
+          // clean too.
           setContentMessages((prev) =>
-            prev.map((m) => (m.id === modelMsgId ? { ...m, text: acc, streaming: true } : m))
+            prev.map((m) => (m.id === modelMsgId ? { ...m, text: stripThinkBlocks(acc), streaming: true } : m))
           );
         }
         // Clear streaming flag when done
