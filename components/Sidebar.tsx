@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Send, Search, MessageSquare, Loader2, ExternalLink, Image as ImageIcon, Sparkles, Columns, RefreshCw, History } from 'lucide-react';
 import { useMashup, LEONARDO_MODELS } from './MashupContext';
-import { streamAI } from '@/lib/aiClient';
+import { streamAI, extractJsonArrayFromLLM } from '@/lib/aiClient';
 import { HealthStrip } from './platform/HealthStrip';
 import { ReadAloudButton } from './mmx/ReadAloudButton';
 
@@ -174,19 +174,26 @@ Return ONLY the JSON array, no prose.`;
         );
 
         let ideaCount = 0;
-        let parsedIdeas: Array<{ context: string; concept: string }> = [];
-        try {
-          const cleaned = acc.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-          const ideasArray = JSON.parse(cleaned);
-          for (const item of ideasArray) {
-            if (item.concept) {
-              addIdea(item.concept, item.context);
-              parsedIdeas.push({ context: item.context || '', concept: item.concept });
-              ideaCount++;
-            }
+        const parsedIdeas: Array<{ context: string; concept: string }> = [];
+        // Use extractJsonArrayFromLLM so reasoning-model output
+        // (MiniMax-M2.5/M2.7 `<think>…</think>` blocks, markdown
+        // fences, prose around the JSON) is normalised before
+        // parse. The previous `JSON.parse(cleaned)` threw silently
+        // on the leading `<` of `<think>`, leaving ideaCount=0 →
+        // ideas never saved to the Ideas Board, and the user just
+        // saw the raw stream text instead of the success message.
+        // Same root cause as MXIMG-001's captioning silent-fail.
+        const rawItems = extractJsonArrayFromLLM(acc);
+        for (const item of rawItems) {
+          if (typeof item !== 'object' || item === null) continue;
+          const rec = item as Record<string, unknown>;
+          const concept = typeof rec.concept === 'string' ? rec.concept : '';
+          const context = typeof rec.context === 'string' ? rec.context : '';
+          if (concept) {
+            addIdea(concept, context);
+            parsedIdeas.push({ context, concept });
+            ideaCount++;
           }
-        } catch {
-          // parse failed — ideaCount stays 0, fallback message shown below
         }
 
         setContentMessages((prev) =>
