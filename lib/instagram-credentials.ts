@@ -1,12 +1,30 @@
-// INSTAGRAM-CRED-FIX helper. Env-first resolution so desktop reads from
-// config.json-hydrated process.env and web deployments still fall through
-// to the client-provided request body. Keeping the `??` chain in one
-// place means routes can't silently drift off the pattern.
+// IG-STALE-FIX helper. Body-first resolution: the browser snapshot is
+// the source of truth when present, env is the fallback. Both manual
+// posts and cron-fired scheduled posts forward the user's current
+// `settings.apiKeys.instagram` through to /api/social/post as
+// `credentials.instagram`, so body is the freshest signal we have.
 //
-// `??` is load-bearing: /api/desktop/config PATCH deletes empty-string
-// keys from config.json, so env values are either a non-empty string or
-// undefined — never '' — which keeps the fallback live for web callers
-// who legitimately pass creds via the request body.
+// Inverts the previous env-first INSTAGRAM-CRED-FIX decision. That
+// design assumed "env set" implied a desktop user whose config.json
+// hydrated process.env at boot, and "env unset" implied web. Maurice
+// hit the failure mode where Vercel production had stale
+// INSTAGRAM_ACCESS_TOKEN env vars set 19+ days ago (from earlier
+// testing), so the resolver always picked them over the browser's
+// freshly-updated credential — manual posts intermittently worked
+// (the env token might still be inside its 60-day Facebook Page
+// Access Token window) but cron-fired scheduled posts failed silently
+// as the env token drifted further from refresh.
+//
+// Body-first now means: whenever the request carries a non-empty
+// credential, it wins. Env stays as a fallback for server-only flows
+// (none exist today, but the pattern leaves room — e.g. an admin
+// recovery cron that wants to bypass user state). Desktop callers
+// pass the same body via the browser shell, so this doesn't regress
+// their flow.
+//
+// Short-circuit semantics use `||` deliberately (not `??`) so empty
+// strings — which a user clearing a field might send — fall through
+// to the env fallback instead of locking in an empty token.
 
 // Index signature — NodeJS.ProcessEnv is `{ [key: string]: string | undefined }`,
 // so a named-key interface would fail structural compatibility at the call site.
@@ -30,7 +48,7 @@ export function resolveInstagramCredentials(
   body: InstagramCredentialBody | undefined,
 ): ResolvedInstagramCredentials {
   return {
-    igAccountId: env.INSTAGRAM_ACCOUNT_ID ?? body?.igAccountId ?? '',
-    igAccessToken: env.INSTAGRAM_ACCESS_TOKEN ?? body?.accessToken ?? '',
+    igAccountId: body?.igAccountId?.trim() || env.INSTAGRAM_ACCOUNT_ID || '',
+    igAccessToken: body?.accessToken?.trim() || env.INSTAGRAM_ACCESS_TOKEN || '',
   };
 }
