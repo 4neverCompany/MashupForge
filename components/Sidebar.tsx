@@ -17,6 +17,26 @@ interface TrendSource {
   url: string;
 }
 
+/**
+ * Merge two source arrays into one, preferring the earlier entry when
+ * URLs collide. /api/trending and /api/ai/prompt's webSearch enrichment
+ * frequently surface the same news article from different aggregators
+ * — the de-dupe is what keeps the rendered list tight.
+ */
+function mergeSourcesByUrl(
+  existing: TrendSource[] | undefined,
+  incoming: TrendSource[],
+): TrendSource[] {
+  const seen = new Set<string>();
+  const out: TrendSource[] = [];
+  for (const src of [...(existing ?? []), ...incoming]) {
+    if (!src.url || seen.has(src.url)) continue;
+    seen.add(src.url);
+    out.push(src);
+  }
+  return out;
+}
+
 interface Message {
   id: string;
   role: 'user' | 'model';
@@ -72,6 +92,15 @@ export function Sidebar() {
           systemPrompt: systemInstruction,
           provider: settings.activeAiAgent,
           model: settings.activeTextModel,
+          onSources: (sources) => {
+            // Emitted by /api/ai/prompt before text deltas when web-
+            // search enrichment found hits. Append to the model's
+            // message so the "Trending sources" affordance renders
+            // alongside the streaming answer.
+            setChatMessages((prev) =>
+              prev.map((m) => (m.id === modelMsgId ? { ...m, trendingSources: mergeSourcesByUrl(m.trendingSources, sources) } : m))
+            );
+          },
         })) {
           acc += delta;
           setChatMessages((prev) =>
@@ -161,7 +190,21 @@ Return ONLY the JSON array, no prose.`;
         );
 
         let acc = '';
-        for await (const delta of streamAI(message, { mode: 'idea', provider: settings.activeAiAgent, model: settings.activeTextModel })) {
+        for await (const delta of streamAI(message, {
+          mode: 'idea',
+          provider: settings.activeAiAgent,
+          model: settings.activeTextModel,
+          onSources: (sources) => {
+            // /api/ai/prompt's DDG/Brave webSearch enrichment lands
+            // here; /api/trending's SearXNG+Reddit hits are already
+            // in `trendingResults` (collected pre-stream). Merge both
+            // by URL so the user sees a single source list with no
+            // duplicates.
+            setContentMessages((prev) =>
+              prev.map((m) => (m.id === modelMsgId ? { ...m, trendingSources: mergeSourcesByUrl(m.trendingSources, sources) } : m))
+            );
+          },
+        })) {
           acc += delta;
           setContentMessages((prev) =>
             prev.map((m) => (m.id === modelMsgId ? { ...m, text: acc, streaming: true } : m))
@@ -397,7 +440,7 @@ Return ONLY the JSON array, no prose.`;
             )}
             {msg.trendingSources && msg.trendingSources.length > 0 && (
               <div className="mt-2 space-y-1 w-full pl-2 border-l-2 border-[#00e6ff]/30">
-                <p className="text-xs text-zinc-500 font-medium">Trending sources:</p>
+                <p className="text-xs text-zinc-500 font-medium">Sources:</p>
                 {msg.trendingSources.map((src, j) =>
                   src.url ? (
                     <a

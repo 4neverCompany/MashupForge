@@ -334,10 +334,21 @@ export async function POST(req: Request): Promise<Response> {
   // benefit doesn't justify the latency cost or rate-limit footprint
   // for prompt-rewrite / metadata generation work.
   let enrichedMessage = message;
+  // Source attribution forwarded to the client via an SSE `sources`
+  // event before the text stream starts. Same shape as TrendSource in
+  // Sidebar.tsx so the existing trending-sources render path can show
+  // these alongside /api/trending hits without a separate UI affordance.
+  let gatheredSources: Array<{
+    topic: string;
+    headline: string;
+    source: string;
+    url: string;
+  }> = [];
   const shouldEnrich = mode === 'idea' || mode === 'chat';
   if (shouldEnrich) {
     let query: string;
     let enrichmentLabel: string;
+    let bucketLabel: string;
     if (mode === 'idea') {
       const queryParts = [
         'trending',
@@ -347,12 +358,14 @@ export async function POST(req: Request): Promise<Response> {
       ].filter((s) => s.length > 0);
       query = queryParts.join(' ');
       enrichmentLabel = 'Trending context for inspiration (recent search results, use as flavour, do not quote verbatim):';
+      bucketLabel = 'trending';
     } else {
       // chat mode — search backends (DDG/Brave) truncate around 400-500
       // chars; cap the query so long chat messages still produce useful
       // matches instead of being dropped.
       query = message.trim().slice(0, 400);
       enrichmentLabel = 'Recent web context for the question above (cite naturally only if relevant, do not invent URLs):';
+      bucketLabel = 'web search';
     }
 
     // Skip enrichment for trivially short chat messages (greetings,
@@ -364,8 +377,10 @@ export async function POST(req: Request): Promise<Response> {
         const { webSearch } = await import('@/lib/web-search');
         const results = await webSearch(query, 5);
         if (results.length > 0) {
-          const snippetLines = results
+          const top3 = results
             .slice(0, 3)
+            .filter((r) => r.title && r.snippet && r.url);
+          const snippetLines = top3
             .map((r) => `- ${r.title}: ${r.snippet}`)
             .filter((line) => line.length > 4);
           if (snippetLines.length > 0) {
@@ -376,9 +391,25 @@ export async function POST(req: Request): Promise<Response> {
               '\n' +
               snippetLines.join('\n');
           }
+          // Build source records for the UI badge regardless of whether
+          // the snippets met the enrichment threshold — the user benefits
+          // from knowing the source list even when a single hit doesn't
+          // produce a usable snippet line.
+          gatheredSources = top3.map((r) => {
+            let host = '';
+            try {
+              host = new URL(r.url).hostname.replace(/^www\./, '');
+            } catch {
+              // URL constructor throws on malformed input; fall back to
+              // the raw URL so the badge still has something to render.
+              host = r.url;
+            }
+            return { topic: bucketLabel, headline: r.title, source: host, url: r.url };
+          });
         }
       } catch {
-        // Non-critical — leave enrichedMessage as the original message.
+        // Non-critical — leave enrichedMessage as the original message
+        // and gatheredSources empty.
       }
     }
   }
@@ -409,6 +440,17 @@ export async function POST(req: Request): Promise<Response> {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
+        // Source attribution event — emitted before text deltas so the
+        // client can render the source-list affordance immediately,
+        // without waiting for the model to finish. Skipped when web
+        // search returned nothing usable (failed network, off-topic
+        // results filtered out, mode without enrichment).
+        if (gatheredSources.length > 0) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ sources: gatheredSources })}\n\n`),
+          );
+        }
+
         if (provider.name === 'minimax') {
           await streamMinimaxChat(controller, encoder, system, enrichedMessage, provider.modelId, textParams);
         } else {

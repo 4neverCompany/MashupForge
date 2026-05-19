@@ -36,6 +36,22 @@ export type PiMode =
   | 'negative-prompt'
   | 'collection-info';
 
+/**
+ * Source-attribution record emitted by `/api/ai/prompt` when web-search
+ * pre-enrichment yields hits (DDG/Brave snippets layered into the user
+ * message). Shape is intentionally identical to `TrendSource` in
+ * `Sidebar.tsx` so the existing trending-sources render path can show
+ * /api/trending + /api/ai/prompt sources side-by-side without a second
+ * UI affordance. The server fills `topic` with the bucket label
+ * (`'web search'` / `'trending'`) and `source` with the URL's hostname.
+ */
+export interface AiSource {
+  topic: string;
+  headline: string;
+  source: string;
+  url: string;
+}
+
 export interface StreamAIOptions {
   mode?: PiMode;
   systemPrompt?: string;
@@ -67,6 +83,15 @@ export interface StreamAIOptions {
    * env and ignores this field.
    */
   model?: string;
+  /**
+   * Invoked once per stream when the server emits a `sources` SSE
+   * event — currently /api/ai/prompt sends one immediately after the
+   * web-search pre-enrichment step, before any text deltas. Callbacks
+   * are best-effort; throwing from the callback aborts the stream.
+   * Non-vercel-ai providers don't emit this event and the callback
+   * never fires.
+   */
+  onSources?: (sources: AiSource[]) => void;
 }
 
 /**
@@ -149,6 +174,27 @@ export async function* streamAI(
         try {
           const parsed = JSON.parse(data) as Record<string, unknown>;
           if (parsed.error) throw new Error(String(parsed.error));
+          if (Array.isArray(parsed.sources) && options?.onSources) {
+            // Best-effort cast: server-side shape matches AiSource by
+            // construction (see /api/ai/prompt's sources emission).
+            // Filter defensively so a malformed entry doesn't poison
+            // the callback's downstream renderer.
+            const clean: AiSource[] = [];
+            for (const s of parsed.sources) {
+              if (s && typeof s === 'object') {
+                const r = s as Record<string, unknown>;
+                if (
+                  typeof r.topic === 'string' &&
+                  typeof r.headline === 'string' &&
+                  typeof r.source === 'string' &&
+                  typeof r.url === 'string'
+                ) {
+                  clean.push({ topic: r.topic, headline: r.headline, source: r.source, url: r.url });
+                }
+              }
+            }
+            if (clean.length > 0) options.onSources(clean);
+          }
           if (typeof parsed.text === 'string' && parsed.text.length > 0) {
             yield parsed.text;
           }
