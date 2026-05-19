@@ -4,6 +4,15 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.34 (2026-05-19)
+
+PROV-AGNOSTIC-PARAMS lands end-to-end: a vercel-ai user can now select MiniMax-M2.7 in Settings and idea-mode chats automatically run at temperature 0.95 / maxTokens 8192 with niches + genres injected, while pi/nca/mmx users see no behavioural change. Architecture doc: `docs/bmad/briefs/PROV-AGNOSTIC-PARAMS.md`.
+
+### Features
+- feat(model-specs): provider tagging schema + new `lib/model-specs/minimax-image-01.json`. Every existing spec carries a `provider` field (Leonardo for the 8 pre-existing image/video models, MiniMax for the first non-Leonardo entry). New `getModelProvider()` + `getModelSpecsByProvider()` helpers feed P2/P3.
+- feat(ai): engine provider-awareness + new `lib/text-model-specs.ts`. `suggestParameters` accepts an optional provider filter (back-compat: undefined leaves the engine in its prior all-providers mode). Text-gen params now have a typed home — six initial specs across MiniMax (M2.5 / M2.7 / M2.7-highspeed), OpenAI (gpt-4o-mini), Anthropic (claude-3-haiku), OpenRouter (openai/gpt-4o-mini) with shared per-mode temperature profile (idea 0.95, chat 0.8, generate 0.6, caption 0.7, enhance 0.5, tag/neg-prompt 0.3). `/api/ai/prompt` + `/api/ai/image` thread the params into both the MiniMax direct-fetch branch (snake_case `temperature` / `max_tokens` / `top_p`) and the `streamText` branch (camelCase).
+- feat(settings): Default Text Model picker + Image Model `<optgroup>` grouping. New "Default Text Model" dropdown renders only when `activeAiAgent === 'vercel-ai'`, optgroup'd by provider in the route's `resolveProvider` priority order. The image dropdown is renamed "Default Image Model" and gains provider-grouping `<optgroup>` blocks (Leonardo bucket first). New `settings.activeTextModel` field forwards through every streamAI callsite (Sidebar / useSocial / useImageGeneration / useCollections / MainContent) into `body.model`, which the route's `resolveProvider` already accepts as the model override.
+
 ## v0.9.33 (2026-05-17)
 
 ### Features
