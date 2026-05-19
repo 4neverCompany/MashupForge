@@ -71,6 +71,7 @@ export function Sidebar() {
           mode: 'chat',
           systemPrompt: systemInstruction,
           provider: settings.activeAiAgent,
+          model: settings.activeTextModel,
         })) {
           acc += delta;
           setChatMessages((prev) =>
@@ -160,7 +161,7 @@ Return ONLY the JSON array, no prose.`;
         );
 
         let acc = '';
-        for await (const delta of streamAI(message, { mode: 'idea', provider: settings.activeAiAgent })) {
+        for await (const delta of streamAI(message, { mode: 'idea', provider: settings.activeAiAgent, model: settings.activeTextModel })) {
           acc += delta;
           setContentMessages((prev) =>
             prev.map((m) => (m.id === modelMsgId ? { ...m, text: acc, streaming: true } : m))

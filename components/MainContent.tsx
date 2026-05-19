@@ -2034,7 +2034,7 @@ export function MainContent() {
         - Use 10 seconds for complex scenes, epic landscapes, or slow-motion.
         - Choose a style that fits the mood (e.g., Cinematic for epic scenes, Dynamic for action, Slow Motion for dramatic moments).
         Return ONLY a JSON object with keys "duration" (number) and "style" (string).`,
-          { mode: 'generate', provider: settings.activeAiAgent }
+          { mode: 'generate', provider: settings.activeAiAgent, model: settings.activeTextModel }
         );
         const dynamicSettings = extractJsonObjectFromLLM(dynamicText);
         const rawDuration = dynamicSettings.duration;
@@ -2059,7 +2059,7 @@ export function MainContent() {
       try {
         const enhanced = await streamAIToString(
           `The user wants to animate an image based on this prompt: "${img.prompt}". Enhance this prompt for a video animation. Focus heavily on "what if" scenarios, alternative universes, different timelines, and epic crossovers for Star Wars, Marvel, DC, and Warhammer 40k. Motion style: ${style}. Return ONLY the enhanced animation prompt as a single string.`,
-          { mode: 'enhance', provider: settings.activeAiAgent }
+          { mode: 'enhance', provider: settings.activeAiAgent, model: settings.activeTextModel }
         );
         if (enhanced.trim()) videoPrompt = enhanced.trim();
       } catch {
@@ -2129,7 +2129,7 @@ export function MainContent() {
             try {
               const text = await streamAIToString(
                 `Analyze this image prompt: "${prompt}". Generate 5-8 fitting tags (universe, character, style, theme). Return ONLY a JSON array of strings.`,
-                { mode: 'tag', provider: settings.activeAiAgent }
+                { mode: 'tag', provider: settings.activeAiAgent, model: settings.activeTextModel }
               );
               const parsed = extractJsonArrayFromLLM(text);
               const strTags = parsed.filter((t): t is string => typeof t === 'string');

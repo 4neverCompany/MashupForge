@@ -35,6 +35,7 @@ import {
   type GeneratedImage,
 } from './MashupContext';
 import type { UserSettings, WatermarkSettings } from '@/types/mashup';
+import { getAllTextModelSpecs } from '@/lib/text-model-specs';
 import { DesktopSettingsPanel } from './DesktopSettingsPanel';
 import type { SettingsSaveState } from '@/hooks/useSettings';
 import { APP_VERSION, getAppVersion } from '@/lib/app-version';
@@ -1286,17 +1287,92 @@ export function SettingsModal({
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
-                <label className="block text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Default Leonardo Model</label>
+                <label className="block text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Default Image Model</label>
                 <select
                   value={settings.defaultLeonardoModel}
                   onChange={(e) => updateSettings({ defaultLeonardoModel: e.target.value })}
                   className="w-full bg-zinc-950 border border-zinc-800/60 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30"
                 >
-                  {LEONARDO_MODELS.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
+                  {/* P3 of PROV-AGNOSTIC-PARAMS: group models by backend
+                      provider so the user can see at a glance which
+                      models go through Leonardo vs MiniMax's native
+                      image_generation endpoint. Undefined `provider` on
+                      pre-MXIMG-001 models bucketises as Leonardo. */}
+                  {(() => {
+                    const buckets = new Map<string, typeof LEONARDO_MODELS>();
+                    for (const m of LEONARDO_MODELS) {
+                      const p = m.provider ?? 'leonardo';
+                      const list = buckets.get(p) ?? [];
+                      list.push(m);
+                      buckets.set(p, list);
+                    }
+                    const providerLabel = (p: string) =>
+                      p === 'leonardo' ? 'Leonardo' :
+                      p === 'minimax' ? 'MiniMax' :
+                      p.charAt(0).toUpperCase() + p.slice(1);
+                    // Stable display order: Leonardo first (historical
+                    // default), then everything else alphabetical.
+                    const orderedProviders = Array.from(buckets.keys()).sort((a, b) => {
+                      if (a === 'leonardo') return -1;
+                      if (b === 'leonardo') return 1;
+                      return a.localeCompare(b);
+                    });
+                    return orderedProviders.map((p) => (
+                      <optgroup key={p} label={providerLabel(p)}>
+                        {(buckets.get(p) ?? []).map((m) => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </optgroup>
+                    ));
+                  })()}
                 </select>
               </div>
+
+              {/* P3 of PROV-AGNOSTIC-PARAMS: text-model picker. Only
+                  visible when vercel-ai is active — pi/nca/mmx select
+                  their text model server-side via subprocess flags and
+                  ignore body.model from this client. An empty selection
+                  means "use server default" (VERCEL_AI_MODEL env or the
+                  provider-built-in fallback in resolveProvider). */}
+              {activeAiAgent === 'vercel-ai' && (
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Default Text Model</label>
+                  <select
+                    value={settings.activeTextModel ?? ''}
+                    onChange={(e) => updateSettings({ activeTextModel: e.target.value || undefined })}
+                    className="w-full bg-zinc-950 border border-zinc-800/60 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30"
+                  >
+                    <option value="">— Server default —</option>
+                    {(() => {
+                      const buckets = new Map<string, ReturnType<typeof getAllTextModelSpecs>>();
+                      for (const s of getAllTextModelSpecs()) {
+                        const list = buckets.get(s.provider) ?? [];
+                        list.push(s);
+                        buckets.set(s.provider, list);
+                      }
+                      const providerLabel = (p: string) =>
+                        p === 'minimax' ? 'MiniMax' :
+                        p === 'openai' ? 'OpenAI' :
+                        p === 'anthropic' ? 'Anthropic' :
+                        p === 'openrouter' ? 'OpenRouter' :
+                        p.charAt(0).toUpperCase() + p.slice(1);
+                      // MiniMax-first ordering: the route's
+                      // resolveProvider chain prioritises MINIMAX_API_KEY,
+                      // so the picker mirrors that hierarchy.
+                      const order = ['minimax', 'openai', 'anthropic', 'openrouter'];
+                      return order
+                        .filter((p) => buckets.has(p))
+                        .map((p) => (
+                          <optgroup key={p} label={providerLabel(p)}>
+                            {(buckets.get(p) ?? []).map((s) => (
+                              <option key={s.modelId} value={s.modelId}>{s.modelId}</option>
+                            ))}
+                          </optgroup>
+                        ));
+                    })()}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
           </>

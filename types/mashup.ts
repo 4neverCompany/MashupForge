@@ -327,6 +327,17 @@ export interface UserSettings {
    * calls, no subprocess. Default for fresh installs.
    */
   aiAgentProvider?: 'pi' | 'nca' | 'mmx' | 'vercel-ai';
+  /**
+   * P3 of PROV-AGNOSTIC-PARAMS: user-selected text model for vercel-ai
+   * runs. When set, all vercel-ai prompt calls forward this through
+   * `streamAI({ model })` → `/api/ai/prompt body.model`, which the
+   * route's `resolveProvider` accepts as an override before falling
+   * back to the env-derived default. Only honoured under vercel-ai;
+   * pi/nca/mmx select their own model server-side via subprocess flags.
+   * Undefined → vercel-ai route picks the env-derived default
+   * (`VERCEL_AI_MODEL` env or per-provider built-in default).
+   */
+  activeTextModel?: string;
 }
 
 export type ViewType = 'studio' | 'gallery' | 'compare' | 'captioning' | 'post-ready' | 'ideas' | 'pipeline';
