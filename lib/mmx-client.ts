@@ -14,7 +14,6 @@
  *
  * NOT done in this module:
  *   - Caching, retries, rate limiting — caller's responsibility.
- *   - Image-provider fallback to Leonardo — see lib/image-generator.ts.
  *   - Public-asset wiring of file outputs (music, speech, video) — caller
  *     decides where to write and how to expose.
  */
