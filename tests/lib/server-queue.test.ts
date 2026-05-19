@@ -13,6 +13,10 @@ import {
   getResults,
   clearResult,
   computeFireAt,
+  getPostById,
+  setQStashMessageId,
+  claimPostById,
+  replacePost,
   __setRedisForTests,
   __KEYS_FOR_TESTS,
   type EnqueuedPost,
@@ -103,6 +107,11 @@ class MockRedis {
     const h = this.hashes.get(key);
     if (!h) return null;
     return Object.fromEntries(h.entries());
+  }
+
+  zscore(key: string, member: string) {
+    const z = this.zsets.get(key);
+    return z?.get(member) ?? null;
   }
 }
 
@@ -198,6 +207,98 @@ describe('claimDuePosts', () => {
     expect(claimed).toHaveLength(1);
     expect(claimed[0].caption).toBe('hi');
     expect(claimed[0].id).toBe('p1');
+  });
+});
+
+// QSTASH-DELIVERY: helpers added to support the push-trigger path
+// (cancel route reads qstashMessageId from getPostById, schedule route
+// attaches it via setQStashMessageId after publishing, deliver route
+// claims by id atomically via claimPostById).
+describe('getPostById', () => {
+  it('returns the post when present', async () => {
+    await enqueuePost(makeEnqueued({ id: 'a', caption: 'one' }));
+    const post = await getPostById('a');
+    expect(post?.caption).toBe('one');
+  });
+
+  it('returns null for an unknown id', async () => {
+    const post = await getPostById('missing');
+    expect(post).toBeNull();
+  });
+
+  it('does not claim or mutate the ZSET', async () => {
+    await enqueuePost(makeEnqueued({ id: 'a', fireAt: 100 }));
+    await getPostById('a');
+    expect(mock.zsets.get(__KEYS_FOR_TESTS.SCHEDULED)?.get('a')).toBe(100);
+  });
+});
+
+describe('setQStashMessageId', () => {
+  it('merges the messageId into the existing payload', async () => {
+    await enqueuePost(makeEnqueued({ id: 'a' }));
+    await setQStashMessageId('a', 'msg-123');
+    const post = await getPostById('a');
+    expect(post?.qstashMessageId).toBe('msg-123');
+  });
+
+  it('preserves other fields on the payload', async () => {
+    await enqueuePost(makeEnqueued({ id: 'a', caption: 'keep me' }));
+    await setQStashMessageId('a', 'msg-123');
+    const post = await getPostById('a');
+    expect(post?.caption).toBe('keep me');
+  });
+
+  it('no-ops when the post was already cancelled', async () => {
+    // No prior enqueue. The setter should not create a phantom entry —
+    // the QStash callback would later find Redis empty and skip cleanly.
+    await setQStashMessageId('ghost', 'msg-123');
+    expect(mock.hashes.get(__KEYS_FOR_TESTS.POSTS)?.get('ghost')).toBeUndefined();
+  });
+});
+
+describe('claimPostById', () => {
+  it('returns the post and removes it from both stores', async () => {
+    await enqueuePost(makeEnqueued({ id: 'a', caption: 'go' }));
+    const claimed = await claimPostById('a');
+    expect(claimed?.caption).toBe('go');
+    expect(mock.zsets.get(__KEYS_FOR_TESTS.SCHEDULED)?.get('a')).toBeUndefined();
+    expect(mock.hashes.get(__KEYS_FOR_TESTS.POSTS)?.get('a')).toBeUndefined();
+  });
+
+  it('returns null when the post is missing', async () => {
+    const claimed = await claimPostById('missing');
+    expect(claimed).toBeNull();
+  });
+
+  it('returns null on a second call (atomic claim guarantee)', async () => {
+    // Models the cron-vs-QStash race: only the first caller gets the post.
+    await enqueuePost(makeEnqueued({ id: 'a' }));
+    const first = await claimPostById('a');
+    const second = await claimPostById('a');
+    expect(first).not.toBeNull();
+    expect(second).toBeNull();
+  });
+
+  it('returns null when ZSET has the entry but payload is missing (orphan)', async () => {
+    mock.zsets.set(__KEYS_FOR_TESTS.SCHEDULED, new Map([['orphan', 100]]));
+    const claimed = await claimPostById('orphan');
+    expect(claimed).toBeNull();
+    // ZREM still ran (we ZREM before reading the hash), so the entry is gone.
+    expect(mock.zsets.get(__KEYS_FOR_TESTS.SCHEDULED)?.get('orphan')).toBeUndefined();
+  });
+});
+
+describe('replacePost', () => {
+  it('reports replaced=false on a fresh enqueue', async () => {
+    const { replaced } = await replacePost(makeEnqueued({ id: 'a' }));
+    expect(replaced).toBe(false);
+  });
+
+  it('reports replaced=true and updates score on a reschedule', async () => {
+    await replacePost(makeEnqueued({ id: 'a', fireAt: 100 }));
+    const { replaced } = await replacePost(makeEnqueued({ id: 'a', fireAt: 999 }));
+    expect(replaced).toBe(true);
+    expect(mock.zsets.get(__KEYS_FOR_TESTS.SCHEDULED)?.get('a')).toBe(999);
   });
 });
 

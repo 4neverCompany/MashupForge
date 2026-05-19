@@ -4,6 +4,18 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.36 (2026-05-16)
+
+Auto-post reliability: scheduled Instagram posts now fire on a push trigger instead of polling. Replaces the GitHub Actions cron (which the free tier was throttling to ~5 runs/day instead of the configured 288, leaving posts stranded in the Upstash Redis queue) with an Upstash QStash delayed HTTP callback. The cron stays as a defense-in-depth safety net, deduplicated via the existing atomic ZREM claim. Free-tier QStash (500 msgs/day) covers the 3–5 posts/day target with retry headroom.
+
+### Features
+- feat(social): Upstash QStash integration as the push-based trigger for scheduled posts. New `lib/qstash-client.ts` wraps `@upstash/qstash` (Client + Receiver) with `scheduleDelivery` / `cancelDelivery` / `verifyDelivery` + lazy env-driven init + test seam. `/api/queue/schedule` now publishes a delayed callback at `fireAt` after enqueueing in Redis; the QStash messageId is stored on the EnqueuedPost so reschedules cancel the prior callback before publishing the new one. `/api/queue/cancel` cancels the queued callback when the user rejects a post. New `/api/social/qstash-deliver` route verifies the Upstash signature, atomically claims the post from Redis via the new `claimPostById`, and fires through `/api/social/post` with the body-first credentials snapshot preserved. The GH Actions cron at `/api/social/cron-fire` is kept as a backstop — both paths claim via ZREM, so whichever arrives first wins and the loser returns 200/skipped.
+- feat(server-queue): `getPostById`, `setQStashMessageId`, `claimPostById` helpers. `EnqueuedPost` gains an optional `qstashMessageId` field. `replacePost` now finally has test coverage too.
+
+### Notes
+- Requires three new env vars on Vercel (production + preview): `QSTASH_TOKEN`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY` — provision via the Upstash QStash console (separate from Upstash Redis, despite the shared brand). Optional `QSTASH_DELIVERY_URL` overrides the resolver (defaults to `APP_URL` → `https://$VERCEL_URL`). With these unset, `isQStashConfigured()` returns false and the schedule path silently degrades to Redis-only, leaving the GH Actions cron as the sole drain (current behaviour).
+- QStash returns 200 on the deliver endpoint even when `/api/social/post` returns 4xx/5xx. We don't want QStash retrying a publish that may have partially succeeded on the platform side — the failure is captured in `markResult` and surfaces in `/api/queue/results` for the browser to reconcile.
+
 ## v0.9.35 (2026-05-19)
 
 ### Features

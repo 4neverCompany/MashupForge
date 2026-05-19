@@ -56,6 +56,13 @@ export interface EnqueuedPost {
    *  aren't set on the server. Without this, scheduled IG posts that
    *  worked in the browser silently failed when the cron fired them. */
   credentials?: SocialCredentials;
+  /** QSTASH-DELIVERY: id of the queued QStash message that will fire
+   *  this post. Persisted alongside the payload so cancel/reschedule
+   *  can call cancelDelivery without a second lookup. Absent when
+   *  QStash is unconfigured (Redis-only / GH-Actions-cron fallback) or
+   *  when publishing to QStash failed (we keep the Redis entry so the
+   *  cron safety net still drains it). */
+  qstashMessageId?: string;
 }
 
 export interface QueueResult {
@@ -150,6 +157,49 @@ export async function cancelPost(id: string): Promise<void> {
   pipe.zrem(KEY_SCHEDULED, id);
   pipe.hdel(KEY_POSTS, id);
   await pipe.exec();
+}
+
+/** QSTASH-DELIVERY: read a single post without claiming it. Used by
+ *  the cancel route to look up qstashMessageId before deleting, and by
+ *  callers that need to inspect state without atomic claim semantics.
+ *  Returns null when the post is unknown or its payload has already
+ *  been drained. */
+export async function getPostById(id: string): Promise<EnqueuedPost | null> {
+  const r = getRedis();
+  const raw = (await r.hget(KEY_POSTS, id)) as string | EnqueuedPost | null;
+  if (raw === null) return null;
+  return typeof raw === 'string' ? (JSON.parse(raw) as EnqueuedPost) : raw;
+}
+
+/** QSTASH-DELIVERY: attach a QStash message id to an already-enqueued
+ *  post. Best-effort: if the post was concurrently cancelled (no entry
+ *  in KEY_POSTS) we silently no-op — the QStash callback will land,
+ *  find Redis empty via claimPostById, and skip cleanly. */
+export async function setQStashMessageId(id: string, messageId: string): Promise<void> {
+  const r = getRedis();
+  const existing = await getPostById(id);
+  if (!existing) return;
+  const merged: EnqueuedPost = { ...existing, qstashMessageId: messageId };
+  await r.hset(KEY_POSTS, { [id]: JSON.stringify(merged) });
+}
+
+/**
+ * QSTASH-DELIVERY: atomic single-post claim used by the deliver route.
+ * QStash carries the payload too, but we still consult Redis to dedupe
+ * against the GH Actions safety-net cron: only the caller that
+ * successfully ZREMs takes ownership. Returns the live post if the
+ * caller claimed it (and clears the payload hash), or null if it's
+ * already been drained — letting the QStash delivery skip silently.
+ */
+export async function claimPostById(id: string): Promise<EnqueuedPost | null> {
+  const r = getRedis();
+  const removed = await r.zrem(KEY_SCHEDULED, id);
+  if (removed !== 1) return null;
+  const raw = (await r.hget(KEY_POSTS, id)) as string | EnqueuedPost | null;
+  if (raw === null) return null;
+  const post: EnqueuedPost = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  await r.hdel(KEY_POSTS, id);
+  return post;
 }
 
 /**
