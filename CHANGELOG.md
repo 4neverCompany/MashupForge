@@ -4,6 +4,14 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.35 (2026-05-19)
+
+### Features
+- feat(ai): source-attribution UI — the AI now shows which web sources it consulted. `/api/ai/prompt` emits a new `data: {"sources": [...]}` SSE event before the text stream when web-search enrichment (DDG with Brave fallback) returns hits; `streamAI` exposes an `onSources` callback. Sidebar's chat and content tabs both render the source list under the model bubble. Content tab merges the new server-side sources with the existing `/api/trending` hits (SearXNG + Reddit) into a single deduplicated list; chat tab gets source visibility for the first time. Existing "Trending sources" affordance reused — label widened to "Sources" since it now spans both buckets.
+
+### Fixes
+- fix(sidebar): idea-mode parse failure swallowed ideas and dumped the raw stream. Same root cause as the MXIMG-001 caption silent-fail — MiniMax-M2.5/M2.7 prefix output with `<think>…</think>` reasoning blocks, the bare `JSON.parse(cleaned)` in Sidebar's Content-tab handler threw on the leading `<`, the throw was swallowed by an empty catch, and ideas never landed on the Ideas Board (`addIdea` never fired). Replaced with `extractJsonArrayFromLLM(acc)` from `lib/aiClient`, which is already think-block-aware via `stripThinkBlocks` in `parseJsonFromLLM`.
+
 ## v0.9.34 (2026-05-19)
 
 PROV-AGNOSTIC-PARAMS lands end-to-end: a vercel-ai user can now select MiniMax-M2.7 in Settings and idea-mode chats automatically run at temperature 0.95 / maxTokens 8192 with niches + genres injected, while pi/nca/mmx users see no behavioural change. Architecture doc: `docs/bmad/briefs/PROV-AGNOSTIC-PARAMS.md`.
