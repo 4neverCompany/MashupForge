@@ -347,6 +347,90 @@ describe('suggestParameters', () => {
   });
 });
 
+describe('suggestParameters provider filter (P2 of PROV-AGNOSTIC-PARAMS)', () => {
+  // Mixed pool: 4 Leonardo + 1 MiniMax image model.
+  const mixedModels = [
+    ...models,
+    makeModel('minimax-image-01', { provider: 'minimax', apiModelId: 'image-01', version: 'v1' }),
+  ];
+  const mixedGuides: Record<string, string> = {
+    ...guides,
+    'minimax-image-01': 'minimax native image generation',
+  };
+
+  it('with no provider filter, every eligible model survives', () => {
+    const s = suggestParameters({
+      prompt: 'photorealistic mountains',
+      availableModels: mixedModels,
+      modelGuides: mixedGuides,
+      availableStyles: styles,
+      savedImages: [],
+    });
+    // nano-banana is excluded by default; the other 4 should all be present.
+    expect(s.modelIds).toContain('nano-banana-2');
+    expect(s.modelIds).toContain('nano-banana-pro');
+    expect(s.modelIds).toContain('gpt-image-1.5');
+    expect(s.modelIds).toContain('minimax-image-01');
+  });
+
+  it('provider=leonardo drops minimax-image-01 from the pool', () => {
+    const s = suggestParameters({
+      prompt: 'photorealistic mountains',
+      availableModels: mixedModels,
+      modelGuides: mixedGuides,
+      availableStyles: styles,
+      savedImages: [],
+      provider: 'leonardo',
+    });
+    expect(s.modelIds).not.toContain('minimax-image-01');
+    expect(s.modelIds).toContain('nano-banana-2');
+    expect(s.modelIds).toContain('nano-banana-pro');
+    expect(s.modelIds).toContain('gpt-image-1.5');
+    // perModel is a Record — its keys mirror modelIds.
+    expect(s.perModel['minimax-image-01']).toBeUndefined();
+  });
+
+  it('provider=minimax keeps only minimax-image-01', () => {
+    const s = suggestParameters({
+      prompt: 'photorealistic mountains',
+      availableModels: mixedModels,
+      modelGuides: mixedGuides,
+      availableStyles: styles,
+      savedImages: [],
+      provider: 'minimax',
+    });
+    expect(s.modelIds).toEqual(['minimax-image-01']);
+    expect(Object.keys(s.perModel)).toEqual(['minimax-image-01']);
+  });
+
+  it('treats absent provider on a model as leonardo (back-compat)', () => {
+    // nano-banana-2 has no `provider` field — every pre-MXIMG-001 model is
+    // implicitly Leonardo, which the filter must honour.
+    const s = suggestParameters({
+      prompt: 'photorealistic mountains',
+      availableModels: mixedModels,
+      modelGuides: mixedGuides,
+      availableStyles: styles,
+      savedImages: [],
+      provider: 'leonardo',
+    });
+    expect(s.modelIds).toContain('nano-banana-2');
+  });
+
+  it('provider with no matching models returns an empty pool', () => {
+    const s = suggestParameters({
+      prompt: 'photorealistic mountains',
+      availableModels: mixedModels,
+      modelGuides: mixedGuides,
+      availableStyles: styles,
+      savedImages: [],
+      provider: 'openai',
+    });
+    expect(s.modelIds).toEqual([]);
+    expect(s.perModel).toEqual({});
+  });
+});
+
 describe('suggestParametersAI (V082 deterministic delegate)', () => {
   const baseInput = {
     prompt: 'photorealistic mountains at dawn',

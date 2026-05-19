@@ -705,6 +705,21 @@ export const LEONARDO_MODEL_PARAMS: Record<string, LeonardoModelSpec> = {
     prompt_enhance: 'ON',
     supports_image_reference: false,
   },
+  'minimax-image-01': {
+    // P2 of PROV-AGNOSTIC-PARAMS — closes the gap discovered during
+    // the provider-filter tests. The model lives in LEONARDO_MODELS
+    // (UI config) and lib/model-specs/minimax-image-01.json (rich spec)
+    // but was missing from this slimmer map that `param-suggest` reads,
+    // so the rule engine returned an empty perModel entry for it.
+    type: 'image',
+    api_name: 'image-01',
+    width: 1024,
+    height: 1024,
+    supported_sizes: ['1024x1024'],
+    style_ids: false,
+    prompt_enhance: 'ON',
+    supports_image_reference: false,
+  },
   'kling-3.0': {
     type: 'video',
     width: 1920,

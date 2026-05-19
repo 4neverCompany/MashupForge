@@ -41,6 +41,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import type { LanguageModel } from 'ai';
 import { getErrorMessage } from '@/lib/errors';
+import { getTextModelParams, type TextGenParams } from '@/lib/text-model-specs';
 
 // Both the AI SDK provider clients and any future Node-only deps demand
 // the Node runtime — edge stripped fetch agents the SDK relies on.
@@ -153,6 +154,7 @@ async function streamMinimaxChat(
   system: string | undefined,
   userMessage: string,
   modelId: string,
+  params?: TextGenParams,
 ): Promise<void> {
   const baseURL =
     process.env.MINIMAX_API_BASE_URL?.trim() || 'https://api.minimaxi.chat/v1';
@@ -161,13 +163,26 @@ async function streamMinimaxChat(
   if (system) messages.push({ role: 'system', content: system });
   messages.push({ role: 'user', content: userMessage });
 
+  // MiniMax uses snake_case parameter names; the lib emits camelCase.
+  // Translate at the edge — only including each key when the caller
+  // supplied a value, so we never overwrite the API's own defaults
+  // with an explicit `undefined`.
+  const requestBody: Record<string, unknown> = {
+    model: modelId,
+    messages,
+    stream: true,
+  };
+  if (params?.temperature !== undefined) requestBody.temperature = params.temperature;
+  if (params?.maxTokens !== undefined) requestBody.max_tokens = params.maxTokens;
+  if (params?.topP !== undefined) requestBody.top_p = params.topP;
+
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${process.env.MINIMAX_API_KEY}`,
     },
-    body: JSON.stringify({ model: modelId, messages, stream: true }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!res.ok) {
@@ -368,6 +383,16 @@ export async function POST(req: Request): Promise<Response> {
     }
   }
 
+  // P2 of PROV-AGNOSTIC-PARAMS: resolve text-gen params for the active
+  // (model, mode) pair. The lib emits an empty object for models without
+  // a spec entry, which spreads cleanly into both branches below — so
+  // unknown / unspec'd models keep their previous unparameterised
+  // behaviour and only spec'd models get auto-tuned.
+  const textParams = getTextModelParams(
+    provider.modelId,
+    typeof mode === 'string' ? mode : undefined,
+  );
+
   const encoder = new TextEncoder();
 
   // Synthesise our own SSE stream. The SDK exposes textStream as an
@@ -385,12 +410,15 @@ export async function POST(req: Request): Promise<Response> {
     async start(controller) {
       try {
         if (provider.name === 'minimax') {
-          await streamMinimaxChat(controller, encoder, system, enrichedMessage, provider.modelId);
+          await streamMinimaxChat(controller, encoder, system, enrichedMessage, provider.modelId, textParams);
         } else {
           const result = streamText({
             model: provider.model,
             system,
             prompt: enrichedMessage,
+            ...(textParams.temperature !== undefined && { temperature: textParams.temperature }),
+            ...(textParams.maxTokens !== undefined && { maxTokens: textParams.maxTokens }),
+            ...(textParams.topP !== undefined && { topP: textParams.topP }),
           });
           for await (const delta of result.textStream) {
             if (!delta) continue;

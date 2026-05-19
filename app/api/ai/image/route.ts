@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getErrorMessage } from '@/lib/errors';
 import { MODEL_PROMPT_GUIDES, LEONARDO_MODELS } from '@/types/mashup';
+import { getTextModelParams } from '@/lib/text-model-specs';
 
 /**
  * vercel-ai image-generation orchestrator (Option B, hybrid).
@@ -139,13 +140,27 @@ async function enhanceViaMinimax(args: {
     { role: 'system' as const, content: args.system },
     { role: 'user' as const, content: args.userMessage },
   ];
+  // P2 of PROV-AGNOSTIC-PARAMS: pull the `enhance` mode profile from the
+  // text-model spec so the prompt rewrite stays focused (low temp). Falls
+  // back to an empty object when the modelId isn't spec'd — spread is a
+  // no-op then and the API sees its own defaults.
+  const params = getTextModelParams(modelId, 'enhance');
+  const requestBody: Record<string, unknown> = {
+    model: modelId,
+    messages,
+    stream: true,
+  };
+  if (params.temperature !== undefined) requestBody.temperature = params.temperature;
+  if (params.maxTokens !== undefined) requestBody.max_tokens = params.maxTokens;
+  if (params.topP !== undefined) requestBody.top_p = params.topP;
+
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ model: modelId, messages, stream: true }),
+    body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(45_000),
   });
   if (!res.ok) {

@@ -30,6 +30,7 @@ import type {
   LeonardoImageModelSpec,
 } from '@/types/mashup';
 import { LEONARDO_MODEL_PARAMS } from '@/types/mashup';
+import type { ModelSpecProvider } from '@/lib/model-specs';
 
 /**
  * Historically `'ai'` and `'ai+rules'` were possible values when the
@@ -136,6 +137,16 @@ export interface SuggestParametersInput {
   includedModelIds?: readonly string[];
   /** Per-model API parameter spec. Defaults to LEONARDO_MODEL_PARAMS. */
   modelParams?: Record<string, LeonardoModelSpec>;
+  /**
+   * P2 of PROV-AGNOSTIC-PARAMS — when set, narrow the candidate pool to
+   * models whose `LeonardoModelConfig.provider` matches. Undefined leaves
+   * the engine in its historical Leonardo-only behaviour (every model
+   * shipped before MXIMG-001 has no provider field; treated as
+   * `'leonardo'` by the filter). When set to `'minimax'`, only
+   * `minimax-image-01` survives the filter today; future MiniMax image
+   * models drop in without engine changes.
+   */
+  provider?: ModelSpecProvider;
 }
 
 // ── Heuristic rules ──────────────────────────────────────────────────────────
@@ -476,11 +487,22 @@ export function suggestParameters(input: SuggestParametersInput): ParamSuggestio
     excludedModelIds = ['nano-banana'],
     includedModelIds,
     modelParams = LEONARDO_MODEL_PARAMS,
+    provider,
   } = input;
 
   const promptTokens = tokenize(prompt);
   const excluded = new Set(excludedModelIds);
-  const eligible = availableModels.filter(m => !excluded.has(m.id));
+  // P2 of PROV-AGNOSTIC-PARAMS: when the caller passes a provider, drop
+  // models whose `LeonardoModelConfig.provider` doesn't match. Undefined
+  // provider on the model is treated as `'leonardo'` for back-compat —
+  // every spec shipped before MXIMG-001 omits the field and is implicitly
+  // Leonardo. When `provider` is undefined on the input, the filter is a
+  // no-op and the engine keeps its prior all-providers behaviour.
+  const eligible = availableModels.filter(m => {
+    if (excluded.has(m.id)) return false;
+    if (provider !== undefined && (m.provider ?? 'leonardo') !== provider) return false;
+    return true;
+  });
   const hints = deriveHints(prompt);
   const availableStyleNames = new Set(availableStyles.map(s => s.name));
 
