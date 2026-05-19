@@ -85,18 +85,27 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
       finalPrompt = parts.join('. ');
     }
 
-    const placeholders: GeneratedImage[] = modelIds.map((modelId, idx) => ({
-      id: `comp-placeholder-${Date.now()}-${idx}`,
-      comparisonId,
-      prompt: finalPrompt,
-      status: 'generating',
-      url: '',
-      modelInfo: {
-        provider: 'leonardo',
-        modelId,
-        modelName: getModelName(modelId)
-      }
-    }));
+    const placeholders: GeneratedImage[] = modelIds.map((modelId, idx) => {
+      // Resolve the placeholder's modelInfo.provider from the model
+      // registry rather than hardcoding 'leonardo' — minimax-image-01
+      // is the first non-Leonardo entry in LEONARDO_MODELS and the
+      // gallery / filters key off this field. Pre-MXIMG-001 models
+      // omit `provider` and fall back to 'leonardo' for back-compat.
+      const cfg = LEONARDO_MODELS.find(m => m.id === modelId);
+      const provider: 'leonardo' | 'minimax' = cfg?.provider ?? 'leonardo';
+      return {
+        id: `comp-placeholder-${Date.now()}-${idx}`,
+        comparisonId,
+        prompt: finalPrompt,
+        status: 'generating',
+        url: '',
+        modelInfo: {
+          provider,
+          modelId,
+          modelName: getModelName(modelId),
+        },
+      };
+    });
     setComparisonResults(prev => [...placeholders, ...prev]);
     setProgress('Preparing comparison...');
 
@@ -166,38 +175,81 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
             return match ? [match.uuid] : undefined;
           })();
 
-          const res = await fetch('/api/leonardo', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              prompt: modelPrompt,
-              modelId,
-              width: dims.width,
-              height: dims.height,
-              negative_prompt: modelNegPrompt,
-              styleIds: leonardoStyleUuids,
-              apiKey: settings.apiKeys.leonardo
-            }),
-          });
+          // Provider branch — minimax-image-01 (and any future MiniMax
+          // image models) route to /api/minimax-image, which calls
+          // MiniMax's native image_generation endpoint with a
+          // synchronous response (no polling). All other models stay on
+          // the Leonardo v2 submit-then-poll path. Mirrors the branching
+          // shipped to hooks/useImageGeneration.ts in MXIMG-001 — that
+          // hook's `generateImages` is destructured in several places
+          // but never actually invoked (Studio + Pipeline use this
+          // generateComparison path instead), which is why the routing
+          // gap survived until now.
+          const submitProvider: 'leonardo' | 'minimax' =
+            modelConfig?.provider ?? 'leonardo';
 
-          if (res.ok) {
-            const data = await res.json();
-            if (data.generationId) {
-              let status = 'PENDING';
-              let attempts = 0;
-              while (status !== 'COMPLETE' && attempts < 150) {
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                attempts++;
-                const statusRes = await fetch(`/api/leonardo/${data.generationId}`);
-                if (!statusRes.ok) break;
-                const statusData = await statusRes.json();
-                status = statusData.status;
-                if (status === 'COMPLETE') {
-                  imageUrl = statusData.url;
-                  imageId = statusData.imageId;
-                  seed = statusData.seed;
-                } else if (status === 'FAILED') {
-                  break;
+          if (submitProvider === 'minimax') {
+            const res = await fetch('/api/minimax-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt: modelPrompt,
+                aspectRatio: modelRatio,
+                width: dims.width,
+                height: dims.height,
+                n: 1,
+                // Short prompts get a bigger uplift from MiniMax's
+                // server-side prompt_optimizer; long ones already
+                // carry their own detail. Mirrors the threshold used
+                // in useImageGeneration.submitMinimaxImage.
+                promptOptimizer: modelPrompt.length < 180,
+              }),
+            });
+            if (res.ok) {
+              const data = (await res.json()) as {
+                images?: Array<{ url?: string; width?: number; height?: number }>;
+                generationId?: string;
+              };
+              const first = Array.isArray(data.images) ? data.images[0] : undefined;
+              if (first && typeof first.url === 'string' && first.url) {
+                imageUrl = first.url;
+                imageId = data.generationId ?? '';
+              }
+            }
+          } else {
+            const res = await fetch('/api/leonardo', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt: modelPrompt,
+                modelId,
+                width: dims.width,
+                height: dims.height,
+                negative_prompt: modelNegPrompt,
+                styleIds: leonardoStyleUuids,
+                apiKey: settings.apiKeys.leonardo
+              }),
+            });
+
+            if (res.ok) {
+              const data = await res.json();
+              if (data.generationId) {
+                let status = 'PENDING';
+                let attempts = 0;
+                while (status !== 'COMPLETE' && attempts < 150) {
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  attempts++;
+                  const statusRes = await fetch(`/api/leonardo/${data.generationId}`);
+                  if (!statusRes.ok) break;
+                  const statusData = await statusRes.json();
+                  status = statusData.status;
+                  if (status === 'COMPLETE') {
+                    imageUrl = statusData.url;
+                    imageId = statusData.imageId;
+                    seed = statusData.seed;
+                  } else if (status === 'FAILED') {
+                    break;
+                  }
                 }
               }
             }
@@ -219,7 +271,7 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
               aspectRatio: modelRatio,
               imageSize: options?.imageSize,
               style: modelStyle,
-              modelInfo: { provider: 'leonardo', modelId, modelName }
+              modelInfo: { provider: submitProvider, modelId, modelName }
             };
             setComparisonResults(prev => prev.map(img => img.id === placeholders[i].id ? newImg : img));
             readyImages.push(newImg);
