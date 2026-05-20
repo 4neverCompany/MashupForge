@@ -91,6 +91,7 @@ const PipelinePanel = dynamic(
 );
 import { streamAIToString, extractJsonArrayFromLLM, extractJsonObjectFromLLM } from '@/lib/aiClient';
 import { enhancePromptForModel } from '@/lib/modelOptimizer';
+import { getModelSpec } from '@/lib/model-specs';
 import { getErrorMessage } from '@/lib/errors';
 import { recordOutcome } from '@/lib/outcome-tracker';
 import { findPostingBlock, isStillScheduled } from '@/lib/post-approval-gate';
@@ -1863,14 +1864,31 @@ export function MainContent() {
     }
     setIsSuggesting(true);
     try {
-      const suggestion = await suggestParametersAI({
-        prompt: comparisonPrompt,
-        availableModels: LEONARDO_MODELS,
-        modelGuides: MODEL_PROMPT_GUIDES,
-        availableStyles: LEONARDO_SHARED_STYLES,
-        savedImages,
-        includedModelIds: comparisonModels,
-      });
+      // AI-PARAM-SUGGEST (2026-05-20): route the AI call through the
+      // user's selected text-AI backend (settings.activeAiAgent). The
+      // capability-aware post-filter inside suggestParametersAI strips
+      // any field the AI hallucinates that violates a model's spec, so
+      // we don't repeat the V082 failure of proposing styles for
+      // gpt-image-1.5 etc. If the AI fails / parse fails, it silently
+      // falls back to the rule engine.
+      const suggestion = await suggestParametersAI(
+        {
+          prompt: comparisonPrompt,
+          availableModels: LEONARDO_MODELS,
+          modelGuides: MODEL_PROMPT_GUIDES,
+          availableStyles: LEONARDO_SHARED_STYLES,
+          savedImages,
+          includedModelIds: comparisonModels,
+        },
+        {
+          aiCall: (message, signal) =>
+            streamAIToString(message, {
+              provider: settings.activeAiAgent,
+              mode: 'chat',
+              signal,
+            }),
+        },
+      );
       setParamSuggestion(suggestion);
     } finally {
       setIsSuggesting(false);
@@ -2524,6 +2542,12 @@ export function MainContent() {
                               );
                               const preview = modelPreviews[modelId];
                               const fallbackRatio = model?.aspectRatios?.[0]?.label || '1:1';
+                              // STYLE-AI-FIX (2026-05-20): only show the Style
+                              // pill / row when this model's spec actually
+                              // exposes a style parameter. Otherwise we're
+                              // misleading the user — gpt-image-*, minimax,
+                              // and every video model silently ignore style.
+                              const supportsStyles = getModelSpec(modelId)?.capabilities.styles !== false;
                               return (
                                 <div key={modelId} className="flex flex-col gap-1">
                                   <span className="text-[10px] font-mono text-zinc-500">
@@ -2533,8 +2557,12 @@ export function MainContent() {
                                     <details className="mt-2 text-xs border border-zinc-800/60 rounded-lg overflow-hidden">
                                       <summary className="px-3 py-2 cursor-pointer hover:bg-zinc-800/50 flex items-center gap-2 text-zinc-400">
                                         <span className="text-indigo-400">AI Optimized</span>
-                                        <span className="text-zinc-600">|</span>
-                                        <span>{preview.style || 'Auto'}</span>
+                                        {supportsStyles && (
+                                          <>
+                                            <span className="text-zinc-600">|</span>
+                                            <span>{preview.style || 'Auto'}</span>
+                                          </>
+                                        )}
                                         <span className="text-zinc-600">|</span>
                                         <span>{preview.aspectRatio || fallbackRatio}</span>
                                         {preview.negativePrompt && (
@@ -2551,7 +2579,7 @@ export function MainContent() {
                                             <p className="text-zinc-300 mt-0.5 max-h-[200px] overflow-y-auto whitespace-pre-wrap leading-relaxed">{preview.prompt}</p>
                                           </div>
                                         )}
-                                        {preview.style && (
+                                        {supportsStyles && preview.style && (
                                           <div>
                                             <span className="text-zinc-500 text-[10px] uppercase tracking-wider">Style</span>
                                             <p className="text-zinc-300 mt-0.5">{preview.style}</p>

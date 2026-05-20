@@ -184,14 +184,28 @@ Return ONLY the prompt text, nothing else.`;
           );
           let suggestedOptions: Partial<GenerateOptions> = {};
           try {
-            const suggestion = await suggestParametersAI({
-              prompt,
-              availableModels: LEONARDO_MODELS,
-              modelGuides: MODEL_PROMPT_GUIDES,
-              availableStyles: LEONARDO_SHARED_STYLES,
-              savedImages: [],
-              includedModelIds: modelIds,
-            });
+            // AI-PARAM-SUGGEST (2026-05-20): route through the user's
+            // text-AI backend. Capability post-filter in suggestParametersAI
+            // strips any field the AI hallucinates outside a model's spec,
+            // and any failure falls back silently to the rule engine.
+            const suggestion = await suggestParametersAI(
+              {
+                prompt,
+                availableModels: LEONARDO_MODELS,
+                modelGuides: MODEL_PROMPT_GUIDES,
+                availableStyles: LEONARDO_SHARED_STYLES,
+                savedImages: [],
+                includedModelIds: modelIds,
+              },
+              {
+                aiCall: (message, signal) =>
+                  streamAIToString(message, {
+                    provider: s.activeAiAgent,
+                    mode: 'chat',
+                    signal,
+                  }),
+              },
+            );
             // V090-PIPELINE-STYLE-DIVERSITY: extract per-model styles
             // from the suggestion so nano-banana siblings each get a
             // different style instead of all sharing the first model's pick.
