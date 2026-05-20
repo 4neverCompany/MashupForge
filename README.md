@@ -27,9 +27,10 @@
 | | |
 | :---: | :--- |
 | **Idea Generator** | AI brainstorms "what if" crossover scenarios across franchises, with taste controls and re-rolls. |
-| **Image Generation** | Turn any idea into artwork via Leonardo.ai — GPT Image-1.5, Nano Banana 2, Nano Banana Pro. |
+| **Image Generation** | Turn any idea into artwork across **MiniMax image-01**, **GPT Image 1.5 / 2**, and **Nano Banana / 2 / Pro**. |
 | **Compare Mode** | Run the same prompt across multiple models side-by-side and pick the winner. |
-| **Pipeline** | Automated flow: Ideas → Approve → Caption → Post Ready, with a smart scheduler. |
+| **Autonomous Pipeline** | Hands-free flow: Ideas → Approve → Caption → Post Ready → **Autopost**, with a smart scheduler. |
+| **Desktop App** | Tauri 2 shell with **system tray**, hide-on-close, **autostart on login**, and silent **auto-update**. |
 | **Chat Assistant** | Conversational AI for brainstorming, prompt refinement, and exploration. |
 
 ![Feature showcase — Idea Generator, Image Generation, Compare Mode, Autonomous Pipeline](assets/features.svg)
@@ -123,9 +124,9 @@ MashupForge/
 - **Framework:** Next.js 16 (Turbopack) + React 19
 - **Language:** TypeScript 5.9
 - **Styling:** Tailwind CSS 4 + `@tailwindcss/typography`
-- **Image AI:** Leonardo.ai v2 API
+- **Image AI:** Leonardo.ai v2 (Nano Banana family, GPT Image) + MiniMax `image-01`
 - **Text AI:** pi.dev RPC subprocess (local, multi-provider)
-- **Desktop:** Tauri 2
+- **Desktop:** Tauri 2 — system tray, autostart, auto-update, single-instance
 - **Testing:** Vitest + Testing Library + jsdom
 - **Storage:** `idb-keyval` (client-side persistence)
 
