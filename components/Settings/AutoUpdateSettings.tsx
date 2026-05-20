@@ -54,7 +54,7 @@ const WIN_MODE_HINTS: Record<WinInstallMode, string> = {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function ToggleRow({
+export function ToggleRow({
   label,
   description,
   enabled,
