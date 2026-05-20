@@ -23,8 +23,11 @@ src-tauri/resources/pi/
 src-tauri/resources/nca/
 dist/
 
-# Claude Code session files
-.claude/
+# Claude Code session files (everything except project-scoped rules,
+# which we DO want tracked so every clone / agent sees the same
+# guidance — e.g. .claude/rules/release-flow.md).
+.claude/*
+!.claude/rules/
 
 # Hermes Agent source (cloned for reference)
 hermes-agent/
