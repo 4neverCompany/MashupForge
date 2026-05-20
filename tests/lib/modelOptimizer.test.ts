@@ -46,4 +46,47 @@ describe('enhancePromptForModel', () => {
     const result = await enhancePromptForModel('x', 'nano-banana');
     expect(result.style).toBeUndefined();
   });
+
+  // STYLE-AI-FIX (2026-05-20): capability-aware style stripping. Mirrors the
+  // existing negativePrompt strip — models whose JSON spec declares
+  // `capabilities.styles: false` must not receive a style downstream, so the
+  // preview panel and the generation path can't surface a style the API
+  // would silently ignore.
+  describe('STYLE-AI-FIX — capability-aware style stripping', () => {
+    it('strips style for gpt-image-1.5 (capabilities.styles: false)', async () => {
+      const result = await enhancePromptForModel('x', 'gpt-image-1.5', {
+        style: 'Cinematic',
+      });
+      expect(result.style).toBeUndefined();
+    });
+
+    it('strips style for gpt-image-2 (capabilities.styles: false)', async () => {
+      const result = await enhancePromptForModel('x', 'gpt-image-2', {
+        style: 'Cinematic',
+      });
+      expect(result.style).toBeUndefined();
+    });
+
+    it('strips style for minimax-image-01 (capabilities.styles: false)', async () => {
+      const result = await enhancePromptForModel('x', 'minimax-image-01', {
+        style: 'Cinematic',
+      });
+      expect(result.style).toBeUndefined();
+    });
+
+    it('preserves style for nano-banana-2 (capabilities.styles: true)', async () => {
+      const result = await enhancePromptForModel('x', 'nano-banana-2', {
+        style: 'Cinematic',
+      });
+      expect(result.style).toBe('Cinematic');
+    });
+
+    it('preserves style for nano-banana-pro (capabilities.styles: true)', async () => {
+      const result = await enhancePromptForModel('x', 'nano-banana-pro', {
+        style: 'Cinematic',
+      });
+      expect(result.style).toBe('Cinematic');
+    });
+
+  });
 });

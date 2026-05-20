@@ -16,6 +16,7 @@
  */
 
 import { getLeonardoModel } from '../types/mashup';
+import { getModelSpec } from './model-specs';
 
 export interface ModelEnhancement {
   prompt: string;
@@ -35,8 +36,16 @@ export interface EnhanceOptions {
 
 /**
  * Return the base prompt unchanged and forward any metadata the caller
- * already has. gpt-image-1.5 rejects negative prompts entirely — we
- * strip them here so callers don't have to special-case it downstream.
+ * already has.
+ *
+ * gpt-image-1.5 rejects negative prompts entirely — we strip them here
+ * so callers don't have to special-case it downstream.
+ *
+ * STYLE-AI-FIX (2026-05-20): same posture for `style` — every model whose
+ * JSON spec sets `capabilities.styles: false` (gpt-image-*, minimax-
+ * image-01, all video models) silently ignores style at the API. Before
+ * this fix the per-model preview panel in MainContent showed a
+ * "Style: …" line for those models too, misleading the user.
  */
 export async function enhancePromptForModel(
   basePrompt: string,
@@ -44,6 +53,12 @@ export async function enhancePromptForModel(
   options?: EnhanceOptions
 ): Promise<ModelEnhancement> {
   const supportsNegPrompt = modelId !== 'gpt-image-1.5';
+  // Style support: spec lookup is the source of truth. Unregistered
+  // models default to "supports" so we don't regress on stragglers (the
+  // pre-fix behaviour was to always pass style through).
+  const caps = getModelSpec(modelId)?.capabilities;
+  const supportsStyles = caps ? caps.styles !== false : true;
+
   const modelConfig = getLeonardoModel(modelId);
 
   const aspectRatio =
@@ -53,7 +68,7 @@ export async function enhancePromptForModel(
 
   return {
     prompt: basePrompt,
-    style: options?.style,
+    style: supportsStyles ? options?.style : undefined,
     aspectRatio,
     negativePrompt: supportsNegPrompt ? options?.negativePrompt : undefined,
   };
