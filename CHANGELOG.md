@@ -4,6 +4,11 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.39] — 2026-05-20
+
+### Fixed
+- **autopost:** skip scheduled posts with malformed date/time
+
 ## [0.9.38] — 2026-05-20
 
 ### Fixed
