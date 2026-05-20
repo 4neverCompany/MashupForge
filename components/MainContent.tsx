@@ -94,6 +94,7 @@ import { enhancePromptForModel } from '@/lib/modelOptimizer';
 import { getErrorMessage } from '@/lib/errors';
 import { recordOutcome } from '@/lib/outcome-tracker';
 import { findPostingBlock, isStillScheduled } from '@/lib/post-approval-gate';
+import { postDueState } from '@/lib/autopost-due';
 import { getAllRejectedImageIds } from '@/lib/gallery-visibility';
 import { useSmartScheduler } from '@/hooks/useSmartScheduler';
 import { SmartScheduleModal } from './SmartScheduleModal';
@@ -1536,8 +1537,22 @@ export function MainContent() {
       for (const post of snapshot) {
         if (processedIds.has(post.id)) continue;
         if (post.status !== 'scheduled') continue;
-        const postDate = new Date(`${post.date}T${post.time}:00`);
-        if (now < postDate) continue;
+        // AUTOPOST-INVALID-DATE-FIX: see lib/autopost-due.ts. The previous
+        // inline `if (now < postDate) continue;` let malformed date/time
+        // fields fall through (Invalid Date comparisons are false) so
+        // single-image posts with corrupted scheduling fields fired
+        // unconditionally on the first auto-poster tick.
+        const due = postDueState(post, now);
+        if (due === 'invalid') {
+          console.error('[auto-poster] skipping post with invalid date/time', {
+            postId: post.id,
+            date: post.date,
+            time: post.time,
+            status: post.status,
+          });
+          continue;
+        }
+        if (due === 'future') continue;
 
         // ── Carousel branch ────────────────────────────────────────
         if (post.carouselGroupId) {
@@ -1547,10 +1562,7 @@ export function MainContent() {
 
           // They share a date/time by construction, but double-check
           // in case the user edited one of them.
-          const allDue = groupPosts.every((p) => {
-            const d = new Date(`${p.date}T${p.time}:00`);
-            return now >= d;
-          });
+          const allDue = groupPosts.every((p) => postDueState(p, now) === 'due');
           if (!allDue) {
             groupPosts.forEach((gp) => processedIds.add(gp.id));
             continue;
