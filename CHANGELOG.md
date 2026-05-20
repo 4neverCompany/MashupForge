@@ -4,6 +4,11 @@ All notable changes to MashupForge are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.38] — 2026-05-20
+
+### Fixed
+- **release:** align Cargo.toml version with package.json and tauri.conf.json
+
 ## v0.9.37 (2026-05-16)
 
 Simplification: strip the entire server-side scheduling stack — Upstash Redis queue, GitHub Actions cron, QStash push trigger — and revert Instagram posting to the browser-only path that predated SCHED-POST-ROBUST. Scheduled posts now fire from the open-tab auto-poster in `MainContent.tsx`; manual posts still go directly through `/api/social/post`. The body-first credential resolver from v0.9.34 (commit 48ed1b2) is kept. Trade-off accepted: scheduled posts no longer fire when the browser is closed, in exchange for zero server-side state and zero cron dependency.
