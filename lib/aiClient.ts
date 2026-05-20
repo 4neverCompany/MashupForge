@@ -222,7 +222,13 @@ export async function streamAIToString(
   for await (const delta of streamAI(message, options)) {
     out += delta;
   }
-  return out;
+  // Reasoning models (MiniMax-M2.5, GLM-5.1, DeepSeek-R1…) emit
+  // <think>…</think> chain-of-thought before the answer. Callers like
+  // expandIdeaToPrompt forward this string straight to Leonardo as an
+  // image prompt, so leaking reasoning tags corrupts generation for
+  // every non-MiniMax model. Strip here at the boundary; downstream
+  // JSON parsers re-strip idempotently.
+  return stripThinkBlocks(out);
 }
 
 /**
