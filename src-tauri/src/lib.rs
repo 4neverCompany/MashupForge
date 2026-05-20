@@ -7,10 +7,72 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use tauri::{Manager, WindowEvent};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, WindowEvent};
 
-/// Holds the running Node sidecar child so we can kill it on window close.
+/// Holds the running Node sidecar child so we can kill it on app quit.
 struct SidecarState(Mutex<Option<Child>>);
+
+/// Kill the Node sidecar process (if any). Used by both the tray's "Quit"
+/// menu item and any future explicit-shutdown path. Idempotent — safe to
+/// call when no sidecar exists or the mutex is poisoned.
+///
+/// FEAT-TRAY-AUTOSTART (2026-05-20): extracted out of the previous
+/// CloseRequested handler. With tray-hide behavior, closing the window
+/// no longer ends the app, so the kill path needed its own entry point.
+fn kill_sidecar(app: &AppHandle, reason: &str) {
+    let log_dir = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|p| p.join("logs"));
+    let log_to_startup = |line: &str| {
+        if let Some(ref ld) = log_dir {
+            startup_log_line(ld, line);
+        }
+    };
+
+    let Some(state) = app.try_state::<SidecarState>() else {
+        log_to_startup(&format!(
+            "{}: SidecarState not registered (skipping kill)",
+            reason
+        ));
+        return;
+    };
+    let mut guard = match state.0.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            log_to_startup(&format!(
+                "{}: SidecarState mutex poisoned ({}) — sidecar may leak",
+                reason, e
+            ));
+            return;
+        }
+    };
+    let Some(mut child) = guard.take() else {
+        log_to_startup(&format!(
+            "{}: no sidecar Child to kill (already taken or never spawned)",
+            reason
+        ));
+        return;
+    };
+    let pid = child.id();
+    log::info!("[tauri] {}: killing sidecar pid={}", reason, pid);
+    log_to_startup(&format!("{}: killing sidecar pid={}", reason, pid));
+    let kill_result = child.kill();
+    let wait_result = child.wait();
+    log_to_startup(&format!(
+        "{} pid={} kill={} wait={}",
+        reason,
+        pid,
+        if kill_result.is_ok() { "ok" } else { "err" },
+        wait_result
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|e| format!("err: {}", e)),
+    ));
+}
 
 /// Stable loopback port for the Next.js sidecar.
 ///
@@ -797,63 +859,88 @@ pub fn run() {
                 }
             });
 
+            // ---- step 6: system tray
+            //
+            // FEAT-TRAY-AUTOSTART (2026-05-20): the user closes the
+            // window expecting the app to "quit" but actually it hides
+            // to tray so the WebView (and its browser-only auto-poster)
+            // stays alive. The tray icon is the only path back to a
+            // visible window AND the only path to a real shutdown.
+            //
+            // - Left click on the tray icon → show + focus window.
+            // - "Öffnen" menu item → same.
+            // - "Beenden" menu item → kill_sidecar() then app.exit(0).
+            //   This is the only place the sidecar dies under normal
+            //   shutdown (the CloseRequested handler above no longer
+            //   kills it because closing is now "hide to tray").
+            let show_item = MenuItem::with_id(app, "show", "Öffnen", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Beenden", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+            let tray_icon = app
+                .default_window_icon()
+                .ok_or("no default window icon for tray")?
+                .clone();
+
+            let _tray = TrayIconBuilder::with_id("main")
+                .icon(tray_icon)
+                .tooltip("MashupForge")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        kill_sidecar(app, "Tray Quit");
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { .. } = event {
-                // Resolve log_dir up front so every branch below can write
-                // to startup.log — that's the file Maurice greps when
-                // debugging "is the sidecar actually being killed?" The
-                // tauri-plugin-log targets only emit when log::info! is
-                // called, but its output isn't easy to correlate with
-                // startup events. Mirroring to startup.log keeps the
-                // shutdown trace next to the spawn trace.
+            // FEAT-TRAY-AUTOSTART (2026-05-20): the X button hides the
+            // window to the system tray instead of quitting the app. The
+            // Node sidecar (and therefore the open WebView) stays alive
+            // so the browser-only auto-poster can keep firing while the
+            // user thinks the app is "closed." Real shutdown is reached
+            // exclusively through the tray's "Beenden" menu item, which
+            // calls kill_sidecar() then app.exit(0) — see the tray setup
+            // inside .setup() above.
+            if let WindowEvent::CloseRequested { api, .. } = event {
                 let log_dir = window
                     .app_handle()
                     .path()
                     .app_data_dir()
                     .ok()
                     .map(|p| p.join("logs"));
-                let log_to_startup = |line: &str| {
-                    if let Some(ref ld) = log_dir {
-                        startup_log_line(ld, line);
-                    }
-                };
-
-                let Some(state) = window.app_handle().try_state::<SidecarState>() else {
-                    log_to_startup("CloseRequested: SidecarState not registered (skipping kill)");
-                    return;
-                };
-                let mut guard = match state.0.lock() {
-                    Ok(g) => g,
-                    Err(e) => {
-                        log_to_startup(&format!(
-                            "CloseRequested: SidecarState mutex poisoned ({}) — sidecar may leak",
-                            e
-                        ));
-                        return;
-                    }
-                };
-                let Some(mut child) = guard.take() else {
-                    log_to_startup(
-                        "CloseRequested: no sidecar Child to kill (already taken or never spawned)",
-                    );
-                    return;
-                };
-                let pid = child.id();
-                log::info!("[tauri] CloseRequested: killing sidecar pid={}", pid);
-                log_to_startup(&format!("CloseRequested: killing sidecar pid={}", pid));
-                let kill_result = child.kill();
-                let wait_result = child.wait();
-                log_to_startup(&format!(
-                    "CloseRequested pid={} kill={} wait={}",
-                    pid,
-                    if kill_result.is_ok() { "ok" } else { "err" },
-                    wait_result
-                        .as_ref()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|e| format!("err: {}", e)),
-                ));
+                if let Some(ref ld) = log_dir {
+                    startup_log_line(ld, "CloseRequested: hiding to tray (sidecar stays alive)");
+                }
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .run(tauri::generate_context!())

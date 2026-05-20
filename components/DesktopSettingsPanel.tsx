@@ -13,6 +13,7 @@ import {
 } from '@/lib/desktop-config-keys';
 import { PortConflictBanner } from './PortConflictBanner';
 import { AutoUpdateSettings } from './Settings/AutoUpdateSettings';
+import { AutoStartSettings } from './Settings/AutoStartSettings';
 
 // Provider/model changes need pi to respawn so the new env reaches the
 // child process. The next prompt will auto-restart pi after stop().
@@ -504,6 +505,9 @@ export function DesktopSettingsPanel() {
         onFieldChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
         isDesktop={config.isDesktop}
       />
+
+      {/* Auto-Start subsection — Windows tray-icon companion (FEAT-TRAY-AUTOSTART). */}
+      <AutoStartSettings isDesktop={config.isDesktop} />
 
       {/* Auto-save status row (STORY-131) */}
       <div className="flex items-center gap-2 min-h-[1.25rem]" aria-live="polite">

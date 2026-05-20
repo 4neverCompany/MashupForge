@@ -64,10 +64,44 @@ function useOnboardingState(): [OnboardingState, (s: OnboardingState) => void] {
   return [state, setState];
 }
 
+// FEAT-TRAY-AUTOSTART (2026-05-20): on first ever launch inside the
+// Tauri desktop shell, enable OS-level autostart so the user gets the
+// "background-poster" behavior by default. Subsequent launches respect
+// whatever the user set in Settings → Auto-Start. The localStorage flag
+// is the one-shot gate — never re-runs once flipped.
+function useFirstLaunchAutostart() {
+  useEffect(() => {
+    const isTauri = typeof window !== 'undefined'
+      && typeof (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ !== 'undefined';
+    if (!isTauri) return;
+
+    const FLAG = 'mashup.autostartFirstRunDone';
+    try {
+      if (localStorage.getItem(FLAG) === '1') return;
+    } catch {
+      return; // private mode → don't risk re-enabling on every launch
+    }
+
+    void (async () => {
+      try {
+        const mod = await import('@tauri-apps/plugin-autostart');
+        const already = await mod.isEnabled();
+        if (!already) await mod.enable();
+        localStorage.setItem(FLAG, '1');
+      } catch {
+        // Silent — Settings → Auto-Start is the manual fallback. We
+        // intentionally don't set the flag on failure so a retry can
+        // happen on next launch.
+      }
+    })();
+  }, []);
+}
+
 function MashupApp() {
   const { isLoaded } = useMashup();
   const { isAuthenticated } = useAuth();
   const [onboarding, setOnboarding] = useOnboardingState();
+  useFirstLaunchAutostart();
 
   if (isAuthenticated === null || !isLoaded) {
     return <DesktopLoadingScreen />;
