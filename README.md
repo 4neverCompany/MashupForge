@@ -14,7 +14,7 @@
 [![pi.dev](https://img.shields.io/badge/pi.dev-RPC-00E6FF?style=for-the-badge)](https://pi.dev)
 
 [![License](https://img.shields.io/badge/License-Proprietary-050505?style=flat-square)](#license)
-[![Version](https://img.shields.io/badge/version-0.8.5-C5A062?style=flat-square)](package.json)
+[![Version](https://img.shields.io/badge/version-0.9.40-C5A062?style=flat-square)](package.json)
 
 ![MashupForge — AI-Powered Creative Crossover Studio](assets/hero.svg)
 
