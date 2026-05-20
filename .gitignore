@@ -29,3 +29,10 @@ dist/
 # Hermes Agent source (cloned for reference)
 hermes-agent/
 .env*.local
+
+# Per-project agent/skills tooling scratch (regenerable from skills-lock.json,
+# symlinks don't survive Windows checkout, NCA caches its own session state).
+.agents/
+.hermes/
+.nca/
+skills-lock.json
