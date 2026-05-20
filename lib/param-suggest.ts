@@ -31,6 +31,7 @@ import type {
 } from '@/types/mashup';
 import { LEONARDO_MODEL_PARAMS } from '@/types/mashup';
 import type { ModelSpecProvider } from '@/lib/model-specs';
+import { extractJsonObjectFromLLM } from '@/lib/aiClient';
 
 /**
  * Historically `'ai'` and `'ai+rules'` were possible values when the
@@ -712,46 +713,405 @@ export function buildRuleFallbackForModel(
   };
 }
 
-// ── V082-PARAM-SCRIPT: deterministic delegate (replaces pi.dev variant) ──────
+// ── AI-PARAM-SUGGEST (2026-05-20): AI variant re-introduced with guards ─────
+//
+// V082 retired the pi.dev variant because it hallucinated wrong values
+// for capability-aware models (proposing styles for gpt-image-1.5,
+// mis-mapping aspect ratios, etc.). The rule engine became the only
+// source of truth.
+//
+// This iteration brings the AI variant back, but with three guards that
+// V082 lacked:
+//
+//   1. The rule engine runs FIRST and becomes the baseline. The AI's
+//      job is to refine that baseline, not to author from scratch. If
+//      the AI fails (parse error, network, validation), we silently
+//      return the baseline.
+//   2. The AI prompt embeds an explicit capability table — every model
+//      gets a one-liner saying which fields are allowed. If the model
+//      still hallucinates outside the contract, step 3 catches it.
+//   3. `applyCapabilityFilter` walks every AI-authored field and drops
+//      anything that violates the spec, regardless of what the AI said.
+//      Style for gpt-image-1.5 → undefined. Negative prompt for
+//      gpt-image-1.5 → undefined. Aspect ratio outside the supported
+//      set → fallback to rule-engine choice. Unknown styles → undefined.
+//
+// The brief explicitly requested this re-introduction with the same
+// capability discipline that V082's failure was about. The filter is
+// the contract.
+//
+// `aiCall` is the only thing wired to the network — passed in by the
+// caller (MainContent / useIdeaProcessor) so this module stays
+// provider-agnostic and testable.
 
-/**
- * Options accepted by `suggestParametersAI` for back-compat. After V082
- * the function no longer calls pi.dev, so `signal` and `aiCall` are
- * accepted but ignored. `fallback` lets a caller swap the underlying
- * engine implementation, which is still useful in tests.
- */
 export interface SuggestParametersAIOptions {
-  /** Accepted for back-compat; the deterministic engine never blocks on IO. */
+  /** Optional abort plumbing for the AI call. */
   signal?: AbortSignal;
-  /** Accepted for back-compat; pi.dev path was removed in V082. */
-  aiCall?: (prompt: string, signal?: AbortSignal) => Promise<string>;
-  /** Override the rule engine. Defaults to suggestParameters. */
+  /**
+   * Inject an AI text-completion. Receives the fully-assembled prompt
+   * and an AbortSignal; returns the raw AI response text. Wire to
+   * `streamAIToString` at call sites.
+   *
+   * When omitted (or when the call throws), we fall back to the pure
+   * rule engine — never block the user on an AI hiccup.
+   */
+  aiCall?: (message: string, signal?: AbortSignal) => Promise<string>;
+  /** Override the rule engine baseline. Defaults to suggestParameters. */
   fallback?: (input: SuggestParametersInput) => ParamSuggestion;
 }
 
+const ALLOWED_ASPECTS_IMAGE = ['1:1', '2:3', '3:2', '9:16', '16:9', '3:4', '4:3', '4:5', '5:4'];
+const ALLOWED_ASPECTS_VIDEO = ['1:1', '9:16', '16:9'];
+
+/** Capability slice used by the AI prompt + the post-filter. */
+interface CapabilityRow {
+  modelId: string;
+  type: 'image' | 'video';
+  styles: boolean;
+  negativePrompt: boolean;
+  imageSize: boolean;
+  promptEnhance: boolean;
+  quality: boolean;
+  audio: boolean;
+}
+
+function buildCapabilityRows(
+  modelIds: readonly string[],
+  modelParams: Record<string, LeonardoModelSpec>,
+): CapabilityRow[] {
+  const rows: CapabilityRow[] = [];
+  for (const id of modelIds) {
+    const spec = modelParams[id];
+    if (!spec) continue;
+    rows.push({
+      modelId: id,
+      type: spec.type,
+      styles: spec.type === 'image' ? Boolean(spec.style_ids) : false,
+      // Mirrors the gpt-image-1.5 strip in lib/modelOptimizer.ts.
+      // (Spec capabilities.negativePrompt is wrong for nano-banana so
+      // we don't use it here.)
+      negativePrompt: id !== 'gpt-image-1.5',
+      imageSize: spec.type === 'image',
+      promptEnhance: spec.type === 'image',
+      quality:
+        spec.type === 'image' && Array.isArray(spec.quality) && spec.quality.length > 0,
+      audio: spec.type === 'video' && typeof spec.motion_has_audio === 'boolean',
+    });
+  }
+  return rows;
+}
+
+function renderCapabilityTable(rows: CapabilityRow[]): string {
+  return rows
+    .map((r) => {
+      const flags = [
+        r.styles ? 'style' : null,
+        r.negativePrompt ? 'negative' : null,
+        r.imageSize ? 'size' : null,
+        r.promptEnhance ? 'enhance' : null,
+        r.quality ? 'quality' : null,
+        r.audio ? 'audio' : null,
+      ].filter(Boolean);
+      return `- ${r.modelId} (${r.type}): ${flags.length ? flags.join(', ') : 'no extras'}`;
+    })
+    .join('\n');
+}
+
+function buildAIPrompt(
+  input: SuggestParametersInput,
+  baseline: ParamSuggestion,
+  modelParams: Record<string, LeonardoModelSpec>,
+): string {
+  const rows = buildCapabilityRows(baseline.modelIds, modelParams);
+  const styleList = input.availableStyles.map((s) => s.name).join(', ');
+  const baselineJson = JSON.stringify(
+    Object.fromEntries(
+      Object.entries(baseline.perModel).map(([id, e]) => [
+        id,
+        e.type === 'image'
+          ? {
+              aspectRatio: e.aspectRatio,
+              imageSize: e.imageSize,
+              quality: e.quality ?? null,
+              promptEnhance: e.promptEnhance,
+              style: e.style ?? null,
+              negativePrompt: e.negativePrompt ?? null,
+            }
+          : {
+              aspectRatio: e.aspectRatio,
+              duration: e.duration,
+              mode: e.mode,
+              motionHasAudio: e.motionHasAudio ?? null,
+            },
+      ]),
+    ),
+    null,
+    2,
+  );
+  return `You are tuning image/video generation parameters for a set of AI models. Return ONLY a JSON object — no preamble, no commentary, no markdown fences.
+
+User prompt:
+"""
+${input.prompt}
+"""
+
+Model capabilities (only set fields the model lists; ignore everything else):
+${renderCapabilityTable(rows)}
+
+Available style names (use one of these or null):
+${styleList || '(none available)'}
+
+Allowed aspect ratios for image models: ${ALLOWED_ASPECTS_IMAGE.join(', ')}
+Allowed aspect ratios for video models: ${ALLOWED_ASPECTS_VIDEO.join(', ')}
+Allowed imageSize: "1K" or "2K"
+Allowed quality (image models that list it): "LOW", "MEDIUM", "HIGH"
+Allowed promptEnhance: "ON" or "OFF"
+
+Rule-engine baseline (use this as a starting point — refine where you have a stronger signal):
+${baselineJson}
+
+Output schema — return EXACTLY this shape:
+{
+  "perModel": {
+    "<modelId>": {
+      "aspectRatio": "1:1" | "2:3" | ... ,
+      "imageSize": "1K" | "2K",        // image only
+      "quality": "HIGH" | null,         // image only, only if model lists quality
+      "promptEnhance": "ON" | "OFF",    // image only
+      "style": "<style name>" | null,   // image only, only if model lists style
+      "negativePrompt": "..." | null,   // image only, only if model lists negative
+      "duration": 5,                    // video only
+      "mode": "RESOLUTION_720" | "RESOLUTION_1080",  // video only
+      "motionHasAudio": true | false | null,         // video only, only if model lists audio
+      "reason": "1-2 sentence rationale"
+    }
+  },
+  "overall": "1-2 sentence summary of the strategy across models"
+}
+
+Use null (not omit) for fields the model doesn't list. Do not invent new fields. Do not change the modelId keys.`;
+}
+
+function isAllowedAspect(value: unknown, type: 'image' | 'video'): value is string {
+  const allowed = type === 'image' ? ALLOWED_ASPECTS_IMAGE : ALLOWED_ASPECTS_VIDEO;
+  return typeof value === 'string' && allowed.includes(value);
+}
+
 /**
- * V082-PARAM-SCRIPT: thin async wrapper around `suggestParameters`. The
- * pi.dev variant was producing wrong values for capability-aware models
- * (proposing styles for gpt-image-1.5, mis-mapping aspect ratios, etc.)
- * so it was retired. The deterministic rule engine already reads the
- * prompt for subject/style/theme cues and respects each model's spec
- * capabilities, which is exactly what the AI variant was supposed to do
- * — minus the hallucinations.
+ * Merge an AI-authored per-model entry into the baseline. Every field
+ * is capability-checked against `row`; anything that violates the spec
+ * is dropped silently and the baseline's value is kept instead.
  *
- * Kept as `suggestParametersAI` (and async) so the production injection
- * point in `MainContent.tsx` and the `pushIdeaToStudio` dependency shape
- * stay unchanged.
+ * Returns the merged entry plus whether ANY field was actually
+ * overridden by the AI — used to decide between 'ai' / 'ai+rules' /
+ * 'rules' source labels downstream.
+ */
+function mergeOneEntry(
+  baseline: PerModelSuggestion,
+  aiRaw: Record<string, unknown>,
+  row: CapabilityRow,
+  availableStyleNames: Set<string>,
+): { entry: PerModelSuggestion; aiTouched: boolean } {
+  let aiTouched = false;
+  const aiReason = typeof aiRaw.reason === 'string' ? aiRaw.reason.trim() : '';
+
+  if (baseline.type === 'image' && row.type === 'image') {
+    const next: PerModelImageSuggestion = { ...baseline };
+
+    if (isAllowedAspect(aiRaw.aspectRatio, 'image')) {
+      // Resolve width/height by reusing the rule engine's mapping. The
+      // baseline already has a (width, height) for its chosen aspect;
+      // if the AI picks a different one we just inherit baseline w/h
+      // unless we have a better source. Keeping it simple: trust the
+      // model spec on dimensions — they're 1024×1024 across the
+      // current image set, so aspectRatio is purely a labelling change
+      // that downstream consumers re-resolve when calling the API.
+      if (next.aspectRatio !== aiRaw.aspectRatio) aiTouched = true;
+      next.aspectRatio = aiRaw.aspectRatio as string;
+    }
+    if (aiRaw.imageSize === '1K' || aiRaw.imageSize === '2K') {
+      if (next.imageSize !== aiRaw.imageSize) aiTouched = true;
+      next.imageSize = aiRaw.imageSize;
+    }
+    if (row.quality && (aiRaw.quality === 'LOW' || aiRaw.quality === 'MEDIUM' || aiRaw.quality === 'HIGH')) {
+      if (next.quality !== aiRaw.quality) aiTouched = true;
+      next.quality = aiRaw.quality;
+    } else if (!row.quality) {
+      next.quality = undefined;
+    }
+    if (aiRaw.promptEnhance === 'ON' || aiRaw.promptEnhance === 'OFF') {
+      if (next.promptEnhance !== aiRaw.promptEnhance) aiTouched = true;
+      next.promptEnhance = aiRaw.promptEnhance;
+    }
+    if (row.styles) {
+      if (typeof aiRaw.style === 'string' && availableStyleNames.has(aiRaw.style)) {
+        if (next.style !== aiRaw.style) aiTouched = true;
+        next.style = aiRaw.style;
+      } else if (aiRaw.style === null) {
+        if (next.style !== undefined) aiTouched = true;
+        next.style = undefined;
+      }
+    } else {
+      // Capability filter: model has no style param. Always undefined.
+      next.style = undefined;
+    }
+    if (row.negativePrompt) {
+      if (typeof aiRaw.negativePrompt === 'string' && aiRaw.negativePrompt.trim()) {
+        if (next.negativePrompt !== aiRaw.negativePrompt) aiTouched = true;
+        next.negativePrompt = aiRaw.negativePrompt.trim();
+      } else if (aiRaw.negativePrompt === null) {
+        if (next.negativePrompt !== undefined) aiTouched = true;
+        next.negativePrompt = undefined;
+      }
+    } else {
+      next.negativePrompt = undefined;
+    }
+
+    if (aiReason) next.reason = aiReason;
+    next.source = aiTouched ? 'ai' : 'rules';
+    return { entry: next, aiTouched };
+  }
+
+  if (baseline.type === 'video' && row.type === 'video') {
+    const next: PerModelVideoSuggestion = { ...baseline };
+
+    if (isAllowedAspect(aiRaw.aspectRatio, 'video')) {
+      if (next.aspectRatio !== aiRaw.aspectRatio) aiTouched = true;
+      next.aspectRatio = aiRaw.aspectRatio as string;
+    }
+    if (typeof aiRaw.duration === 'number' && aiRaw.duration > 0 && aiRaw.duration <= 30) {
+      if (next.duration !== aiRaw.duration) aiTouched = true;
+      next.duration = aiRaw.duration;
+    }
+    if (aiRaw.mode === 'RESOLUTION_720' || aiRaw.mode === 'RESOLUTION_1080') {
+      if (next.mode !== aiRaw.mode) aiTouched = true;
+      next.mode = aiRaw.mode;
+    }
+    if (row.audio) {
+      if (typeof aiRaw.motionHasAudio === 'boolean') {
+        if (next.motionHasAudio !== aiRaw.motionHasAudio) aiTouched = true;
+        next.motionHasAudio = aiRaw.motionHasAudio;
+      } else if (aiRaw.motionHasAudio === null) {
+        next.motionHasAudio = undefined;
+      }
+    } else {
+      next.motionHasAudio = undefined;
+    }
+
+    if (aiReason) next.reason = aiReason;
+    next.source = aiTouched ? 'ai' : 'rules';
+    return { entry: next, aiTouched };
+  }
+
+  return { entry: baseline, aiTouched: false };
+}
+
+/**
+ * Capability-aware merge of an AI JSON response into the rule-engine
+ * baseline. Every per-model field is validated; anything that violates
+ * the spec is dropped and the baseline value is kept.
+ *
+ * Returns the merged ParamSuggestion. Source label resolves to:
+ *   - 'ai'        — every selected model got at least one AI override
+ *   - 'ai+rules'  — some models were AI-touched, others fell back
+ *   - 'rules'     — no model was AI-touched (response was useless)
+ *
+ * Exported for unit testing without going through `suggestParametersAI`.
+ */
+export function applyCapabilityFilter(
+  parsed: Record<string, unknown>,
+  baseline: ParamSuggestion,
+  input: SuggestParametersInput,
+  modelParams: Record<string, LeonardoModelSpec> = LEONARDO_MODEL_PARAMS,
+): ParamSuggestion {
+  const aiPerModel =
+    parsed.perModel && typeof parsed.perModel === 'object'
+      ? (parsed.perModel as Record<string, Record<string, unknown>>)
+      : {};
+  const overall = typeof parsed.overall === 'string' ? parsed.overall : undefined;
+
+  const rows = buildCapabilityRows(baseline.modelIds, modelParams);
+  const rowById = new Map(rows.map((r) => [r.modelId, r]));
+  const availableStyleNames = new Set(input.availableStyles.map((s) => s.name));
+
+  const mergedPerModel: Record<string, PerModelSuggestion> = {};
+  let touchedAny = false;
+  let touchedAll = true;
+  for (const id of baseline.modelIds) {
+    const base = baseline.perModel[id];
+    const row = rowById.get(id);
+    const aiEntry = aiPerModel[id];
+    if (!base) continue;
+    if (!row || !aiEntry || typeof aiEntry !== 'object') {
+      mergedPerModel[id] = base;
+      touchedAll = false;
+      continue;
+    }
+    const { entry, aiTouched } = mergeOneEntry(base, aiEntry, row, availableStyleNames);
+    mergedPerModel[id] = entry;
+    if (aiTouched) touchedAny = true;
+    else touchedAll = false;
+  }
+
+  const source: SuggestionSource = touchedAll && touchedAny
+    ? 'ai'
+    : touchedAny
+      ? 'ai+rules'
+      : 'rules';
+
+  const firstId = baseline.modelIds[0];
+  const first = firstId ? mergedPerModel[firstId] : undefined;
+
+  return {
+    ...baseline,
+    perModel: mergedPerModel,
+    aspectRatio: first?.aspectRatio ?? baseline.aspectRatio,
+    style: first?.type === 'image' ? first.style : baseline.style,
+    imageSize: first?.type === 'image' ? first.imageSize : baseline.imageSize,
+    quality: first?.type === 'image' ? first.quality : baseline.quality,
+    promptEnhance: first?.type === 'image' ? first.promptEnhance : baseline.promptEnhance,
+    negativePrompt:
+      first?.type === 'image' ? first.negativePrompt : baseline.negativePrompt,
+    reasons: {
+      ...baseline.reasons,
+      overall: overall ?? baseline.reasons.overall,
+    },
+    source,
+  };
+}
+
+/**
+ * AI-tuned parameter suggestion with rule-engine fallback.
+ *
+ * When `options.aiCall` is wired (real callers) AND the call returns a
+ * parseable JSON response, the AI's overrides are merged into the rule-
+ * engine baseline through `applyCapabilityFilter` — so the user gets
+ * AI judgment for fields the AI got right, AND rule-engine values for
+ * everything the AI hallucinated, never the other way around.
+ *
+ * When `aiCall` is omitted, the response can't be parsed, or anything
+ * throws, the function returns the pure rule-engine baseline. Failure
+ * is silent and never blocks the user.
  */
 export async function suggestParametersAI(
   input: SuggestParametersInput,
   options: SuggestParametersAIOptions = {},
 ): Promise<ParamSuggestion> {
   const fallbackFn = options.fallback ?? suggestParameters;
-  return Promise.resolve(fallbackFn(input));
-}
+  const baseline = fallbackFn(input);
 
-// V082-PARAM-SCRIPT: helpers below this point (renderModelSpecBlock,
-// buildPerModelPromptPayload, mergePerModelAI, resolveStyleAlias,
-// buildAIPromptPayload, etc.) supported the pi.dev variant. They
-// were removed when suggestParametersAI became a deterministic
-// delegate — see commit V082-PARAM-SCRIPT.
+  if (!options.aiCall) return baseline;
+  if (baseline.modelIds.length === 0) return baseline;
+
+  try {
+    const modelParams = input.modelParams ?? LEONARDO_MODEL_PARAMS;
+    const prompt = buildAIPrompt(input, baseline, modelParams);
+    const raw = await options.aiCall(prompt, options.signal);
+    if (!raw || typeof raw !== 'string') return baseline;
+    const parsed = extractJsonObjectFromLLM(raw);
+    if (!parsed || Object.keys(parsed).length === 0) return baseline;
+    return applyCapabilityFilter(parsed, baseline, input, modelParams);
+  } catch {
+    return baseline;
+  }
+}

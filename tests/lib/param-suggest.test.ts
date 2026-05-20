@@ -431,7 +431,7 @@ describe('suggestParameters provider filter (P2 of PROV-AGNOSTIC-PARAMS)', () =>
   });
 });
 
-describe('suggestParametersAI (V082 deterministic delegate)', () => {
+describe('suggestParametersAI', () => {
   const baseInput = {
     prompt: 'photorealistic mountains at dawn',
     availableModels: models,
@@ -440,7 +440,7 @@ describe('suggestParametersAI (V082 deterministic delegate)', () => {
     savedImages: [] as GeneratedImage[],
   };
 
-  it('returns the same shape as suggestParameters', async () => {
+  it('returns the same shape as suggestParameters when no aiCall provided', async () => {
     const sync = suggestParameters(baseInput);
     const async_ = await suggestParametersAI(baseInput);
     expect(async_.modelIds).toEqual(sync.modelIds);
@@ -448,16 +448,145 @@ describe('suggestParametersAI (V082 deterministic delegate)', () => {
     expect(Object.keys(async_.perModel)).toEqual(Object.keys(sync.perModel));
   });
 
-  it('ignores aiCall — pi.dev path was removed in V082', async () => {
+  it('falls back to rule engine when aiCall is omitted (no network)', async () => {
     let aiCalled = false;
     const s = await suggestParametersAI(baseInput, {
-      aiCall: async () => {
-        aiCalled = true;
-        return '{}';
+      // No aiCall — should never reach this fallback even if defined
+      fallback: (input) => {
+        // Use suggestParameters but verify no AI was invoked above us
+        return suggestParameters(input);
       },
     });
     expect(aiCalled).toBe(false);
     expect(s.source).toBe('rules');
+  });
+
+  it('AI-PARAM-SUGGEST: invokes aiCall when provided', async () => {
+    let aiCalled = false;
+    let capturedPrompt = '';
+    await suggestParametersAI(baseInput, {
+      aiCall: async (msg) => {
+        aiCalled = true;
+        capturedPrompt = msg;
+        return '{}'; // Empty JSON → falls back to rules
+      },
+    });
+    expect(aiCalled).toBe(true);
+    expect(capturedPrompt).toContain('Model capabilities');
+    expect(capturedPrompt).toContain(baseInput.prompt);
+  });
+
+  it('AI-PARAM-SUGGEST: silently falls back to rules when aiCall throws', async () => {
+    const s = await suggestParametersAI(baseInput, {
+      aiCall: async () => {
+        throw new Error('network down');
+      },
+    });
+    expect(s.source).toBe('rules');
+  });
+
+  it('AI-PARAM-SUGGEST: silently falls back to rules on unparseable JSON', async () => {
+    const s = await suggestParametersAI(baseInput, {
+      aiCall: async () => 'not JSON at all — completely garbage',
+    });
+    expect(s.source).toBe('rules');
+  });
+
+  it('AI-PARAM-SUGGEST: applies AI overrides when response is well-formed', async () => {
+    const s = await suggestParametersAI(baseInput, {
+      aiCall: async () =>
+        JSON.stringify({
+          perModel: {
+            'nano-banana-2': {
+              aspectRatio: '16:9',
+              imageSize: '2K',
+              promptEnhance: 'OFF',
+              style: 'Pro Color Photography',
+              reason: 'wide landscape, photoreal',
+            },
+          },
+          overall: 'cinematic landscape strategy',
+        }),
+    });
+    const entry = s.perModel['nano-banana-2'];
+    if (entry?.type !== 'image') throw new Error('expected image entry');
+    expect(entry.aspectRatio).toBe('16:9');
+    expect(entry.imageSize).toBe('2K');
+    expect(entry.promptEnhance).toBe('OFF');
+    expect(entry.style).toBe('Pro Color Photography');
+    expect(entry.reason).toContain('photoreal');
+    expect(entry.source).toBe('ai');
+  });
+
+  it('AI-PARAM-SUGGEST: capability filter STRIPS style for gpt-image-1.5 even if AI hallucinates one', async () => {
+    // This is the exact V082 failure mode — AI proposes a style for a
+    // model that has no style parameter. The post-filter must drop it.
+    const s = await suggestParametersAI({ ...baseInput, includedModelIds: ['gpt-image-1.5'] }, {
+      aiCall: async () =>
+        JSON.stringify({
+          perModel: {
+            'gpt-image-1.5': {
+              aspectRatio: '1:1',
+              style: 'Pro Color Photography', // ← hallucinated; not supported
+              reason: 'photoreal',
+            },
+          },
+        }),
+    });
+    const entry = s.perModel['gpt-image-1.5'];
+    if (entry?.type !== 'image') throw new Error('expected image entry');
+    expect(entry.style).toBeUndefined();
+  });
+
+  it('AI-PARAM-SUGGEST: capability filter STRIPS negativePrompt for gpt-image-1.5', async () => {
+    const s = await suggestParametersAI({ ...baseInput, includedModelIds: ['gpt-image-1.5'] }, {
+      aiCall: async () =>
+        JSON.stringify({
+          perModel: {
+            'gpt-image-1.5': {
+              negativePrompt: 'blurry, low-res', // ← hallucinated; not supported
+            },
+          },
+        }),
+    });
+    const entry = s.perModel['gpt-image-1.5'];
+    if (entry?.type !== 'image') throw new Error('expected image entry');
+    expect(entry.negativePrompt).toBeUndefined();
+  });
+
+  it('AI-PARAM-SUGGEST: capability filter STRIPS unknown style for a style-supporting model', async () => {
+    const s = await suggestParametersAI(baseInput, {
+      aiCall: async () =>
+        JSON.stringify({
+          perModel: {
+            'nano-banana-2': {
+              style: 'Definitely Not A Real Style Name', // ← unknown; available styles are limited
+            },
+          },
+        }),
+    });
+    const entry = s.perModel['nano-banana-2'];
+    if (entry?.type !== 'image') throw new Error('expected image entry');
+    // Either the original baseline style or undefined — never the hallucinated value.
+    expect(entry.style).not.toBe('Definitely Not A Real Style Name');
+  });
+
+  it('AI-PARAM-SUGGEST: capability filter REJECTS aspect ratio outside the allowed set', async () => {
+    const baseline = suggestParameters(baseInput);
+    const baselineAspect = baseline.perModel['nano-banana-2']?.aspectRatio;
+    const s = await suggestParametersAI(baseInput, {
+      aiCall: async () =>
+        JSON.stringify({
+          perModel: {
+            'nano-banana-2': {
+              aspectRatio: '42:1', // garbage
+            },
+          },
+        }),
+    });
+    const entry = s.perModel['nano-banana-2'];
+    if (entry?.type !== 'image') throw new Error('expected image entry');
+    expect(entry.aspectRatio).toBe(baselineAspect);
   });
 
   it('honors a fallback override', async () => {

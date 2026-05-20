@@ -1864,14 +1864,31 @@ export function MainContent() {
     }
     setIsSuggesting(true);
     try {
-      const suggestion = await suggestParametersAI({
-        prompt: comparisonPrompt,
-        availableModels: LEONARDO_MODELS,
-        modelGuides: MODEL_PROMPT_GUIDES,
-        availableStyles: LEONARDO_SHARED_STYLES,
-        savedImages,
-        includedModelIds: comparisonModels,
-      });
+      // AI-PARAM-SUGGEST (2026-05-20): route the AI call through the
+      // user's selected text-AI backend (settings.activeAiAgent). The
+      // capability-aware post-filter inside suggestParametersAI strips
+      // any field the AI hallucinates that violates a model's spec, so
+      // we don't repeat the V082 failure of proposing styles for
+      // gpt-image-1.5 etc. If the AI fails / parse fails, it silently
+      // falls back to the rule engine.
+      const suggestion = await suggestParametersAI(
+        {
+          prompt: comparisonPrompt,
+          availableModels: LEONARDO_MODELS,
+          modelGuides: MODEL_PROMPT_GUIDES,
+          availableStyles: LEONARDO_SHARED_STYLES,
+          savedImages,
+          includedModelIds: comparisonModels,
+        },
+        {
+          aiCall: (message, signal) =>
+            streamAIToString(message, {
+              provider: settings.activeAiAgent,
+              mode: 'chat',
+              signal,
+            }),
+        },
+      );
       setParamSuggestion(suggestion);
     } finally {
       setIsSuggesting(false);
