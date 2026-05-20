@@ -50,6 +50,24 @@ else
   echo "[skip] bun not on PATH — bun.lock not refreshed."
 fi
 
+# Refresh src-tauri/Cargo.lock so the `app` package version inside the
+# lockfile tracks Cargo.toml. The workflow's parity check
+# (`tauri-windows.yml:48-64`) doesn't read Cargo.lock, so a stale entry
+# slips past parity but trips the cargo build downstream — e.g. v0.9.40
+# initial CI failed at the parity step for a different reason but would
+# have also tripped on a stale lockfile if it had gotten that far. Without
+# this step every release commit needs a manual `cargo update -p app`
+# companion commit (see `.claude/rules/release-flow.md`).
+#
+# Skip silently if cargo isn't on PATH — operator can refresh manually
+# afterwards on a machine that has the Rust toolchain.
+if command -v cargo >/dev/null 2>&1; then
+  echo "Refreshing src-tauri/Cargo.lock..."
+  (cd src-tauri && cargo update -p app --quiet)
+else
+  echo "[skip] cargo not on PATH — src-tauri/Cargo.lock not refreshed."
+fi
+
 # ── Changelog generation ─────────────────────────────────────────────────────
 # Conventional-commits → Keep-a-Changelog sections. `chore:`, `ci:`, `build:`,
 # `style:` are skipped — internal noise that doesn't belong in user-facing
@@ -139,9 +157,9 @@ cat "${block}"
 echo "───────────────────────────────"
 
 # ── Commit ──────────────────────────────────────────────────────────────────
-# Stage all four files and commit with subject `chore(release): vX.Y.Z` and
-# body = the generated changelog block. Operator pushes + tags afterwards.
-git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml CHANGELOG.md
+# Stage the five version files and commit with subject `chore(release): vX.Y.Z`
+# and body = the generated changelog block. Operator pushes + tags afterwards.
+git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock CHANGELOG.md
 # Include bun.lock if the install step above (or any prior local run)
 # changed it. Empty-stage if it's clean — `git add` no-ops on missing diff.
 if [ -f bun.lock ]; then

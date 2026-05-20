@@ -11,31 +11,26 @@ paths:
 
 # MashupForge release flow
 
-`scripts/release.sh <ver>` bumps the **three** project-version files (`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`), refreshes `bun.lock`, regenerates `CHANGELOG.md` from conventional-commit subjects, and commits as `chore(release): v<ver>`.
+`scripts/release.sh <ver>` bumps **all** version files in one shot — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock` — plus refreshes `bun.lock` and regenerates `CHANGELOG.md` from conventional-commit subjects, committing as `chore(release): v<ver>`.
 
-But it does **not** touch `src-tauri/Cargo.lock`. The lockfile's `app` package version (line ~80) stays at the previous release, and the next tag-push trips the version-parity check in `tauri-windows.yml:48-64` ("Internal version mismatch — files don't agree with each other").
+Before v0.9.40 the script didn't touch `Cargo.lock`, which caused two separate release breakages (v0.9.37 and v0.9.40). A `cargo update -p app` step now runs inside the script after the version bumps so the lockfile's `app` entry tracks `Cargo.toml`.
 
 ## The canonical release sequence
 
 ```bash
-# 1. Bump everything release.sh knows about + commit.
+# 1. Bump everything + commit.
 bash scripts/release.sh 0.9.X
 
-# 2. Bring Cargo.lock along. release.sh leaves it stale.
-cd src-tauri && cargo update -p app && cd ..
-
-# 3. Companion commit (do not amend — CLAUDE.md forbids amending).
-git add src-tauri/Cargo.lock
-git commit -m "chore(release): refresh Cargo.lock for v0.9.X"
-
-# 4. Push + tag. The tag-push triggers tauri-windows.yml.
+# 2. Push + tag. The tag-push triggers tauri-windows.yml.
 git push origin main
 git tag -a v0.9.X -m "Release v0.9.X"
 git push origin v0.9.X
 
-# 5. Watch the build (~25-30 min on Windows-latest).
+# 3. Watch the build (~25-30 min on Windows-latest).
 gh -R Code4neverCompany/MashupForge run watch <run-id> --exit-status
 ```
+
+If you find yourself making a "refresh Cargo.lock for v0.9.X" companion commit after `release.sh`, something regressed in the script — that step should be automatic now.
 
 ## What the workflow checks
 
