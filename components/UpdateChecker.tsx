@@ -24,7 +24,13 @@ interface UpdateLike {
 
 type State =
   | { kind: 'idle' }
-  | { kind: 'available'; update: UpdateLike }
+  // UPDATE-P0-2 (2026-05-21): downloadSize lets the banner show an
+  // approximate size in MB so users on metered connections can make an
+  // informed decision before clicking. Populated asynchronously after
+  // the banner appears via a HEAD request against the platform asset
+  // URL extracted from latest.json. null = still fetching / unavailable
+  // (banner falls back to omitting the size hint, never shows a guess).
+  | { kind: 'available'; update: UpdateLike; downloadSize: number | null }
   | { kind: 'postponed'; update: UpdateLike; deadline: number }
   | { kind: 'downloading'; update: UpdateLike; downloaded: number; total: number | null }
   | { kind: 'download-error'; update: UpdateLike; message: string }
@@ -200,10 +206,69 @@ export function UpdateChecker() {
         traceUpdater('run:setting-available-state', {
           version: update.version, shouldAutoDownload, shouldAutoInstall,
         });
-        setState({ kind: 'available', update });
+        setState({ kind: 'available', update, downloadSize: null });
         if (shouldAutoDownload && shouldAutoInstall) {
           autoInstallRef.current = true;
         }
+
+        // UPDATE-P0-2 (2026-05-21): fire a background HEAD against the
+        // platform asset URL from latest.json to populate the banner's
+        // size hint. Fully optional — every failure path silently leaves
+        // downloadSize=null so the banner just omits the size string.
+        // Done AFTER setState so the banner appears immediately and the
+        // size fills in if/when the HEAD resolves.
+        void (async () => {
+          try {
+            const latestRes = await fetch(
+              'https://github.com/Code4neverCompany/MashupForge/releases/latest/download/latest.json',
+              { cache: 'no-cache' },
+            );
+            if (!latestRes.ok) return;
+            const manifest = (await latestRes.json()) as {
+              platforms?: Record<string, { url?: string }>;
+            };
+            const platforms = manifest?.platforms ?? {};
+            // Tauri convention: keys like `windows-x86_64`, `darwin-aarch64`.
+            // The desktop is currently Windows-only in production (NSIS).
+            // Future macOS/Linux builds will land their own keys; fall
+            // through to "first available" so the size hint still works
+            // before this code learns about new platforms.
+            const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+            const preferredKey =
+              Object.keys(platforms).find((k) =>
+                ua.includes('Windows')
+                  ? k.toLowerCase().startsWith('windows')
+                  : ua.includes('Mac')
+                    ? k.toLowerCase().startsWith('darwin')
+                    : k.toLowerCase().startsWith('linux'),
+              ) ?? Object.keys(platforms)[0];
+            const assetUrl = preferredKey ? platforms[preferredKey]?.url : undefined;
+            if (!assetUrl) return;
+            const headRes = await fetch(assetUrl, { method: 'HEAD' });
+            if (!headRes.ok) return;
+            const lenStr = headRes.headers.get('content-length');
+            if (!lenStr) return;
+            const len = Number.parseInt(lenStr, 10);
+            // GitHub's CDN occasionally returns 0 on HEAD even when the
+            // asset is fine. Treat 0 (or anything non-positive / NaN) as
+            // unavailable so the banner doesn't lie about a 0 MB update.
+            if (!Number.isFinite(len) || len <= 0) return;
+            traceUpdater('run:resolved-download-size', { bytes: len, key: preferredKey });
+            if (cancelled) return;
+            setState((prev) =>
+              prev.kind === 'available' && prev.update.version === update.version
+                ? { ...prev, downloadSize: len }
+                : prev,
+            );
+          } catch (e) {
+            // Network blip / parse failure — fall through, banner stays
+            // sizeless. Don't surface to the user; the size hint is
+            // purely informational.
+            traceUpdater('run:download-size-failed', {
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+        })();
       } catch (e: unknown) {
         // Plugin unavailable, network failure, manifest missing, or ACL
         // denied — none are actionable from the banner, so we log loudly
@@ -340,7 +405,7 @@ export function UpdateChecker() {
 
   const handleRetry = useCallback(() => {
     if (state.kind !== 'download-error') return;
-    setState({ kind: 'available', update: state.update });
+    setState({ kind: 'available', update: state.update, downloadSize: null });
   }, [state]);
 
   const handleDismissError = useCallback(() => {
@@ -469,6 +534,15 @@ export function UpdateChecker() {
           <div className="flex-1 min-w-0">
             <p className="text-xs font-semibold text-white">
               Update available — <span className="text-[#c5a062] font-mono">v{update.version}</span>
+              {/* UPDATE-P0-2 (2026-05-21): size hint rendered only when
+                  the background HEAD resolved a positive content-length.
+                  Silent omission on any failure path (CDN returns 0,
+                  HEAD fails, network blip). Uses ~ prefix to signal the
+                  ballpark nature — the actual download may differ if
+                  GitHub recompresses between HEAD and GET. */}
+              {state.kind === 'available' && state.downloadSize !== null && (
+                <span className="text-zinc-500 font-mono"> · ~{formatBytes(state.downloadSize)}</span>
+              )}
             </p>
           </div>
           {!isDownloading && (
