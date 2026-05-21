@@ -5,6 +5,9 @@
   "windows": [
     "main"
   ],
+  "webviews": [
+    "*"
+  ],
   "permissions": [
     "core:default",
     "core:app:default",
