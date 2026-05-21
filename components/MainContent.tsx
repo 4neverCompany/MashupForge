@@ -95,6 +95,7 @@ import { getModelSpec } from '@/lib/model-specs';
 import { getErrorMessage } from '@/lib/errors';
 import { recordOutcome } from '@/lib/outcome-tracker';
 import { findPostingBlock, isStillScheduled } from '@/lib/post-approval-gate';
+import { ensureHostedUrl, ensureHostedUrls } from '@/lib/upload-to-host';
 import { postDueState } from '@/lib/autopost-due';
 import { getAllRejectedImageIds } from '@/lib/gallery-visibility';
 import { useSmartScheduler } from '@/hooks/useSmartScheduler';
@@ -484,22 +485,23 @@ export function MainContent() {
     setPostBusy((prev) => ({ ...prev, [img.id]: 'posting' }));
     setPostStatus((prev) => ({ ...prev, [img.id]: null }));
     try {
-      // POST-413-FIX (2026-05-21): only ship mediaBase64 when mediaUrl is
-      // missing. Vercel's serverless function body limit is 4.5MB; a
-      // ~3MB JPEG becomes ~4MB base64-encoded, blowing the limit and
-      // surfacing as a Vercel platform 413 (plain text, not JSON) that
-      // bypasses our route entirely. The route already prefers mediaUrl
-      // and only falls back to base64 when URL fetch produces no buffers
-      // (see route.ts:197-199), so omitting base64 when URL is present
-      // costs nothing.
+      // POST-413-FIX phase 3 (2026-05-21): hoist the image to a public
+      // host BEFORE sending the post request so the body to /api/social/
+      // post stays a few hundred bytes. JPEG@0.92 (phase 2, 578f8c2)
+      // brought single-image posts under Vercel's 4.5MB serverless body
+      // limit but a 3840x3840 GPT Image-2 output can still trip it, and
+      // carousels of 2+ images cross it reliably. ensureHostedUrl is a
+      // no-op for already-https sources and uploads data: URLs to uguu.
+      const source = img.url || (img.base64 ? `data:image/jpeg;base64,${img.base64}` : '');
+      if (!source) throw new Error('No image source — both url and base64 are missing');
+      const hostedUrl = await ensureHostedUrl(source);
       const res = await fetch('/api/social/post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           caption: formatPost(img),
           platforms,
-          mediaUrl: img.url,
-          ...(img.url ? {} : { mediaBase64: img.base64 }),
+          mediaUrl: hostedUrl,
           credentials: buildCredentialsPayload(),
         }),
       });
@@ -1040,7 +1042,16 @@ export function MainContent() {
     setPostStatus((prev) => ({ ...prev, [key]: null }));
     try {
       const caption = item.group?.caption || formatPost(item.images[0]);
-      const mediaUrls = item.images.map((i) => i.url).filter(Boolean) as string[];
+      // POST-413-FIX phase 3 (2026-05-21): carousels were the failure
+      // case after phase 2 (578f8c2). N watermarked JPEG@0.92 data URLs
+      // each in mediaUrls reliably blow Vercel's 4.5MB body limit once
+      // N >= 2. ensureHostedUrls passes through https URLs unchanged and
+      // parallel-uploads data: URLs to uguu so the body stays tiny.
+      const rawSources = item.images
+        .map((i) => i.url || (i.base64 ? `data:image/jpeg;base64,${i.base64}` : ''))
+        .filter(Boolean);
+      if (rawSources.length === 0) throw new Error('Carousel has no usable image sources');
+      const mediaUrls = await ensureHostedUrls(rawSources);
       const res = await fetch('/api/social/post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1612,16 +1623,22 @@ export function MainContent() {
           }
 
           try {
-            const mediaUrls = groupImages.map((i) => i.url).filter(Boolean) as string[];
+            // POST-413-FIX phase 3 (2026-05-21): see manual-carousel
+            // counterpart above. Same uguu hoist so the autopost path
+            // doesn't trip Vercel's 4.5MB body limit for high-res carousels.
+            const rawSources = groupImages
+              .map((i) => i.url || (i.base64 ? `data:image/jpeg;base64,${i.base64}` : ''))
+              .filter(Boolean);
             // Fix 5 (mmx brief): old content sometimes lands here with
             // every Leonardo URL expired AND no base64 fallback. Bail
             // early with an actionable error instead of letting the
             // server try to fetch dead URLs.
-            if (mediaUrls.length === 0) {
+            if (rawSources.length === 0) {
               throw new Error(
                 'No usable image source — every carousel member is missing both url and base64 (Leonardo URL likely expired)'
               );
             }
+            const mediaUrls = await ensureHostedUrls(rawSources);
             const res = await fetch('/api/social/post', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -1700,18 +1717,18 @@ export function MainContent() {
           if (!post.platforms || post.platforms.length === 0) {
             throw new Error('No platforms selected on the scheduled post');
           }
-          // POST-413-FIX (2026-05-21): see manual-single counterpart above.
-          // Skip mediaBase64 when mediaUrl is present so the autopost path
-          // doesn't trip Vercel's 4.5MB serverless body limit on
-          // higher-res output from GPT Image-2 / MiniMax-image-01.
+          // POST-413-FIX phase 3 (2026-05-21): see manual-single
+          // counterpart above. ensureHostedUrl uploads data: URLs to uguu
+          // and passes https URLs through unchanged.
+          const source = image.url || (image.base64 ? `data:image/jpeg;base64,${image.base64}` : '');
+          const hostedUrl = await ensureHostedUrl(source);
           const res = await fetch('/api/social/post', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               caption: post.caption,
               platforms: post.platforms,
-              mediaUrl: image.url,
-              ...(image.url ? {} : { mediaBase64: image.base64 }),
+              mediaUrl: hostedUrl,
               credentials,
             }),
           });
