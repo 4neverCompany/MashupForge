@@ -32,6 +32,13 @@ type State =
   | { kind: 'post-update'; version: string };
 
 const DISMISS_KEY = (version: string) => `mashup_update_dismissed_${version}`;
+// UPDATE-P0-1 (2026-05-21): cross-version "remind me later" snooze.
+// Stores an absolute epoch-ms wakeup time. Any banner attempt before
+// the wakeup is silently skipped; the next launch-time check past the
+// wakeup re-evaluates normally. Distinct from DISMISS_KEY which is
+// per-version permanent — snooze is global and time-bounded.
+const SNOOZE_KEY = 'mashup_update_snooze_until';
+const SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000; // 24h
 const LAST_SEEN_KEY = 'mashup_update_last_seen_version';
 // FEAT-002: surfaced in the Updates subsection of DesktopSettingsPanel.
 export const LAST_CHECKED_AT_KEY = 'mashup_update_last_checked_at';
@@ -173,6 +180,20 @@ export function UpdateChecker() {
           if (localStorage.getItem(DISMISS_KEY(update.version)) === '1') {
             traceUpdater('exit:version-dismissed', { version: update.version });
             return;
+          }
+        } catch { /* ignore */ }
+
+        // UPDATE-P0-1 (2026-05-21): respect the 24h global snooze. Cleared
+        // automatically on expiry — no need to delete the key — so the
+        // banner reappears on the first launch-time check after wakeup.
+        try {
+          const snoozeRaw = localStorage.getItem(SNOOZE_KEY);
+          if (snoozeRaw) {
+            const snoozeUntil = Number.parseInt(snoozeRaw, 10);
+            if (Number.isFinite(snoozeUntil) && Date.now() < snoozeUntil) {
+              traceUpdater('exit:snoozed', { snoozeUntil, version: update.version });
+              return;
+            }
           }
         } catch { /* ignore */ }
 
@@ -326,10 +347,25 @@ export function UpdateChecker() {
     setState({ kind: 'idle' });
   }, []);
 
-  const handleDismiss = useCallback(() => {
+  // UPDATE-P0-1 (2026-05-21): "Skip this version" — per-version permanent
+  // dismissal. Identical to the prior single "Later" behaviour; renamed
+  // to make the irreversibility-within-this-version explicit. A new
+  // version released later will trigger a fresh banner.
+  const handleSkipVersion = useCallback(() => {
     if (state.kind !== 'available') return;
     try {
       localStorage.setItem(DISMISS_KEY(state.update.version), '1');
+    } catch { /* ignore */ }
+    setState({ kind: 'idle' });
+  }, [state]);
+
+  // UPDATE-P0-1 (2026-05-21): "Remind me tomorrow" — global 24h snooze.
+  // Re-evaluated by the launch-time `run()` effect on every mount; the
+  // banner returns automatically after the wakeup elapses.
+  const handleRemindTomorrow = useCallback(() => {
+    if (state.kind !== 'available') return;
+    try {
+      localStorage.setItem(SNOOZE_KEY, String(Date.now() + SNOOZE_DURATION_MS));
     } catch { /* ignore */ }
     setState({ kind: 'idle' });
   }, [state]);
@@ -438,8 +474,8 @@ export function UpdateChecker() {
           {!isDownloading && (
             <button
               type="button"
-              onClick={handleDismiss}
-              aria-label="Dismiss update notification"
+              onClick={handleSkipVersion}
+              aria-label="Skip this version"
               className="text-zinc-500 hover:text-zinc-300 transition-colors -mt-0.5 -mr-0.5"
             >
               <X className="w-3.5 h-3.5" />
@@ -509,13 +545,24 @@ export function UpdateChecker() {
           {!isDownloading && (
             <button
               type="button"
-              onClick={handleDismiss}
+              onClick={handleRemindTomorrow}
               className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors px-2 py-1.5"
             >
-              Later
+              Remind me tomorrow
             </button>
           )}
         </div>
+        {!isDownloading && (
+          <div className="pt-1 -mt-1">
+            <button
+              type="button"
+              onClick={handleSkipVersion}
+              className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors underline-offset-2 hover:underline"
+            >
+              Skip this version
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
