@@ -139,6 +139,16 @@ export interface GenerateOptions {
    * entry here.
    */
   perModelOptions?: Record<string, { style?: string; aspectRatio?: string; negativePrompt?: string }>;
+  /**
+   * Per-model failure callback. Fired from the generateComparison loop
+   * whenever a single model's submitOnce throws (Leonardo 400, MiniMax
+   * 4xx, network error, moderation block that survived the rewrite).
+   * Pipeline callers wire this to addLog so users see WHY a model
+   * didn't appear in readyImages — without it, per-model errors land
+   * only on the Compare panel's placeholder state and the Pipeline
+   * just looks like fewer-than-expected images came back.
+   */
+  onModelError?: (modelId: string, modelName: string, error: string) => void;
 }
 
 export interface WatermarkSettings {

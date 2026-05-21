@@ -232,6 +232,16 @@ Return ONLY the prompt text, nothing else.`;
           imageReadyPromise = generateComparison(prompt, modelIds, {
             skipEnhance: false,
             ...suggestedOptions,
+            // Surface per-model Leonardo/MiniMax failures in the pipeline
+            // log. Without this hook, the only signal of a failed model
+            // is a smaller readyImages array vs. modelIds.length — and
+            // the WHY (400 prompt-too-long, moderation, validation, …)
+            // lives only on the Compare placeholder, which Pipeline users
+            // never see. Added 2026-05-21 after the "only MiniMax shows
+            // up in Pipeline" debugging session.
+            onModelError: (_modelId, modelName, err) => {
+              addLog('image-gen', idea.id, 'error', `${modelName} failed: ${err}`);
+            },
           });
           // Swallow the images here — processor contract is Promise<void>.
           // waitForImages reads the captured Promise next.

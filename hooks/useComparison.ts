@@ -382,6 +382,13 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
               ? { ...img, status: 'error', error: errMsg }
               : img
           ));
+          // Notify the caller (Pipeline wires this to addLog so per-model
+          // failures show up in the pipeline timeline; Compare UI keeps
+          // the placeholder-error breadcrumb above). Swallow callback
+          // exceptions so a bad consumer can't break the comparison loop.
+          try {
+            options?.onModelError?.(modelId, modelName, errMsg);
+          } catch { /* ignore consumer-side throw */ }
         }
       }
     } catch (e: unknown) {

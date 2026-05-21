@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractJsonArrayFromLLM, extractJsonObjectFromLLM } from '@/lib/aiClient';
+import { extractJsonArrayFromLLM, extractJsonObjectFromLLM, stripThinkBlocks } from '@/lib/aiClient';
 
 describe('extractJsonArrayFromLLM', () => {
   it('parses a clean JSON array', () => {
@@ -76,5 +76,48 @@ describe('extractJsonObjectFromLLM', () => {
   it('handles nested objects', () => {
     const raw = '{"outer":{"inner":{"deep":1}}}';
     expect(extractJsonObjectFromLLM(raw)).toEqual({ outer: { inner: { deep: 1 } } });
+  });
+});
+
+// Regression guard for commit c8b469f (2026-05-20). The pipeline path
+// — expandIdeaToPrompt → streamAIToString → Leonardo image prompt —
+// forwards the raw text. Reasoning models (MiniMax-M2.5, GLM-5.1,
+// DeepSeek-R1) prefix their answer with <think>…</think>; if it leaks
+// through, Leonardo rejects the oversized prompt while MiniMax-image
+// silently truncates at 1500 chars and tolerates it, producing the
+// "only MiniMax generates in Pipeline" symptom.
+describe('stripThinkBlocks', () => {
+  it('removes a single <think>…</think> block', () => {
+    expect(stripThinkBlocks('<think>reasoning here</think>final answer'))
+      .toBe('final answer');
+  });
+
+  it('removes multi-line think blocks across newlines', () => {
+    const raw = '<think>line 1\nline 2\nline 3</think>\nactual prompt';
+    expect(stripThinkBlocks(raw)).toBe('actual prompt');
+  });
+
+  it('removes multiple think blocks', () => {
+    const raw = '<think>first</think>middle<think>second</think>tail';
+    expect(stripThinkBlocks(raw)).toBe('middletail');
+  });
+
+  it('drops an unterminated leading <think> block (truncated model output)', () => {
+    expect(stripThinkBlocks('<think>started thinking but cut off'))
+      .toBe('');
+  });
+
+  it('returns the trimmed input when no think tags are present', () => {
+    expect(stripThinkBlocks('  just an answer  ')).toBe('just an answer');
+  });
+
+  it('is idempotent on already-clean input', () => {
+    const clean = 'A clean image prompt.';
+    expect(stripThinkBlocks(stripThinkBlocks(clean))).toBe(clean);
+  });
+
+  it('preserves brace/bracket content outside think blocks', () => {
+    const raw = '<think>{ "fake": "json in reasoning" }</think>{"real":42}';
+    expect(stripThinkBlocks(raw)).toBe('{"real":42}');
   });
 });
