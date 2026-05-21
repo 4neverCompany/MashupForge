@@ -29,6 +29,8 @@ import {
 } from '@/lib/pipeline-processor';
 import { awaitImagesOrSkip } from '@/lib/image-readiness';
 import { generateNegativePrompt } from '@/lib/negative-prompts';
+import { extractTrademarkNames } from '@/lib/extract-trademark-names';
+import { getAllBlocked, setOutcome, preflightGenericize } from '@/lib/trademark-outcomes';
 import type { WriteCheckpointBase } from './usePipelineDaemon';
 import { useDesktopConfig } from './useDesktopConfig';
 
@@ -115,13 +117,24 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
   const expandIdeaToPrompt = useCallback(
     async (idea: Idea, trendingContext?: string): Promise<string> => {
       const s = getSettings();
+      // TRADEMARK-LEARNING (2026-05-21): inject the learned blocklist into
+      // the system prompt so the upstream prompt-enhance step generalizes
+      // known-bad IP into descriptors instead of writing them out. This
+      // is the "feedback" loop side of the store — pre-flight rewrite
+      // still catches it post-hoc, but front-loading the AI saves a
+      // pipeline step. List grows as the outcome store learns from
+      // future failures.
+      const blockedNames = getAllBlocked();
+      const blockedBlock = blockedNames.length > 0
+        ? `\nTRADEMARKED CHARACTERS TO AVOID (based on past pipeline failures): ${blockedNames.join(', ')}.\nUse generic descriptions instead (e.g. "a spider-powered hero" instead of "Spider-Man").\n`
+        : '';
       const systemContext = `${s.agentPrompt || 'You are an elite AI art director.'}
 Active Niches: ${s.agentNiches?.join(', ') || 'None'}.
 Active Genres: ${s.agentGenres?.join(', ') || 'None'}.
 
 You are given a content idea concept. Expand it into a single, highly detailed image generation prompt.
 The prompt should be vivid, specific, and optimized for AI image generation.
-${trendingContext ? `\nCURRENT TRENDING CONTEXT — weave relevant trends into the prompt to make it timely and shareable:\n${trendingContext}\n` : ''}
+${trendingContext ? `\nCURRENT TRENDING CONTEXT — weave relevant trends into the prompt to make it timely and shareable:\n${trendingContext}\n` : ''}${blockedBlock}
 Return ONLY the prompt text, nothing else.`;
 
       const text = await streamAIToString(
@@ -235,7 +248,30 @@ Return ONLY the prompt text, nothing else.`;
             suggestedOptions = { negativePrompt: baseNegative };
           }
 
-          imageReadyPromise = generateComparison(prompt, modelIds, {
+          // TRADEMARK-LEARNING (2026-05-21): pre-flight pass that swaps
+          // any known-blocked trademarked name in the prompt with its
+          // generic descriptor BEFORE submitting to the image API.
+          // Avoids burning a Leonardo call (and the user-visible
+          // "blocked, rewriting…" status flash) on names we already
+          // know fail. Unknown names pass through unchanged — the
+          // classification-aware retry from 4bc046b still handles
+          // first-time failures.
+          const blockedNames = getAllBlocked();
+          let activePrompt = prompt;
+          if (blockedNames.length > 0) {
+            const pre = preflightGenericize(prompt, blockedNames);
+            if (pre.swapped.length > 0) {
+              addLog(
+                'moderation',
+                idea.id,
+                'success',
+                `Pre-flight swapped ${pre.swapped.length} known-blocked name${pre.swapped.length === 1 ? '' : 's'} → generics: ${pre.swapped.join(', ')}`,
+              );
+              activePrompt = pre.prompt;
+            }
+          }
+
+          imageReadyPromise = generateComparison(activePrompt, modelIds, {
             skipEnhance: false,
             ...suggestedOptions,
             // Surface per-model Leonardo/MiniMax failures in the pipeline
@@ -245,8 +281,27 @@ Return ONLY the prompt text, nothing else.`;
             // lives only on the Compare placeholder, which Pipeline users
             // never see. Added 2026-05-21 after the "only MiniMax shows
             // up in Pipeline" debugging session.
+            //
+            // TRADEMARK-LEARNING: when the error string mentions TRADEMARK
+            // (Leonardo's classification surfaces through this string at
+            // useComparison.ts:382 as "Blocked after rewrite: TRADEMARK…"),
+            // extract names from the prompt we submitted and mark them
+            // 'blocked' in the outcome store. Future runs will pre-flight
+            // these out automatically.
             onModelError: (_modelId, modelName, err) => {
               addLog('image-gen', idea.id, 'error', `${modelName} failed: ${err}`);
+              if (/TRADEMARK|COPYRIGHT/i.test(err)) {
+                const observedNames = extractTrademarkNames(activePrompt);
+                for (const name of observedNames) setOutcome(name, 'blocked');
+                if (observedNames.length > 0) {
+                  addLog(
+                    'moderation',
+                    idea.id,
+                    'error',
+                    `TRADEMARK blocked: ${modelName} — marked ${observedNames.length} name${observedNames.length === 1 ? '' : 's'} blocked for future pre-flight: ${observedNames.join(', ')}`,
+                  );
+                }
+              }
             },
           });
           // Swallow the images here — processor contract is Promise<void>.
