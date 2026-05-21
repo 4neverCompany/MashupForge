@@ -64,7 +64,13 @@ export function useSmartScheduler({
     setSlots([]);
 
     const computeSlots = (eng: Awaited<ReturnType<typeof fetchInstagramEngagement>>) => {
-      const newSlots = findBestSlots(scheduledPosts, count, eng);
+      // AUTO-SCHEDULE-FIX (2026-05-21): derive a per-day cap so the
+      // modal spreads picks across days instead of stacking every slot
+      // on the dominant engagement day. ceil(count / 14) targets roughly
+      // even fill over the 14-day horizon: 5 posts → 1/day → spreads
+      // over 5+ days; 20 posts → 2/day; 50 posts → 4/day.
+      const postsPerDay = Math.max(1, Math.ceil(count / 14));
+      const newSlots = findBestSlots(scheduledPosts, count, eng, { postsPerDay });
       setSlots(newSlots);
       if (newSlots.length > 0) {
         setForm({ date: newSlots[0].date, time: newSlots[0].time, platforms: defaultPlatforms });

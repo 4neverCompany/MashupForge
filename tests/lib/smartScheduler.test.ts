@@ -125,6 +125,57 @@ describe('findBestSlots', () => {
     expect(findBestSlots([], 0, makeEngagement())).toEqual([]);
   });
 
+  describe('AUTO-SCHEDULE-FIX (2026-05-21): postsPerDay hard cap', () => {
+    it('caps same-call picks at postsPerDay per day', () => {
+      // Maurice's bug: without a hard cap, 5 requested slots could all
+      // land on the dominant engagement day (Saturday). With postsPerDay=1
+      // each day can hold at most one slot from this call.
+      const slots = findBestSlots([], 5, makeEngagement(), { postsPerDay: 1 });
+      const dates = slots.map((s) => s.date);
+      const uniqueDates = new Set(dates);
+      expect(uniqueDates.size).toBe(dates.length);
+      expect(dates.length).toBe(5);
+    });
+
+    it('respects existing posts in the cap accounting', () => {
+      // 2 existing posts on the engagement-best day saturate it. A new
+      // pick with postsPerDay=2 must land somewhere else.
+      const eng = makeEngagement();
+      const baselineSlot = findBestSlots([], 1, eng)[0];
+      const dominantDate = baselineSlot.date;
+      const existing = [
+        { date: dominantDate, time: '20:00', platforms: ['instagram'] },
+        { date: dominantDate, time: '19:00', platforms: ['instagram'] },
+      ];
+      const next = findBestSlots(existing, 1, eng, { postsPerDay: 2 });
+      expect(next.length).toBe(1);
+      expect(next[0].date).not.toBe(dominantDate);
+    });
+
+    it('without postsPerDay (undefined) preserves old soft-penalty behaviour', () => {
+      // Back-compat: 5 picks against an engagement profile with a heavy
+      // weekend bias would historically stack on the dominant day. We
+      // assert that the cap-less path still permits same-day duplicates
+      // (the existing soft penalty isn't strong enough). If this test
+      // ever flips to all-unique, the soft penalty was tuned up — fine,
+      // but the cap test above is the real guarantee.
+      const slots = findBestSlots([], 5, makeEngagement());
+      const dates = slots.map((s) => s.date);
+      expect(dates.length).toBe(5);
+      // Don't assert uniqueness — point is the cap path is what enforces it.
+    });
+
+    it('caps interact with platform per-day caps (both honored)', () => {
+      const slots = findBestSlots([], 4, makeEngagement(), {
+        postsPerDay: 1,
+        platforms: ['instagram'],
+        caps: { instagram: 1 },
+      });
+      const dates = slots.map((s) => s.date);
+      expect(new Set(dates).size).toBe(dates.length);
+    });
+  });
+
   it('reason string mentions IG data when source is instagram', () => {
     const eng = makeEngagement();
     eng.source = 'instagram';

@@ -45,7 +45,15 @@ export function pickFillWeekSlot(opts: PickFillWeekSlotOptions): FillWeekSlotRes
   const { posts, engagement, postsPerDay, platforms, caps, now } = opts;
   const week1 = computeWeekFillStatus(posts, 7, postsPerDay, now ?? new Date());
   const horizonDays = week1.filled ? 14 : 7;
-  const slot = findBestSlot(posts, engagement, { platforms, caps, horizonDays });
+  // AUTO-SCHEDULE-FIX (2026-05-21): forward postsPerDay as a hard cap on
+  // findBestSlot, not just an input to computeWeekFillStatus. The soft
+  // dispersion penalty inside findBestSlots (`score / (1 + dayCount)`)
+  // wasn't enough to stop a dominant engagement day from absorbing every
+  // pipeline post — Saturday 20:00 at raw=20 still beat Monday 12:00 at
+  // raw=2.4 even after 5 Saturday posts (20/6=3.3 > 2.4/1). The hard cap
+  // forces the picker to bounce off a full day and land on the next
+  // engagement-best day instead.
+  const slot = findBestSlot(posts, engagement, { platforms, caps, horizonDays, postsPerDay });
 
   // Week classification: both `findBestSlots` and `computeWeekFillStatus`
   // anchor on TOMORROW (today is excluded — we never schedule into it),

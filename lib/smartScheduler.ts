@@ -338,6 +338,18 @@ export function findBestSlots(
      * week before this one is full.
      */
     horizonDays?: number;
+    /**
+     * AUTO-SCHEDULE-FIX (2026-05-21): hard cap on posts per day across
+     * ALL platforms (distinct from per-platform `caps` above). When set,
+     * any day whose existing-post count >= postsPerDay is excluded from
+     * the candidate grid entirely. The original soft dispersion penalty
+     * (`score / (1 + count)`) wasn't strong enough — a dominant
+     * engagement day (e.g. Saturday 20:00) would still outscore weaker
+     * days even after stacking 5+ posts. Maurice reported pipeline runs
+     * piling every post on one day; root cause was the missing hard cap.
+     * Undefined = no cap = pre-fix behaviour (preserves existing tests).
+     */
+    postsPerDay?: number;
   },
 ): SlotScore[] {
   const eng = engagement || loadEngagementData();
@@ -345,6 +357,7 @@ export function findBestSlots(
   const platforms = options?.platforms || [];
   const caps = options?.caps || {};
   const horizonDays = Math.max(1, options?.horizonDays ?? 14);
+  const postsPerDay = options?.postsPerDay;
   const platDayCounts = buildPerDayPlatformCounts(existingPosts);
   const dayCounts = buildPerDayCounts(existingPosts);
 
@@ -359,6 +372,14 @@ export function findBestSlots(
       if (current >= cap) return true;
     }
     return false;
+  };
+
+  // AUTO-SCHEDULE-FIX (2026-05-21): hard-cap check used both at grid
+  // build time (skip days already at the cap) AND inside the selection
+  // loop (skip if a same-call earlier round pushed the day to the cap).
+  const dayAtPostsPerDayCap = (dateStr: string, localCount: number): boolean => {
+    if (postsPerDay == null) return false;
+    return localCount >= postsPerDay;
   };
 
   // `dayCounts` is mutated during selection so each pick on the same day
@@ -380,6 +401,10 @@ export function findBestSlots(
     checkDate.setDate(checkDate.getDate() + dayOffset);
     const dateStr = formatLocalDate(checkDate);
     if (dayWouldExceedCap(dateStr)) continue;
+    // AUTO-SCHEDULE-FIX: skip days already at the postsPerDay cap from
+    // the existing posts. Same-call rounds also check via dayAtPostsPerDayCap
+    // in the selection loop below.
+    if (dayAtPostsPerDayCap(dateStr, dayCountsLocal[dateStr] || 0)) continue;
     for (const { hour } of eng.hours) {
       if (hour < 6 || hour > 23) continue;
       candidates.push({
@@ -399,6 +424,9 @@ export function findBestSlots(
       const c = candidates[i];
       const time = `${String(c.hour).padStart(2, '0')}:00`;
       if (taken.has(`${c.date}T${time}`)) continue;
+      // AUTO-SCHEDULE-FIX: same-call rounds may have pushed this day to
+      // the postsPerDay cap even though the pre-built grid included it.
+      if (dayAtPostsPerDayCap(c.date, dayCountsLocal[c.date] || 0)) continue;
       const score = c.raw / (1 + (dayCountsLocal[c.date] || 0));
       if (score > bestScore) {
         bestScore = score;
@@ -432,6 +460,8 @@ export function findBestSlot(
     caps?: DailyCaps;
     /** V060-004: see `findBestSlots`. */
     horizonDays?: number;
+    /** AUTO-SCHEDULE-FIX (2026-05-21): see `findBestSlots`. */
+    postsPerDay?: number;
   },
 ): { date: string; time: string } {
   const slots = findBestSlots(existingPosts, 1, engagement, options);
