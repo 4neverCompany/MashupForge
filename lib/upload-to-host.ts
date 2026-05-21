@@ -1,4 +1,4 @@
-// POST-413-FIX phase 3 (2026-05-21): client-side image hosting so the
+// POST-413-FIX phase 3+4 (2026-05-21): client-side image hosting so the
 // request body to /api/social/post stays a few hundred bytes regardless
 // of how many images a carousel carries. Vercel's serverless function
 // body limit is 4.5MB; even JPEG@0.92 watermarked GPT Image-2 / MiniMax
@@ -6,11 +6,12 @@
 // crosses the limit when shipped inline. Uploading to a public host
 // first turns each image into a ~50 byte URL.
 //
-// uguu.se is the same host the /api/social/post IG branch already uses
-// internally — picking it client-side keeps the trust surface and
-// failure-mode catalog the same. n.uguu.se URLs are CDN-backed and stay
-// live for ~30 days (long enough for the route's downstream IG/Twitter/
-// Pinterest/Discord posts to fetch).
+// Phase 4 (CORS fix): uguu.se sends no Access-Control-Allow-Origin
+// header, so the browser blocks direct uploads with "Failed to fetch".
+// We proxy through /api/upload — same uguu backend, but the cross-origin
+// hop happens server-to-server where CORS doesn't apply. Per-image
+// uploads keep each request under Vercel's 4.5MB function body limit
+// (a single JPEG@0.92 fits; carousels upload members one request each).
 
 /**
  * Public-host upload result. `hostedUrl` is what gets shipped to the
@@ -20,7 +21,7 @@ export interface HostedImage {
   hostedUrl: string;
 }
 
-const UGUU_UPLOAD_ENDPOINT = 'https://uguu.se/upload.php';
+const UPLOAD_PROXY_ENDPOINT = '/api/upload';
 const UPLOAD_TIMEOUT_MS = 30_000;
 
 /**
@@ -55,33 +56,33 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 }
 
 /**
- * POST one image (as Blob) to uguu and return the hosted URL. Throws
- * on network/parse/contract failures so the caller can fall back to
- * shipping the raw data URL (and hitting the 413, but at least with
- * a descriptive error from the route's diagnostic patch).
+ * POST one image (as Blob) to our own /api/upload proxy and return the
+ * hosted URL the proxy received from uguu. Throws on network / parse /
+ * contract failures so the caller can surface a readable message.
+ *
+ * The proxy field name is `file` (single) — distinct from uguu's own
+ * `files[]` convention, which the proxy translates server-side.
  */
-async function uploadBlobToUguu(blob: Blob, filename: string): Promise<string> {
+async function uploadBlobToProxy(blob: Blob, filename: string): Promise<string> {
   const formData = new FormData();
-  formData.append('files[]', blob, filename);
-  const res = await fetch(UGUU_UPLOAD_ENDPOINT, {
+  formData.append('file', blob, filename);
+  const res = await fetch(UPLOAD_PROXY_ENDPOINT, {
     method: 'POST',
     body: formData,
     signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
   });
   const text = await res.text();
-  let data: { success?: boolean; files?: Array<{ url?: string }>; description?: string; error?: string };
+  let data: { url?: string; error?: string };
   try {
     data = JSON.parse(text);
   } catch {
     const snippet = text.slice(0, 200).replace(/\s+/g, ' ').trim();
-    throw new Error(`uguu returned non-JSON (HTTP ${res.status}): ${snippet || '<empty>'}`);
+    throw new Error(`/api/upload returned non-JSON (HTTP ${res.status}): ${snippet || '<empty>'}`);
   }
-  if (!res.ok || !data.success) {
-    throw new Error(`uguu upload failed (HTTP ${res.status}): ${data.description ?? data.error ?? 'no message'}`);
+  if (!res.ok || !data.url) {
+    throw new Error(`/api/upload failed (HTTP ${res.status}): ${data.error ?? 'no message'}`);
   }
-  const url = data.files?.[0]?.url;
-  if (!url) throw new Error('uguu returned success but no files[0].url');
-  return url;
+  return data.url;
 }
 
 /**
@@ -99,7 +100,7 @@ export async function ensureHostedUrl(source: string): Promise<string> {
   // content, just helps the host route the file correctly on its end.
   const ext = parsed.mimeType.endsWith('png') ? 'png' : 'jpg';
   const blob = base64ToBlob(parsed.base64, parsed.mimeType);
-  return uploadBlobToUguu(blob, `image.${ext}`);
+  return uploadBlobToProxy(blob, `image.${ext}`);
 }
 
 /**
@@ -121,5 +122,5 @@ export async function ensureHostedUrls(sources: string[]): Promise<string[]> {
 export async function uploadBase64ToHost(base64: string, mimeType = 'image/jpeg'): Promise<string> {
   const ext = mimeType.endsWith('png') ? 'png' : 'jpg';
   const blob = base64ToBlob(base64, mimeType);
-  return uploadBlobToUguu(blob, `image.${ext}`);
+  return uploadBlobToProxy(blob, `image.${ext}`);
 }

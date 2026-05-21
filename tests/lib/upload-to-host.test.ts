@@ -6,10 +6,14 @@ import { ensureHostedUrl, ensureHostedUrls, uploadBase64ToHost } from '@/lib/upl
 const TINY_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII=';
 const TINY_PNG_DATA_URL = `data:image/png;base64,${TINY_PNG_B64}`;
 
-function mockUguuSuccess(hostedUrl = 'https://n.uguu.se/Abc12345.jpg') {
+// /api/upload (our proxy) returns `{ url }` after re-hosting to uguu
+// server-side. The proxy shields the browser from uguu's missing CORS
+// headers and translates uguu's `{ success, files: [{ url }] }` shape
+// into a simpler `{ url }` for the client.
+function mockProxySuccess(hostedUrl = 'https://n.uguu.se/Abc12345.jpg') {
   return vi.fn().mockResolvedValue(
     new Response(
-      JSON.stringify({ success: true, files: [{ hash: 'x', filename: 'image.jpg', url: hostedUrl, size: 100, dupe: false }] }),
+      JSON.stringify({ url: hostedUrl }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     ),
   );
@@ -42,30 +46,30 @@ describe('ensureHostedUrl', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('uploads data: URL to uguu and returns the hosted URL', async () => {
-    const fetchSpy = mockUguuSuccess('https://n.uguu.se/Hosted1.png');
+  it('uploads data: URL through /api/upload proxy and returns the hosted URL', async () => {
+    const fetchSpy = mockProxySuccess('https://n.uguu.se/Hosted1.png');
     globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
     const result = await ensureHostedUrl(TINY_PNG_DATA_URL);
     expect(result).toBe('https://n.uguu.se/Hosted1.png');
     expect(fetchSpy).toHaveBeenCalledOnce();
-    expect(fetchSpy.mock.calls[0][0]).toBe('https://uguu.se/upload.php');
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/upload');
     const init = fetchSpy.mock.calls[0][1] as RequestInit;
     expect(init?.method).toBe('POST');
     expect(init?.body).toBeInstanceOf(FormData);
   });
 
-  it('throws with a readable message when uguu returns non-JSON', async () => {
+  it('throws with a readable message when /api/upload returns non-JSON', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response('Request Enqueued', { status: 429, headers: { 'content-type': 'text/plain' } }),
     ) as unknown as typeof globalThis.fetch;
-    await expect(ensureHostedUrl(TINY_PNG_DATA_URL)).rejects.toThrow(/uguu returned non-JSON \(HTTP 429\): Request Enqueued/);
+    await expect(ensureHostedUrl(TINY_PNG_DATA_URL)).rejects.toThrow(/\/api\/upload returned non-JSON \(HTTP 429\): Request Enqueued/);
   });
 
-  it('throws when uguu reports success:false', async () => {
+  it('throws when /api/upload returns an error payload', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: false, description: 'No input file(s)' }), { status: 400 }),
+      new Response(JSON.stringify({ error: 'uguu upload failed: No input file(s)' }), { status: 502 }),
     ) as unknown as typeof globalThis.fetch;
-    await expect(ensureHostedUrl(TINY_PNG_DATA_URL)).rejects.toThrow(/uguu upload failed \(HTTP 400\): No input file/);
+    await expect(ensureHostedUrl(TINY_PNG_DATA_URL)).rejects.toThrow(/\/api\/upload failed \(HTTP 502\): uguu upload failed: No input file/);
   });
 
   it('throws when source is neither http/https nor data:', async () => {
@@ -85,7 +89,7 @@ describe('ensureHostedUrls (array)', () => {
     globalThis.fetch = vi.fn(async () => {
       callCount += 1;
       return new Response(
-        JSON.stringify({ success: true, files: [{ url: `https://n.uguu.se/Mixed${callCount}.jpg` }] }),
+        JSON.stringify({ url: `https://n.uguu.se/Mixed${callCount}.jpg` }),
         { status: 200 },
       );
     }) as unknown as typeof globalThis.fetch;
@@ -111,7 +115,7 @@ describe('ensureHostedUrls (array)', () => {
     globalThis.fetch = vi.fn(async () => {
       n += 1;
       if (n === 2) return new Response('Server Error', { status: 500 });
-      return new Response(JSON.stringify({ success: true, files: [{ url: 'https://n.uguu.se/Ok.jpg' }] }), { status: 200 });
+      return new Response(JSON.stringify({ url: 'https://n.uguu.se/Ok.jpg' }), { status: 200 });
     }) as unknown as typeof globalThis.fetch;
 
     await expect(ensureHostedUrls([TINY_PNG_DATA_URL, TINY_PNG_DATA_URL, TINY_PNG_DATA_URL])).rejects.toThrow();
@@ -125,7 +129,7 @@ describe('uploadBase64ToHost (raw base64, no data: prefix)', () => {
   afterEach(() => { globalThis.fetch = originalFetch; });
 
   it('uploads a raw base64 string and returns the hosted URL', async () => {
-    globalThis.fetch = mockUguuSuccess('https://n.uguu.se/Raw.jpg') as unknown as typeof globalThis.fetch;
+    globalThis.fetch = mockProxySuccess('https://n.uguu.se/Raw.jpg') as unknown as typeof globalThis.fetch;
     const result = await uploadBase64ToHost(TINY_PNG_B64, 'image/jpeg');
     expect(result).toBe('https://n.uguu.se/Raw.jpg');
   });
