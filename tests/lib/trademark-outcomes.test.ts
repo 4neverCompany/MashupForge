@@ -81,15 +81,28 @@ describe('genericFor', () => {
     vi.unstubAllGlobals();
   });
 
-  it('returns the curated generic for known names', () => {
-    expect(genericFor('Spider-Man')).toBe('a spider-powered hero');
-    expect(genericFor('Grogu')).toBe('a small green-skinned alien child');
-    expect(genericFor('Astartes')).toBe('an armored sci-fi soldier');
+  it('returns a visually-distinctive curated generic for known names', () => {
+    // TRADEMARK-SURGICAL-REWRITE (2026-05-21): generics enriched to
+    // preserve visual identity per Maurice's "generic descriptions are
+    // NOT acceptable — they lose what makes the character distinct" rule.
+    // Assert STRUCTURAL shape (key visual cues present) rather than
+    // verbatim wording so future tuning doesn't break the suite.
+    const spider = genericFor('Spider-Man');
+    expect(spider).toMatch(/red and blue/i);
+    expect(spider).toMatch(/spider/i);
+
+    const grogu = genericFor('Grogu');
+    expect(grogu).toMatch(/green/i);
+    expect(grogu).toMatch(/alien/i);
+
+    const astartes = genericFor('Astartes');
+    expect(astartes).toMatch(/armored/i);
+    expect(astartes).toMatch(/sci-fi|super-soldier/i);
   });
 
-  it('case-insensitive lookup', () => {
-    expect(genericFor('SPIDER-MAN')).toBe('a spider-powered hero');
-    expect(genericFor('grogu')).toBe('a small green-skinned alien child');
+  it('case-insensitive lookup returns the same enriched generic', () => {
+    expect(genericFor('SPIDER-MAN')).toBe(genericFor('Spider-Man'));
+    expect(genericFor('grogu')).toBe(genericFor('Grogu'));
   });
 
   it('falls back to a permissive default for unknown names', () => {
@@ -107,12 +120,19 @@ describe('preflightGenericize', () => {
     vi.unstubAllGlobals();
   });
 
-  it('swaps known-blocked names with their generics', () => {
+  it('swaps known-blocked names with their generics — preserves all other text', () => {
+    // TRADEMARK-SURGICAL-REWRITE: assert the rest of the prompt survives
+    // verbatim (Maurice's rule #2: "ONLY change what triggered the block
+    // — keep everything else identical"). Generic content is asserted
+    // structurally so the test doesn't break when we tune the visual
+    // descriptors.
     const result = preflightGenericize(
       'Spider-Man swinging through Tokyo at night',
       ['Spider-Man'],
     );
-    expect(result.prompt).toBe('a spider-powered hero swinging through Tokyo at night');
+    expect(result.prompt).not.toContain('Spider-Man');
+    expect(result.prompt).toMatch(/spider/i);
+    expect(result.prompt).toContain('swinging through Tokyo at night');
     expect(result.swapped).toEqual(['Spider-Man']);
   });
 
@@ -127,7 +147,8 @@ describe('preflightGenericize', () => {
 
   it('case-insensitive substring match in the prompt', () => {
     const result = preflightGenericize('spider-man epic pose', ['Spider-Man']);
-    expect(result.prompt).toBe('a spider-powered hero epic pose');
+    expect(result.prompt).not.toMatch(/spider-man/i);
+    expect(result.prompt).toContain('epic pose');
     expect(result.swapped).toContain('Spider-Man');
   });
 
@@ -141,11 +162,15 @@ describe('preflightGenericize', () => {
     // "Miles Morales" should be swapped as a unit; a hypothetical "Miles"
     // alone in the blocked list wouldn't fragment the canonical name.
     const result = preflightGenericize('Miles Morales lands on a rooftop', ['Miles Morales']);
-    expect(result.prompt).toBe('a young spider-powered hero lands on a rooftop');
+    expect(result.prompt).not.toContain('Miles Morales');
+    expect(result.prompt).toMatch(/spider/i);
+    expect(result.prompt).toContain('lands on a rooftop');
   });
 
   it('escapes regex metacharacters in name lookups (apostrophes, hyphens)', () => {
     const result = preflightGenericize("T'Challa leaps from a tree", ["T'Challa"]);
-    expect(result.prompt).toBe('a panther-themed warrior leaps from a tree');
+    expect(result.prompt).not.toContain("T'Challa");
+    expect(result.prompt).toMatch(/panther/i);
+    expect(result.prompt).toContain('leaps from a tree');
   });
 });

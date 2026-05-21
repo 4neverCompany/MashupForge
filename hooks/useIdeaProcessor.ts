@@ -285,20 +285,38 @@ Return ONLY the prompt text, nothing else.`;
             // TRADEMARK-LEARNING: when the error string mentions TRADEMARK
             // (Leonardo's classification surfaces through this string at
             // useComparison.ts:382 as "Blocked after rewrite: TRADEMARK…"),
-            // extract names from the prompt we submitted and mark them
-            // 'blocked' in the outcome store. Future runs will pre-flight
-            // these out automatically.
+            // extract names from the prompt we submitted. Only auto-flag
+            // 'blocked' when EXACTLY ONE name is in the prompt — that's
+            // the unambiguous case where we know which name triggered the
+            // moderation.
+            //
+            // TRADEMARK-SURGICAL-REWRITE (2026-05-21): Maurice's bug report
+            // — when a multi-name prompt blocked, the prior code marked
+            // EVERY extracted name 'blocked' even though only one was the
+            // trigger. Iron Man got falsely flagged from a Spider-Man +
+            // Iron Man prompt where Spider-Man was the real trigger,
+            // poisoning the learning store. Now: if there are multiple
+            // candidate names, just log them so a human / future
+            // disambiguation can act — don't auto-poison the store.
             onModelError: (_modelId, modelName, err) => {
               addLog('image-gen', idea.id, 'error', `${modelName} failed: ${err}`);
               if (/TRADEMARK|COPYRIGHT/i.test(err)) {
                 const observedNames = extractTrademarkNames(activePrompt);
-                for (const name of observedNames) setOutcome(name, 'blocked');
-                if (observedNames.length > 0) {
+                if (observedNames.length === 1) {
+                  const name = observedNames[0];
+                  setOutcome(name, 'blocked');
                   addLog(
                     'moderation',
                     idea.id,
                     'error',
-                    `TRADEMARK blocked: ${modelName} — marked ${observedNames.length} name${observedNames.length === 1 ? '' : 's'} blocked for future pre-flight: ${observedNames.join(', ')}`,
+                    `TRADEMARK blocked: ${modelName} — marked "${name}" blocked for future pre-flight (sole candidate in prompt)`,
+                  );
+                } else if (observedNames.length > 1) {
+                  addLog(
+                    'moderation',
+                    idea.id,
+                    'error',
+                    `TRADEMARK blocked: ${modelName} — ${observedNames.length} candidate names in prompt, NOT auto-flagging (ambiguous trigger): ${observedNames.join(', ')}`,
                   );
                 }
               }
