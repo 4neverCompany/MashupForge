@@ -373,7 +373,63 @@ async function submitMinimaxImage(params: MinimaxImageParams): Promise<LeonardoS
   };
 }
 
-export function buildModerationRewriteInstruction(failedPrompt: string): string {
+/**
+ * TRADEMARK-SELF-HEAL (2026-05-21): the previous one-size-fits-all
+ * instruction said "Keep the character names and core concept" — which
+ * is exactly the wrong move for TRADEMARK rejections (Leonardo flagged
+ * the named character; keeping the name guarantees the retry also
+ * fails). Classification-aware now:
+ *
+ * - TRADEMARK / COPYRIGHT → instruct the AI to swap named IP for
+ *   generic descriptors ("Spider-Man" → "a spider-powered hero",
+ *   "Grogu" → "a small green alien"). The model already knows the
+ *   franchise mappings; embedding a hardcoded mapping table would
+ *   rot the moment a new franchise lands. The "core concept" framing
+ *   is dropped — for trademark, the concept WAS the violation.
+ * - NSFW / EXTREME_VIOLENCE / CHILD → keep names, soften imagery
+ *   (the original behaviour, useful for over-aggressive moderation).
+ * - Default / unknown → conservative fallback identical to pre-fix.
+ *
+ * Maurice reported: every pipeline run currently fails on Spider-Man /
+ * Grogu / Mandalorian mashups because the rewrite kept the name.
+ */
+export function buildModerationRewriteInstruction(
+  failedPrompt: string,
+  classifications: string[] = [],
+): string {
+  const upper = classifications.map((c) => c.toUpperCase());
+  const isTrademark = upper.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
+  const isContentBlock = upper.some((c) => c === 'NSFW' || c === 'EXTREME_VIOLENCE' || c === 'CHILD');
+
+  if (isTrademark) {
+    return `This prompt was blocked by content moderation for TRADEMARK / COPYRIGHT (named IP). Rewrite it so every trademarked or copyrighted name is replaced by a generic visual descriptor — preserve the visual concept, drop the named-character anchor.
+
+Examples of the right kind of substitution:
+- "Spider-Man" / "Miles Morales" / "Peter Parker" → "a spider-powered hero" / "a young spider-powered hero"
+- "Black Panther" → "a panther-themed warrior"
+- "Captain America" / "Steve Rogers" → "a patriotic shield-bearing hero"
+- "Grogu" / "Baby Yoda" → "a small green-skinned alien"
+- "Mandalorian" / "Jedi" / "Sith" → "a sci-fi warrior in armor" / "a robed sci-fi knight"
+- "Astartes" / "Space Marine" / "Tyranid" → "an armored sci-fi soldier" / "a chitinous alien creature"
+
+Apply the same pattern to ANY named franchise character or IP. Keep the visual style, mood, composition, and any non-IP descriptors. Target 40-60 words. Return ONLY the rewritten prompt, no preamble.
+
+BLOCKED PROMPT:
+${failedPrompt}
+
+REWRITTEN PROMPT:`;
+  }
+
+  if (isContentBlock) {
+    return `This prompt was blocked by content moderation (${classifications.join(', ')}). Rewrite it to be cleaner and shorter (40–60 words max). Remove any violence, gore, or explicit language. Keep the character names and core concept. Return ONLY the rewritten prompt.
+
+BLOCKED PROMPT:
+${failedPrompt}
+
+REWRITTEN PROMPT:`;
+  }
+
+  // Unknown / mixed classification — conservative fallback (pre-fix wording).
   return `This prompt was blocked by content moderation. Rewrite it to be cleaner and shorter (40–60 words max). Remove any violence, gore, or explicit language. Keep the character names and core concept. Return ONLY the rewritten prompt.
 
 BLOCKED PROMPT:
@@ -422,7 +478,7 @@ async function submitWithOneRetry(
     callbacks.onRetry(classifications);
 
     const rewritten = await streamAIToString(
-      buildModerationRewriteInstruction(lErr.failedPrompt || initialPrompt),
+      buildModerationRewriteInstruction(lErr.failedPrompt || initialPrompt, classifications),
       { mode: 'enhance', provider },
     );
     const activePrompt = (rewritten || '').trim() || initialPrompt;
@@ -469,7 +525,7 @@ async function submitViaAiImageWithOneRetry(
     callbacks.onRetry(classifications);
 
     const rewritten = await streamAIToString(
-      buildModerationRewriteInstruction(lErr.failedPrompt || initialIdea),
+      buildModerationRewriteInstruction(lErr.failedPrompt || initialIdea, classifications),
       { mode: 'enhance', provider: 'vercel-ai' },
     );
     const activePrompt = (rewritten || '').trim() || initialIdea;

@@ -333,7 +333,7 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
                 : img
             ));
             const rewritten = await streamAIToString(
-              buildModerationRewriteInstruction(e.failedPrompt ?? activePrompt),
+              buildModerationRewriteInstruction(e.failedPrompt ?? activePrompt, cls),
               { mode: 'enhance', provider: settings.activeAiAgent, model: settings.activeTextModel },
             );
             activePrompt = (rewritten || '').trim() || activePrompt;

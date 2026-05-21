@@ -23,6 +23,14 @@ const BASE_NEGATIVES = [
   'signature',
   'text',
   'jpeg artifacts',
+  // TRADEMARK-SELF-HEAL (2026-05-21): defense in depth alongside the
+  // classification-aware retry rewrite in buildModerationRewriteInstruction.
+  // Negative prompts don't catch everything (Leonardo's moderation runs
+  // on the positive prompt, not these), but they nudge the upstream
+  // prompt-enhance step to favour generic descriptors over named IP.
+  'trademarked character names',
+  'copyrighted franchise IP',
+  'specific named characters',
 ];
 
 /**
