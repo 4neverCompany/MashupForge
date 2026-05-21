@@ -336,46 +336,58 @@ export function AutoUpdateSettings({ draft, onFieldChange, isDesktop }: AutoUpda
         />
       </div>
 
-      {/* Windows install mode — persisted but not yet wired to the runtime install call */}
-      <div className="space-y-1.5 opacity-60">
-        <div className="flex items-center gap-2">
-          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-            Windows install mode
+      {/* UPDATE-P0-3 (2026-05-21): Windows install mode — hidden on
+          non-Windows platforms entirely. The NSIS install modes
+          (passive/basicUi/quiet) are Windows-specific by construction;
+          on macOS / Linux this section telegraphed unfinished work that
+          was never coming to those platforms in this shape. Runtime
+          selection is still pending an app build wire-up even on
+          Windows; the "Coming soon" badge stays for that reason.
+          Detection via navigator.userAgent matches the rest of the
+          codebase (e.g. P0-1 / P0-3 brief recommendation); a future
+          tauri-plugin-os switch would be a nicer source of truth but
+          isn't installed yet. */}
+      {typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows') && (
+        <div className="space-y-1.5 opacity-60">
+          <div className="flex items-center gap-2">
+            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+              Windows install mode
+            </p>
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-zinc-800 text-zinc-500 border border-zinc-700/60">
+              Coming soon
+            </span>
+          </div>
+          <div
+            role="radiogroup"
+            aria-label="Windows install mode (coming soon)"
+            className="grid grid-cols-3 gap-1.5 pointer-events-none"
+          >
+            {WIN_MODES.map((mode) => {
+              const selected = winMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled
+                  className={[
+                    'flex items-center justify-center rounded-lg border px-2.5 py-2 text-xs font-medium cursor-not-allowed',
+                    selected
+                      ? 'border-zinc-700 bg-zinc-800/50 text-zinc-400'
+                      : 'border-zinc-800/40 bg-[#050505] text-zinc-600',
+                  ].join(' ')}
+                >
+                  {WIN_MODE_LABELS[mode]}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-zinc-600">
+            {WIN_MODE_HINTS[winMode]} — runtime selection requires a future app build
           </p>
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-zinc-800 text-zinc-500 border border-zinc-700/60">
-            Coming soon
-          </span>
         </div>
-        <div
-          role="radiogroup"
-          aria-label="Windows install mode (coming soon)"
-          className="grid grid-cols-3 gap-1.5 pointer-events-none"
-        >
-          {WIN_MODES.map((mode) => {
-            const selected = winMode === mode;
-            return (
-              <button
-                key={mode}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                disabled
-                className={[
-                  'flex items-center justify-center rounded-lg border px-2.5 py-2 text-xs font-medium cursor-not-allowed',
-                  selected
-                    ? 'border-zinc-700 bg-zinc-800/50 text-zinc-400'
-                    : 'border-zinc-800/40 bg-[#050505] text-zinc-600',
-                ].join(' ')}
-              >
-                {WIN_MODE_LABELS[mode]}
-              </button>
-            );
-          })}
-        </div>
-        <p className="text-[10px] text-zinc-600">
-          {WIN_MODE_HINTS[winMode]} — runtime selection requires a future app build
-        </p>
-      </div>
+      )}
 
       {/* Manual check button + last-checked label */}
       <div className="flex items-center gap-2">
