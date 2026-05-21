@@ -2,6 +2,22 @@
 
 All notable changes to MashupForge are documented in this file.
 
+## [0.9.41] — 2026-05-21
+
+### Fixed
+- **social:** proxy uguu uploads through /api/upload (413 fix v4 / CORS fix)
+- **social:** client-side uguu upload before posting (413 fix v3)
+- **watermark:** JPEG 92 output instead of PNG (413 fix v2)
+- **social:** skip mediaBase64 when mediaUrl is present (413 fix)
+- **social:** diagnostic patch for posting non-JSON failures
+- **pipeline:** surface per-model image-gen failures + lock think-strip
+- **aiClient:** strip <think> blocks in streamAIToString
+- **release:** scripts/release.sh now refreshes src-tauri/Cargo.lock
+
+### Docs
+- refresh README for v0.9.40
+- update version badge to v0.9.40
+
 ## [0.9.40] — 2026-05-20
 
 ### Fixed
