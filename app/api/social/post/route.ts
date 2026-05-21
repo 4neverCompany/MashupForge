@@ -4,6 +4,63 @@ import { resolveInstagramCredentials } from '@/lib/instagram-credentials';
 
 const IG_GRAPH_API_VERSION = 'v21.0';
 
+// POST-NONJSON-DIAG (2026-05-21): typed error class so the outer catch
+// can surface upstream URL + Vercel-edge headers + body snippet in the
+// JSON error response. Maurice hit a "Request Enqueued" plain-text body
+// that the IG branch's parseJsonOrThrow already names, but the route
+// also had an unwrapped res.json() (Pinterest uguu upload) and the
+// frontend had no visibility into which upstream produced the failure
+// or whether a Vercel edge/WAF layer intercepted before our code ran.
+const VERCEL_DIAG_HEADERS = [
+  'x-vercel-id',
+  'x-vercel-error',
+  'x-vercel-mitigated',
+  'server',
+] as const;
+
+function pickVercelHeaders(res: Response): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const h of VERCEL_DIAG_HEADERS) {
+    const v = res.headers.get(h);
+    if (v) out[h] = v;
+  }
+  return out;
+}
+
+class UpstreamNonJsonError extends Error {
+  readonly upstreamUrl: string;
+  readonly upstreamStatus: number;
+  readonly upstreamBodySnippet: string;
+  readonly upstreamHeaders: Record<string, string>;
+  constructor(
+    context: string,
+    url: string,
+    status: number,
+    snippet: string,
+    headers: Record<string, string>,
+  ) {
+    super(
+      `${context} [${url}]: server returned non-JSON (HTTP ${status}). First 200 chars: ${snippet || '<empty>'}`,
+    );
+    this.name = 'UpstreamNonJsonError';
+    this.upstreamUrl = url;
+    this.upstreamStatus = status;
+    this.upstreamBodySnippet = snippet;
+    this.upstreamHeaders = headers;
+  }
+}
+
+/** Platform branch tracker — updated as the handler enters each block. */
+type ActiveBranch =
+  | 'init'
+  | 'parse-input'
+  | 'fetch-media'
+  | 'instagram'
+  | 'twitter'
+  | 'pinterest'
+  | 'discord'
+  | 'finalize';
+
 /**
  * Parse a response body as JSON, or throw a readable error that includes
  * HTTP status + a snippet of the raw body. Graph API and uguu both return
@@ -20,8 +77,17 @@ async function parseJsonOrThrow(res: Response, context: string): Promise<Record<
     return raw ? JSON.parse(raw) : {};
   } catch {
     const snippet = raw.slice(0, 200).replace(/\s+/g, ' ').trim();
-    throw new Error(
-      `${context}: server returned non-JSON (HTTP ${res.status}). First 200 chars: ${snippet || '<empty>'}`,
+    // POST-NONJSON-DIAG (2026-05-21): throw a typed error carrying url +
+    // status + body snippet + Vercel-edge headers so the outer catch can
+    // include them in the JSON error response. Maurice can then read the
+    // toast to identify whether a Vercel WAF/queue intercept, a Meta
+    // anti-abuse response, or an uguu degradation produced the body.
+    throw new UpstreamNonJsonError(
+      context,
+      res.url,
+      res.status,
+      snippet,
+      pickVercelHeaders(res),
     );
   }
 }
@@ -133,8 +199,20 @@ async function prepareForInstagram(buffer: Buffer): Promise<Buffer> {
 }
 
 export async function POST(req: Request) {
+  // POST-NONJSON-DIAG (2026-05-21): tracker shared between the try and the
+  // outer catch so the failure response can name which platform branch was
+  // executing when the throw happened. Updated as the handler crosses
+  // branch boundaries.
+  let activeBranch: ActiveBranch = 'init';
+  // Original request body, captured before any platform branch runs, so
+  // the outer catch can emit a redacted replay-cURL for Maurice. Captured
+  // separately because `await req.json()` consumes the body.
+  let rawBodyForReplay: Record<string, unknown> | null = null;
   try {
-    const { caption, platforms, mediaUrl, mediaUrls, mediaBase64, credentials } = await req.json();
+    activeBranch = 'parse-input';
+    const parsed = await req.json();
+    rawBodyForReplay = parsed;
+    const { caption, platforms, mediaUrl, mediaUrls, mediaBase64, credentials } = parsed;
 
     // Fix 5 (mmx brief): old scheduled content arrived here with empty
     // mediaUrl AND no base64, then silently produced a 0-image post that
@@ -149,6 +227,7 @@ export async function POST(req: Request) {
     // Helper to get image buffers
     const imageItems: { buffer: Buffer, mimeType: string, url?: string }[] = [];
 
+    activeBranch = 'fetch-media';
     const urlsToProcess = mediaUrls && mediaUrls.length > 0 ? mediaUrls : (mediaUrl ? [mediaUrl] : []);
 
     for (const url of urlsToProcess) {
@@ -210,6 +289,7 @@ export async function POST(req: Request) {
     }
 
     if (platforms.includes('instagram')) {
+      activeBranch = 'instagram';
       const { igAccountId: igAccountIdRaw, igAccessToken: igAccessTokenRaw } =
         resolveInstagramCredentials(process.env, credentials?.instagram);
       if (!igAccessTokenRaw || !igAccountIdRaw) {
@@ -267,6 +347,7 @@ export async function POST(req: Request) {
           }
           igMediaUrls.push(uploadFiles[0].url as string);
         } catch (e: unknown) {
+          if (e instanceof UpstreamNonJsonError) throw e;
           throw new Error(`Failed to host image for Instagram: ${getErrorMessage(e)}`);
         }
       }
@@ -340,6 +421,7 @@ export async function POST(req: Request) {
     }
 
     if (platforms.includes('twitter')) {
+      activeBranch = 'twitter';
       const twAppKey = process.env.TWITTER_APP_KEY ?? credentials?.twitter?.appKey ?? '';
       const twAppSecret = process.env.TWITTER_APP_SECRET ?? credentials?.twitter?.appSecret ?? '';
       const twAccessToken = process.env.TWITTER_ACCESS_TOKEN ?? credentials?.twitter?.accessToken ?? '';
@@ -371,6 +453,7 @@ export async function POST(req: Request) {
     }
 
     if (platforms.includes('pinterest')) {
+      activeBranch = 'pinterest';
       const pinAccessToken = process.env.PINTEREST_ACCESS_TOKEN ?? credentials?.pinterest?.accessToken ?? '';
       if (!pinAccessToken) {
         throw new Error('Pinterest access token missing');
@@ -395,14 +478,27 @@ export async function POST(req: Request) {
             body: formData,
             signal: AbortSignal.timeout(30000),
           });
-          if (!uploadRes.ok) throw new Error('uguu upload failed');
-          const uploadData = await uploadRes.json() as Record<string, unknown>;
+          // POST-NONJSON-DIAG (2026-05-21): was `await uploadRes.json()`,
+          // which bubbled the raw V8 SyntaxError when uguu returned plain
+          // text (rate-limit page, "Request Enqueued" overload response,
+          // etc.) and the outer catch surfaced that uninformative message
+          // verbatim. The IG branch already uses parseJsonOrThrow for the
+          // same upload, so mirror it here for parity + named upstream in
+          // the error message.
+          const uploadData = await parseJsonOrThrow(uploadRes, 'uguu image upload (pinterest)');
+          if (!uploadRes.ok) {
+            throw new Error(`uguu upload failed (HTTP ${uploadRes.status}): ${(uploadData?.description as string | undefined) ?? (uploadData?.error as string | undefined) ?? 'no message'}`);
+          }
           const uploadFiles2 = uploadData.files as Array<Record<string, unknown>> | undefined;
           if (!uploadData?.success || !uploadFiles2?.[0]?.url) {
             throw new Error('uguu returned invalid response');
           }
           publicUrl = uploadFiles2[0].url as string;
         } catch (e: unknown) {
+          // Re-throw UpstreamNonJsonError directly so the outer catch keeps
+          // its typed fields (url, status, snippet, vercel headers) instead
+          // of stringifying through getErrorMessage and dropping them.
+          if (e instanceof UpstreamNonJsonError) throw e;
           throw new Error(`Failed to host image for Pinterest: ${getErrorMessage(e)}`);
         }
       }
@@ -438,6 +534,7 @@ export async function POST(req: Request) {
     }
 
     if (platforms.includes('discord')) {
+      activeBranch = 'discord';
       const discordWebhookUrl = process.env.DISCORD_WEBHOOK_URL ?? credentials?.discord?.webhookUrl ?? '';
       if (!discordWebhookUrl) {
         throw new Error('Discord webhook URL missing');
@@ -474,8 +571,68 @@ export async function POST(req: Request) {
       results.discord = { success: true };
     }
 
+    activeBranch = 'finalize';
     return NextResponse.json({ success: true, results });
   } catch (e: unknown) {
-    return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });
+    // POST-NONJSON-DIAG (2026-05-21): enrich the error response with the
+    // branch that was active when the throw happened, any upstream URL +
+    // status + body snippet + Vercel-edge headers captured by
+    // parseJsonOrThrow, plus a redacted replay-cURL Maurice can paste
+    // straight into a terminal. Server-side console.error keeps the same
+    // information in Vercel function logs / Tauri sidecar stderr for
+    // post-mortem reads when the surfaced toast is too short.
+    const errorPayload: Record<string, unknown> = {
+      error: getErrorMessage(e),
+      branch: activeBranch,
+    };
+    if (e instanceof UpstreamNonJsonError) {
+      errorPayload.upstream = {
+        url: e.upstreamUrl,
+        status: e.upstreamStatus,
+        bodySnippet: e.upstreamBodySnippet,
+        headers: e.upstreamHeaders,
+      };
+    }
+    // Redacted replay cURL — strip mediaBase64 (multi-MB) and any token
+    // strings from credentials so Maurice can paste this verbatim into a
+    // terminal or share it without leaking secrets.
+    if (rawBodyForReplay) {
+      const redacted = redactReplayBody(rawBodyForReplay);
+      const requestUrl = (() => { try { return new URL(req.url).pathname; } catch { return '/api/social/post'; } })();
+      errorPayload.replayCurl =
+        `curl -X POST '${requestUrl}' -H 'Content-Type: application/json' --data-raw '${JSON.stringify(redacted)}'`;
+    }
+    console.error('[/api/social/post] failure', {
+      branch: activeBranch,
+      message: getErrorMessage(e),
+      upstream: e instanceof UpstreamNonJsonError ? {
+        url: e.upstreamUrl,
+        status: e.upstreamStatus,
+        bodySnippet: e.upstreamBodySnippet,
+        headers: e.upstreamHeaders,
+      } : undefined,
+    });
+    return NextResponse.json(errorPayload, { status: 500 });
   }
+}
+
+/**
+ * Strip secrets and oversized fields from the request body so a replay
+ * cURL can be safely shared. Keeps shape so a paste-and-run reproduces
+ * the same code path.
+ */
+function redactReplayBody(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...body };
+  if (typeof out.mediaBase64 === 'string') {
+    out.mediaBase64 = `<redacted: ${(out.mediaBase64 as string).length} chars>`;
+  }
+  if (out.credentials && typeof out.credentials === 'object') {
+    const c = out.credentials as Record<string, unknown>;
+    const redactedCreds: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(c)) {
+      redactedCreds[k] = v && typeof v === 'object' ? '<redacted>' : v ? '<redacted>' : v;
+    }
+    out.credentials = redactedCreds;
+  }
+  return out;
 }

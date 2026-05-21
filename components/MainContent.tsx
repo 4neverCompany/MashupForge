@@ -1043,7 +1043,17 @@ export function MainContent() {
           credentials: buildCredentialsPayload(),
         }),
       });
-      const data = await res.json() as { error?: string };
+      // POST-NONJSON-DIAG (2026-05-21): defensively wrap res.json() to
+      // match the other three /api/social/post call sites. Without this,
+      // a non-JSON response body bubbled the raw V8 SyntaxError directly
+      // into the carousel-post toast ("Unexpected token R, Request En...
+      // is not valid JSON"), masking which upstream produced the failure.
+      let data: { error?: string };
+      try {
+        data = await res.json() as { error?: string };
+      } catch {
+        throw new Error(`Server error (HTTP ${res.status}) — check logs`);
+      }
       if (!res.ok) throw new Error(data.error || 'Carousel post failed');
       const stamp = Date.now();
       for (const ci of item.images) {
