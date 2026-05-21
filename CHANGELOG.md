@@ -2,6 +2,10 @@
 
 All notable changes to MashupForge are documented in this file.
 
+## [0.9.43] — 2026-05-21
+
+_Internal-only release; no user-facing changes since v0.9.43._
+
 ## [0.9.42] — 2026-05-21
 
 ### Added
