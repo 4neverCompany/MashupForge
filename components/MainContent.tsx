@@ -484,6 +484,14 @@ export function MainContent() {
     setPostBusy((prev) => ({ ...prev, [img.id]: 'posting' }));
     setPostStatus((prev) => ({ ...prev, [img.id]: null }));
     try {
+      // POST-413-FIX (2026-05-21): only ship mediaBase64 when mediaUrl is
+      // missing. Vercel's serverless function body limit is 4.5MB; a
+      // ~3MB JPEG becomes ~4MB base64-encoded, blowing the limit and
+      // surfacing as a Vercel platform 413 (plain text, not JSON) that
+      // bypasses our route entirely. The route already prefers mediaUrl
+      // and only falls back to base64 when URL fetch produces no buffers
+      // (see route.ts:197-199), so omitting base64 when URL is present
+      // costs nothing.
       const res = await fetch('/api/social/post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -491,7 +499,7 @@ export function MainContent() {
           caption: formatPost(img),
           platforms,
           mediaUrl: img.url,
-          mediaBase64: img.base64,
+          ...(img.url ? {} : { mediaBase64: img.base64 }),
           credentials: buildCredentialsPayload(),
         }),
       });
@@ -1692,6 +1700,10 @@ export function MainContent() {
           if (!post.platforms || post.platforms.length === 0) {
             throw new Error('No platforms selected on the scheduled post');
           }
+          // POST-413-FIX (2026-05-21): see manual-single counterpart above.
+          // Skip mediaBase64 when mediaUrl is present so the autopost path
+          // doesn't trip Vercel's 4.5MB serverless body limit on
+          // higher-res output from GPT Image-2 / MiniMax-image-01.
           const res = await fetch('/api/social/post', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1699,7 +1711,7 @@ export function MainContent() {
               caption: post.caption,
               platforms: post.platforms,
               mediaUrl: image.url,
-              mediaBase64: image.base64,
+              ...(image.url ? {} : { mediaBase64: image.base64 }),
               credentials,
             }),
           });
