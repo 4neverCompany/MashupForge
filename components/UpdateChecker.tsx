@@ -33,6 +33,14 @@ type State =
   | { kind: 'available'; update: UpdateLike; downloadSize: number | null }
   | { kind: 'postponed'; update: UpdateLike; deadline: number }
   | { kind: 'downloading'; update: UpdateLike; downloaded: number; total: number | null }
+  // UPDATE-P0-4 (2026-05-21): bridge state between downloadAndInstall
+  // resolving and the actual relaunch() call. Gives the user 10s to see
+  // that a restart is imminent (mirrors VS Code's update flow). The
+  // simpler variant per the brief — no cancel, since cancelling an in-
+  // flight update is fraught; the user just gets a "Restart now" button
+  // to skip the wait if they're ready. Auto-fires relaunch() when
+  // secondsLeft hits 0.
+  | { kind: 'restart-pending'; update: UpdateLike; secondsLeft: number }
   | { kind: 'download-error'; update: UpdateLike; message: string }
   | { kind: 'error'; message: string }
   | { kind: 'post-update'; version: string };
@@ -45,6 +53,14 @@ const DISMISS_KEY = (version: string) => `mashup_update_dismissed_${version}`;
 // per-version permanent — snooze is global and time-bounded.
 const SNOOZE_KEY = 'mashup_update_snooze_until';
 const SNOOZE_DURATION_MS = 24 * 60 * 60 * 1000; // 24h
+// UPDATE-P0-4 (2026-05-21): countdown before the post-download
+// relaunch. 10s mirrors VS Code's "Restarting to update" overlay —
+// long enough to register, short enough to not feel like a hostage
+// situation. Shipped as the simpler variant per the brief: no cancel
+// button, just a "Restart now" to skip the wait. Cancelling an in-
+// flight update is fraught — the install has already completed by
+// this point and rolling back isn't trivially safe.
+const RESTART_COUNTDOWN_SECONDS = 10;
 const LAST_SEEN_KEY = 'mashup_update_last_seen_version';
 // FEAT-002: surfaced in the Updates subsection of DesktopSettingsPanel.
 export const LAST_CHECKED_AT_KEY = 'mashup_update_last_checked_at';
@@ -324,23 +340,65 @@ export function UpdateChecker() {
         }
       });
       traceUpdater('install:downloadAndInstall-resolved', { version: update.version });
-      // BUG-002: NSIS only RELAUNCHES via `/R`, it does NOT kill the parent.
-      // Without an explicit exit the old instance keeps holding sidecar port
-      // 19782 (DESKTOP_PORT in src-tauri/src/lib.rs) and the new instance
-      // installed by NSIS falls back to an ephemeral port — which breaks
-      // the IndexedDB origin pin (STORY-121) and orphans settings.
-      // `relaunch()` from tauri-plugin-process triggers a clean exit, fires
-      // WindowEvent::CloseRequested in lib.rs, the sidecar Child is killed,
-      // port 19782 frees, and Tauri spawns the freshly installed binary.
-      const processMod = await import('@tauri-apps/plugin-process');
-      traceUpdater('install:calling-relaunch');
-      await processMod.relaunch();
+      // UPDATE-P0-4 (2026-05-21): instead of relaunching immediately,
+      // park in `restart-pending` with a 10s countdown so the user has
+      // a chance to see what's happening before the app vanishes. The
+      // dedicated countdown effect below fires relaunch() when the
+      // timer hits 0 (or when the user clicks "Restart now").
+      setState({ kind: 'restart-pending', update, secondsLeft: RESTART_COUNTDOWN_SECONDS });
     } catch (e: unknown) {
       const detail = e instanceof Error ? e.message : String(e);
       traceUpdater('install:failed', { error: detail });
       setState({ kind: 'download-error', update, message: detail });
     }
   }, []);
+
+  // UPDATE-P0-4 (2026-05-21): the actual relaunch call, callable from
+  // BOTH the countdown effect (when secondsLeft hits 0) AND the
+  // "Restart now" button. BUG-002 context: NSIS only RELAUNCHES via
+  // `/R`, it does NOT kill the parent. Without an explicit exit the
+  // old instance keeps holding sidecar port 19782 (DESKTOP_PORT in
+  // src-tauri/src/lib.rs) and the new instance installed by NSIS falls
+  // back to an ephemeral port — which breaks the IndexedDB origin pin
+  // (STORY-121) and orphans settings. `relaunch()` from
+  // tauri-plugin-process triggers a clean exit, fires
+  // WindowEvent::CloseRequested in lib.rs, the sidecar Child is
+  // killed, port 19782 frees, and Tauri spawns the freshly installed
+  // binary.
+  const triggerRelaunch = useCallback(async () => {
+    try {
+      const processMod = await import('@tauri-apps/plugin-process');
+      traceUpdater('install:calling-relaunch');
+      await processMod.relaunch();
+    } catch (e: unknown) {
+      const detail = e instanceof Error ? e.message : String(e);
+      traceUpdater('install:relaunch-failed', { error: detail });
+      // If relaunch itself fails (unlikely once we reach this point) we
+      // can't really recover here — the update is already installed.
+      // Surface an error so the user knows to restart manually.
+      setState({ kind: 'error', message: `Restart failed: ${detail}. Please restart MashupForge manually.` });
+    }
+  }, []);
+
+  // UPDATE-P0-4 (2026-05-21): countdown effect — ticks once per second
+  // while in `restart-pending` and fires relaunch() the instant it
+  // reaches 0. Cleanup on unmount / state change prevents a stale timer
+  // from firing after the user clicks "Restart now".
+  useEffect(() => {
+    if (state.kind !== 'restart-pending') return;
+    if (state.secondsLeft <= 0) {
+      void triggerRelaunch();
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      setState((prev) =>
+        prev.kind === 'restart-pending'
+          ? { ...prev, secondsLeft: Math.max(0, prev.secondsLeft - 1) }
+          : prev,
+      );
+    }, 1000);
+    return () => window.clearTimeout(handle);
+  }, [state, triggerRelaunch]);
 
   const handleUpdate = useCallback(async () => {
     if (state.kind !== 'available') return;
@@ -436,6 +494,46 @@ export function UpdateChecker() {
   }, [state]);
 
   if (state.kind === 'idle' || state.kind === 'error') return null;
+
+  // UPDATE-P0-4 (2026-05-21): full-screen restart-pending overlay. Sits
+  // on top of everything (z-[200] vs the corner banners at z-[100]) so
+  // the user can't miss that the app is about to restart. Single
+  // "Restart now" button — no cancel, per the simpler-variant brief.
+  if (state.kind === 'restart-pending') {
+    return (
+      <div
+        className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="update-restart-heading"
+      >
+        <div className="max-w-md w-[calc(100%-2rem)] rounded-2xl border border-[#c5a062]/40 bg-[#050505]/95 shadow-2xl p-6 space-y-4">
+          <div className="flex items-center gap-3">
+            <RotateCw className="w-5 h-5 text-[#c5a062]" />
+            <h2 id="update-restart-heading" className="text-sm font-semibold text-white">
+              Restarting in {state.secondsLeft} {state.secondsLeft === 1 ? 'second' : 'seconds'}
+            </h2>
+          </div>
+          <p className="text-xs text-zinc-400 leading-relaxed">
+            MashupForge is restarting to apply update{' '}
+            <span className="font-mono text-[#c5a062]">v{state.update.version}</span>. Any
+            in-flight pipeline work has finished — you can wait or restart now.
+          </p>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => void triggerRelaunch()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold bg-[#00e6ff] hover:bg-[#33eaff] active:bg-[#00b8cc] text-[#050505] transition-colors"
+              aria-label="Restart MashupForge now"
+            >
+              <RotateCw className="w-3 h-3" />
+              Restart now
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (state.kind === 'download-error') {
     return (
