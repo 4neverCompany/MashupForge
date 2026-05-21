@@ -17,6 +17,7 @@ import {
   type EngagementHour,
 } from '@/lib/smartScheduler';
 import { getErrorMessage } from '@/lib/errors';
+import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { setPipelineBusy } from '@/lib/pipeline-busy';
 import {
   saveCheckpoint,
@@ -261,9 +262,48 @@ export function usePipelineDaemon(deps: UsePipelineDaemonDeps) {
   const autoGenerateIdeas = useCallback(async (count: number): Promise<Idea[]> => {
     const s = latestPropsRef.current.settings;
     const themed = s.pipelineThemedBatches ?? false;
+
+    // TREND-DRIVEN-IDEAS (2026-05-21): fetch trending research keyed by
+    // the user's active niches/genres BEFORE asking the AI for concepts.
+    // Without this, daemon-auto-gen saw only static niche/genre lists and
+    // produced evergreen but un-timely ideas. /api/trending falls back
+    // to niche/genre-only queries when ideaConcept is empty (see
+    // app/api/trending/route.ts:211 — `if (ideaConcept)` branch is
+    // skipped, freshTerms + crossoverTerms drive the search). The
+    // resulting blurb is injected into the system prompt so the AI can
+    // bias concept selection toward what's actually trending in the
+    // user's franchises right now. Sidebar idea-gen already follows
+    // this pattern (components/Sidebar.tsx ~200); this brings the
+    // autonomous daemon in line.
+    //
+    // Failure mode: trending fetch errors fall through with an empty
+    // blurb. AI still gets niches/genres; we just lose the timeliness
+    // signal for that cycle. Same prompt template either way so the AI
+    // doesn't see a half-broken context.
+    let trendingBlurb = '';
+    try {
+      const res = await fetchWithRetry('/api/trending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tags: [],
+          niches: s.agentNiches,
+          genres: s.agentGenres,
+          ideaConcept: '',
+        }),
+      });
+      const data = (await res.json()) as { success?: boolean; summary?: string };
+      if (data.success && data.summary) trendingBlurb = data.summary;
+    } catch {
+      // Best-effort — daemon continues without trending signal.
+    }
+    const trendingBlock = trendingBlurb
+      ? `\nTrending right now in the user's active franchises (use this to drive concept picks if relevant — recent releases, fan reactions, crossover potential):\n${trendingBlurb}\n`
+      : '';
+
     const base = `${s.agentPrompt || 'You are an elite AI art director.'}
 Active Niches: ${s.agentNiches?.join(', ') || 'All'}
-Active Genres: ${s.agentGenres?.join(', ') || 'All'}`;
+Active Genres: ${s.agentGenres?.join(', ') || 'All'}${trendingBlock}`;
 
     const systemContext = themed
       ? `${base}
