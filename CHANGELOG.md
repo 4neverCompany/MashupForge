@@ -2,6 +2,21 @@
 
 All notable changes to MashupForge are documented in this file.
 
+## [0.9.42] — 2026-05-21
+
+### Added
+- **moderation:** trademark-learning store + pre-flight name rewrite
+- **pipeline:** trend-driven idea generation in autonomous daemon
+- **param-suggest:** thread trending context into AI parameter picker
+
+### Fixed
+- **moderation:** classification-aware retry rewrites TRADEMARK blocks
+- **scheduler:** hard postsPerDay cap to stop dominant-day stacking
+- **pipeline:** respect user model deselections from Studio Mode
+
+### Docs
+- **bmad:** DEPS-TS-MAJOR-MAY21 — TS 5.9.3 → 6.0.3 research
+
 ## [0.9.41] — 2026-05-21
 
 ### Fixed
