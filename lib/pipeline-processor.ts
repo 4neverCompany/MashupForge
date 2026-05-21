@@ -64,6 +64,22 @@ export interface ProcessIdeaDeps {
    */
   triggerImageGeneration(prompt: string, modelIds: string[], trendingContext: string): Promise<void>;
   /**
+   * Return the user's currently-selected image model IDs (Studio Mode
+   * Compare picker, persisted to localStorage.mashup_comparison_models).
+   * The pipeline applies its own nano-banana exclusion on top — nano-
+   * banana is a stale model retained in LEONARDO_MODELS for back-compat
+   * but excluded from generation paths. Empty array signals "user has no
+   * explicit selection" and the pipeline falls back to all Leonardo
+   * models minus nano-banana, preserving the v0.9.41-and-earlier
+   * behaviour for brand-new users.
+   *
+   * MODEL-PRESELECT-FIX (2026-05-21): added because the pipeline was
+   * hardcoded to LEONARDO_MODELS.filter and silently ignored user
+   * deselections in the Studio. Reported by Maurice: deselecting
+   * MiniMax in Studio Mode still produced MiniMax pipeline images.
+   */
+  getEnabledModelIds(): string[];
+  /**
    * Wait for generated images to appear in the image store.
    * Returns ready images (may be empty on timeout).
    * Implementations poll the image store and throw SkipIdeaSignal when
@@ -162,6 +178,7 @@ export async function processIdea(
     fetchTrendingContext,
     expandIdeaToPrompt,
     triggerImageGeneration,
+    getEnabledModelIds,
     waitForImages,
     generatePostContent,
     saveImage,
@@ -307,7 +324,29 @@ export async function processIdea(
     }
 
     // Step d — generate images (fatal on failure)
-    const allModelIds = LEONARDO_MODELS.filter((m) => m.id !== 'nano-banana').map((m) => m.id);
+    // MODEL-PRESELECT-FIX (2026-05-21): was hardcoded
+    //   `LEONARDO_MODELS.filter((m) => m.id !== 'nano-banana')`
+    // which ignored the user's Studio Mode selection entirely — a user
+    // who deselected MiniMax still got MiniMax in pipeline runs. Now
+    // reads getEnabledModelIds() (backed by localStorage.mashup_comparison_models).
+    // Falls back to "all Leonardo models minus nano-banana" when the
+    // selection list is empty so brand-new users without persisted
+    // settings still get a working pipeline. The nano-banana exclusion
+    // is reapplied on top of the user list as defense-in-depth — the UI
+    // default seeds ALL models including nano-banana, and we don't want
+    // a regression sneaking in via the default-on-first-launch path.
+    const selectedIds = getEnabledModelIds();
+    const fallbackIds = LEONARDO_MODELS.filter((m) => m.id !== 'nano-banana').map((m) => m.id);
+    const allModelIds = (selectedIds.length > 0 ? selectedIds : fallbackIds).filter((id) => id !== 'nano-banana');
+    if (allModelIds.length === 0) {
+      // User deselected every image model in Studio Mode. Pipeline can't
+      // generate anything; bail with an actionable error instead of
+      // silently calling triggerImageGeneration with an empty list (which
+      // produces a generic timeout downstream).
+      const msg = 'No image models selected — enable at least one in Studio Mode Compare picker';
+      addLog('image-gen', idea.id, 'error', msg);
+      throw new Error(msg);
+    }
     setPipelineProgress({
       current: index + 1,
       total,

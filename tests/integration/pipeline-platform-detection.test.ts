@@ -62,6 +62,7 @@ const mkDeps = (overrides: Partial<ProcessIdeaDeps> = {}): ProcessIdeaDeps => ({
   fetchTrendingContext: vi.fn().mockResolvedValue(''),
   expandIdeaToPrompt: vi.fn().mockResolvedValue('expanded prompt'),
   triggerImageGeneration: vi.fn().mockResolvedValue(undefined),
+  getEnabledModelIds: vi.fn().mockReturnValue([]),
   waitForImages: vi.fn().mockResolvedValue([mkImage()]),
   generatePostContent: vi.fn().mockImplementation(async (img: GeneratedImage) => ({
     ...img,

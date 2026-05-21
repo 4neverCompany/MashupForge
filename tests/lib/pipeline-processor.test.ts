@@ -61,6 +61,7 @@ function makeDeps(overrides?: Partial<ProcessIdeaDeps>): ProcessIdeaDeps {
     fetchTrendingContext: vi.fn().mockResolvedValue('trending: neon cyberpunk'),
     expandIdeaToPrompt: vi.fn().mockResolvedValue('Epic Batman vs Vader neon Tokyo cinematic 4K'),
     triggerImageGeneration: vi.fn().mockResolvedValue(undefined),
+    getEnabledModelIds: vi.fn().mockReturnValue([]),
     waitForImages: vi.fn().mockResolvedValue([makeImage()]),
     generatePostContent: vi.fn().mockImplementation(async (img: GeneratedImage) => ({
       ...img,
@@ -81,6 +82,64 @@ function makeDeps(overrides?: Partial<ProcessIdeaDeps>): ProcessIdeaDeps {
 }
 
 // ─── processIdea ─────────────────────────────────────────────────────────────
+
+describe('MODEL-PRESELECT-FIX (2026-05-21): respects getEnabledModelIds', () => {
+  it('forwards the user selection to triggerImageGeneration verbatim', async () => {
+    // User deselected MiniMax in Studio Mode — only nano-banana-2 and
+    // gpt-image-1.5 are enabled. Pipeline must call triggerImageGeneration
+    // with that exact list, not LEONARDO_MODELS.
+    const userSelection = ['nano-banana-2', 'gpt-image-1.5'];
+    const trigger = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      triggerImageGeneration: trigger,
+      getEnabledModelIds: vi.fn().mockReturnValue(userSelection),
+    });
+    await processIdea(makeIdea(), 0, 1, makeEngagement(), [], makeSettings(), deps);
+    expect(trigger).toHaveBeenCalledOnce();
+    const passedModelIds = trigger.mock.calls[0][1];
+    expect(passedModelIds).toEqual(userSelection);
+    expect(passedModelIds).not.toContain('minimax-image-01');
+  });
+
+  it('falls back to "all minus nano-banana" when selection is empty (brand-new user)', async () => {
+    const trigger = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      triggerImageGeneration: trigger,
+      getEnabledModelIds: vi.fn().mockReturnValue([]),
+    });
+    await processIdea(makeIdea(), 0, 1, makeEngagement(), [], makeSettings(), deps);
+    const passedModelIds = trigger.mock.calls[0][1] as string[];
+    expect(passedModelIds.length).toBeGreaterThan(0);
+    expect(passedModelIds).not.toContain('nano-banana');
+  });
+
+  it('strips nano-banana from the user selection as defense-in-depth', async () => {
+    // The Studio UI seeds defaults with LEONARDO_MODELS.map(m=>m.id) which
+    // includes nano-banana — without the redundant filter, fresh users
+    // would regress back to the stale model.
+    const trigger = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      triggerImageGeneration: trigger,
+      getEnabledModelIds: vi.fn().mockReturnValue(['nano-banana', 'nano-banana-2']),
+    });
+    await processIdea(makeIdea(), 0, 1, makeEngagement(), [], makeSettings(), deps);
+    const passedModelIds = trigger.mock.calls[0][1] as string[];
+    expect(passedModelIds).toContain('nano-banana-2');
+    expect(passedModelIds).not.toContain('nano-banana');
+  });
+
+  it('throws an actionable error when the user deselected every model', async () => {
+    // Only nano-banana is "selected" — after the redundant strip nothing
+    // remains. Pipeline must bail with a user-actionable message rather
+    // than calling triggerImageGeneration with [] and timing out later.
+    const deps = makeDeps({
+      getEnabledModelIds: vi.fn().mockReturnValue(['nano-banana']),
+    });
+    await expect(
+      processIdea(makeIdea(), 0, 1, makeEngagement(), [], makeSettings(), deps),
+    ).rejects.toThrow(/No image models selected/);
+  });
+});
 
 describe('processIdea — happy path (single mode)', () => {
   it('calls all steps in sequence and marks idea done', async () => {

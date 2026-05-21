@@ -72,6 +72,7 @@ function makeDeps(overrides?: Partial<ProcessIdeaDeps>): ProcessIdeaDeps {
     fetchTrendingContext: vi.fn().mockResolvedValue(''),
     expandIdeaToPrompt: vi.fn().mockResolvedValue('epic expanded prompt'),
     triggerImageGeneration: vi.fn().mockResolvedValue(undefined),
+    getEnabledModelIds: vi.fn().mockReturnValue([]),
     waitForImages: vi.fn().mockResolvedValue([makeImage()]),
     generatePostContent: vi.fn().mockImplementation(async (img: GeneratedImage) => ({
       ...img,

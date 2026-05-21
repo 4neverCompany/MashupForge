@@ -253,6 +253,24 @@ Return ONLY the prompt text, nothing else.`;
           // waitForImages reads the captured Promise next.
           await imageReadyPromise;
         },
+        getEnabledModelIds: () => {
+          // MODEL-PRESELECT-FIX (2026-05-21): bridge between the Studio
+          // Compare picker (persists to localStorage.mashup_comparison_models
+          // — see components/MainContent.tsx:1468) and the pipeline's
+          // model-list step. Returns [] on SSR / missing key / parse failure;
+          // pipeline-processor handles the empty case by falling back to
+          // "all Leonardo models minus nano-banana".
+          try {
+            if (typeof window === 'undefined') return [];
+            const raw = window.localStorage.getItem('mashup_comparison_models');
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) return [];
+            return parsed.filter((x): x is string => typeof x === 'string');
+          } catch {
+            return [];
+          }
+        },
         waitForImages: async () => {
           if (!imageReadyPromise) return [];
           const readyImages = await awaitImagesOrSkip(imageReadyPromise, skipSignal);
