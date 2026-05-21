@@ -171,7 +171,7 @@ Return ONLY the prompt text, nothing else.`;
           return '';
         },
         expandIdeaToPrompt,
-        triggerImageGeneration: async (prompt, modelIds) => {
+        triggerImageGeneration: async (prompt, modelIds, trendingContext) => {
           // Run the deterministic param-suggest rule engine for this
           // idea's prompt so the pipeline uses the same style / aspect /
           // negative prompt picks as the interactive Compare flow. Falls
@@ -196,6 +196,12 @@ Return ONLY the prompt text, nothing else.`;
                 availableStyles: LEONARDO_SHARED_STYLES,
                 savedImages: [],
                 includedModelIds: modelIds,
+                // PARAM-TRENDING (2026-05-21): thread the pipeline's
+                // already-fetched trending blurb into the AI so style /
+                // aspect picks can react to current trends. Empty string
+                // when fetchTrendingContext returned nothing — the prompt
+                // template handles that with a "(none available)" line.
+                trendingContext,
               },
               {
                 aiCall: (message, signal) =>

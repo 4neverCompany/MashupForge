@@ -476,6 +476,38 @@ describe('suggestParametersAI', () => {
     expect(capturedPrompt).toContain(baseInput.prompt);
   });
 
+  it('PARAM-TRENDING: forwards trendingContext into the AI prompt verbatim', async () => {
+    // The pipeline already fetches a Reddit + SearXNG blurb via
+    // fetchTrendingContext; without this wiring it was being discarded
+    // before reaching the AI parameter picker, so style / aspect picks
+    // ignored real-world trend signal.
+    let capturedPrompt = '';
+    const trendingBlurb = 'Cyberpunk neon aesthetic spiking on r/cyberpunk this week';
+    await suggestParametersAI(
+      { ...baseInput, trendingContext: trendingBlurb },
+      {
+        aiCall: async (msg) => {
+          capturedPrompt = msg;
+          return '{}';
+        },
+      },
+    );
+    expect(capturedPrompt).toContain('Trending context');
+    expect(capturedPrompt).toContain(trendingBlurb);
+  });
+
+  it('PARAM-TRENDING: emits "(none available)" placeholder when trendingContext is missing', async () => {
+    let capturedPrompt = '';
+    await suggestParametersAI(baseInput, {
+      aiCall: async (msg) => {
+        capturedPrompt = msg;
+        return '{}';
+      },
+    });
+    expect(capturedPrompt).toContain('Trending context');
+    expect(capturedPrompt).toContain('(none available)');
+  });
+
   it('AI-PARAM-SUGGEST: silently falls back to rules when aiCall throws', async () => {
     const s = await suggestParametersAI(baseInput, {
       aiCall: async () => {

@@ -55,8 +55,14 @@ export interface ProcessIdeaDeps {
   fetchTrendingContext(idea: Idea): Promise<string>;
   /** Expand an idea + trending context into an image generation prompt. Throws on failure. */
   expandIdeaToPrompt(idea: Idea, trendingContext: string): Promise<string>;
-  /** Start image generation for a prompt + model list. Throws on failure. */
-  triggerImageGeneration(prompt: string, modelIds: string[]): Promise<void>;
+  /**
+   * Start image generation for a prompt + model list. Throws on failure.
+   * `trendingContext` is the same blurb `expandIdeaToPrompt` received —
+   * the implementation forwards it to the AI param-suggester so style /
+   * aspect picks can react to current trends instead of only the prompt
+   * text. Empty string when no trending data was fetched.
+   */
+  triggerImageGeneration(prompt: string, modelIds: string[], trendingContext: string): Promise<void>;
   /**
    * Wait for generated images to appear in the image store.
    * Returns ready images (may be empty on timeout).
@@ -311,7 +317,7 @@ export async function processIdea(
     });
     writeCheckpoint('Generating images');
     try {
-      await triggerImageGeneration(expandedPrompt, allModelIds);
+      await triggerImageGeneration(expandedPrompt, allModelIds, trendingContext);
       addLog('image-gen', idea.id, 'success', `Image generation started with ${allModelIds.length} models`);
     } catch (e) {
       addLog('image-gen', idea.id, 'error', 'Image generation failed');

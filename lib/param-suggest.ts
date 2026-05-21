@@ -148,6 +148,14 @@ export interface SuggestParametersInput {
    * models drop in without engine changes.
    */
   provider?: ModelSpecProvider;
+  /**
+   * Pipeline trending-context blurb (Reddit + SearXNG summary from
+   * `fetchTrendingContext`). When present, included in the AI prompt so
+   * style / aspect / negative picks can react to current trends rather
+   * than only the idea concept text. Optional — the rule-engine baseline
+   * never consumes this; only the AI refinement step does.
+   */
+  trendingContext?: string;
 }
 
 // ── Heuristic rules ──────────────────────────────────────────────────────────
@@ -854,6 +862,9 @@ User prompt:
 """
 ${input.prompt}
 """
+
+Trending context (use this to guide your parameter picks if relevant):
+${input.trendingContext || '(none available)'}
 
 Model capabilities (only set fields the model lists; ignore everything else):
 ${renderCapabilityTable(rows)}
