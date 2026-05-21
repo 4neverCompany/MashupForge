@@ -90,7 +90,15 @@ export async function applyWatermark(baseImageSrc: string, settings: WatermarkSe
           }
 
           ctx.drawImage(wm, x, y, wmWidth, wmHeight);
-          resolve(canvas.toDataURL('image/png'));
+          // POST-413-FIX (2026-05-21): was 'image/png' which produced
+          // multi-megabyte data URLs (a 4K canvas → 20-30MB PNG). Vercel's
+          // 4.5MB serverless body limit then rejected /api/social/post
+          // before our route ran (HTTP 413, plain-text body, not JSON).
+          // JPEG at 0.92 is visually indistinguishable for photographic
+          // output and ~70% smaller. The composite has no transparency
+          // at this point (watermark already alpha-blended into canvas)
+          // so dropping PNG's alpha channel costs nothing.
+          resolve(canvas.toDataURL('image/jpeg', 0.92));
         };
         wm.onerror = () => resolve(baseImageSrc);
         wm.src = settings.image;
@@ -120,7 +128,8 @@ export async function applyWatermark(baseImageSrc: string, settings: WatermarkSe
         }
 
         ctx.fillText(channelName, x, y);
-        resolve(canvas.toDataURL('image/png'));
+        // POST-413-FIX (2026-05-21): see image-watermark branch above.
+        resolve(canvas.toDataURL('image/jpeg', 0.92));
       }
     };
     img.onerror = () => resolve(baseImageSrc);
