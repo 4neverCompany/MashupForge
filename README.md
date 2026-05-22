@@ -8,13 +8,13 @@
 
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.1-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 [![Leonardo.ai](https://img.shields.io/badge/Leonardo.ai-v2-C5A062?style=for-the-badge)](https://leonardo.ai)
 [![pi.dev](https://img.shields.io/badge/pi.dev-RPC-00E6FF?style=for-the-badge)](https://pi.dev)
 
 [![License](https://img.shields.io/badge/License-Proprietary-050505?style=flat-square)](#license)
-[![Version](https://img.shields.io/badge/version-0.9.40-C5A062?style=flat-square)](package.json)
+[![Version](https://img.shields.io/badge/version-0.9.45-C5A062?style=flat-square)](package.json)
 
 ![MashupForge — AI-Powered Creative Crossover Studio](assets/hero.svg)
 
@@ -26,12 +26,13 @@
 
 | | |
 | :---: | :--- |
-| **Idea Generator** | AI brainstorms "what if" crossover scenarios across franchises, with taste controls and re-rolls. |
+| **Idea Generator** | AI brainstorms "what if" crossover scenarios across franchises, now powered by **Content Pillars** and **Style Tags** for guided creativity. |
 | **Image Generation** | Turn any idea into artwork across **MiniMax image-01**, **GPT Image 1.5 / 2**, and **Nano Banana / 2 / Pro**. |
 | **Compare Mode** | Run the same prompt across multiple models side-by-side and pick the winner. |
-| **Autonomous Pipeline** | Hands-free flow: Ideas → Approve → Caption → Post Ready → **Autopost**, with a smart scheduler. |
+| **Autonomous Pipeline** | Hands-free flow: Ideas → Approve → Caption → Post Ready → **Autopost**, with trend-driven generation and smart daily caps. |
+| **Trademark Guard** | History-driven moderation filter learns from past blocks and surgically rewrites flagged names while preserving prompts. |
 | **Desktop App** | Tauri 2 shell with **system tray**, hide-on-close, **autostart on login**, and silent **auto-update**. |
-| **Chat Assistant** | Conversational AI for brainstorming, prompt refinement, and exploration. |
+| **AI Co-Pilot** | Redesigned conversational agent — brainstorm, refine prompts, and explore crossover angles with a purpose-built MashupForge persona. |
 
 ![Feature showcase — Idea Generator, Image Generation, Compare Mode, Autonomous Pipeline](assets/features.svg)
 
@@ -122,7 +123,7 @@ MashupForge/
 ## Tech Stack
 
 - **Framework:** Next.js 16 (Turbopack) + React 19
-- **Language:** TypeScript 5.9
+- **Language:** TypeScript 6.0
 - **Styling:** Tailwind CSS 4 + `@tailwindcss/typography`
 - **Image AI:** Leonardo.ai v2 (Nano Banana family, GPT Image) + MiniMax `image-01`
 - **Text AI:** pi.dev RPC subprocess (local, multi-provider)
