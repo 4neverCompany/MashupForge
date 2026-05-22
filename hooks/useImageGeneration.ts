@@ -9,6 +9,7 @@ import { getErrorMessage } from '@/lib/errors';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { extractTrademarkNames } from '@/lib/extract-trademark-names';
 import { preflightGenericize, setOutcome, getOutcome } from '@/lib/trademark-outcomes';
+import { MASHUPFORGE_AI_PERSONA } from '@/lib/agent-prompt';
 import {
   type GeneratedImage,
   type GenerateOptions,
@@ -789,12 +790,15 @@ Keep it under 100 words. Return ONLY the negative prompt text, nothing else.`,
       };
 
       // Single source of truth: settings.agentPrompt carries diversity
-      // rules, art direction, and universe-blending guidance. Niches +
-      // genres are appended as live context so the active tag chips in
-      // Settings still shape each batch.
-      const systemContext = `${settings.agentPrompt || 'You are an elite AI art director.'}
-Active Niches: ${settings.agentNiches?.join(', ') || 'All'}
-Active Genres: ${settings.agentGenres?.join(', ') || 'All'}`;
+      // rules, art direction, and universe-blending guidance. Content
+      // Pillars + Style Tags (was Niches + Genres) are appended as
+      // live context so the active tag chips in Settings still shape
+      // each batch.
+      // AI-ROLE-REDESIGN (2026-05-22): MashupForge AI persona fallback
+      // + label rename; agentNiches/agentGenres keys unchanged.
+      const systemContext = `${settings.agentPrompt || MASHUPFORGE_AI_PERSONA}
+Content Pillars: ${settings.agentNiches?.join(', ') || 'All — pick freely'}
+Style Tags: ${settings.agentGenres?.join(', ') || 'All — pick freely'}`;
 
       if (options?.skipEnhance && customPrompts) {
         itemsToGenerate = customPrompts.map(p => ({ prompt: p, aspectRatio: options?.aspectRatio }));

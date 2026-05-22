@@ -31,6 +31,7 @@ import { awaitImagesOrSkip } from '@/lib/image-readiness';
 import { generateNegativePrompt } from '@/lib/negative-prompts';
 import { extractTrademarkNames } from '@/lib/extract-trademark-names';
 import { getAllBlocked, setOutcome } from '@/lib/trademark-outcomes';
+import { MASHUPFORGE_AI_PERSONA } from '@/lib/agent-prompt';
 import type { WriteCheckpointBase } from './usePipelineDaemon';
 import { useDesktopConfig } from './useDesktopConfig';
 
@@ -128,12 +129,16 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
       const blockedBlock = blockedNames.length > 0
         ? `\nTRADEMARKED CHARACTERS TO AVOID (based on past pipeline failures): ${blockedNames.join(', ')}.\nUse generic descriptions instead (e.g. "a spider-powered hero" instead of "Spider-Man").\n`
         : '';
-      const systemContext = `${s.agentPrompt || 'You are an elite AI art director.'}
-Active Niches: ${s.agentNiches?.join(', ') || 'None'}.
-Active Genres: ${s.agentGenres?.join(', ') || 'None'}.
+      // AI-ROLE-REDESIGN (2026-05-22): Content Pillars / Style Tags
+      // labels replace the prior "Active Niches / Active Genres"
+      // vocabulary. The settings keys (agentNiches/agentGenres) are
+      // unchanged for storage back-compat. Persona fallback also
+      // upgraded to the MashupForge AI co-pilot framing.
+      const systemContext = `${s.agentPrompt || MASHUPFORGE_AI_PERSONA}
+Content Pillars: ${s.agentNiches?.join(', ') || 'None — operate on the idea concept alone'}.
+Style Tags: ${s.agentGenres?.join(', ') || 'None — let the idea concept guide style'}.
 
-You are given a content idea concept. Expand it into a single, highly detailed image generation prompt.
-The prompt should be vivid, specific, and optimized for AI image generation.
+Mode: prompt expansion. Take this content idea and produce a single, highly detailed image generation prompt (40-60 words). Honor the Content Pillars and Style Tags above as your orientation.
 ${trendingContext ? `\nCURRENT TRENDING CONTEXT — weave relevant trends into the prompt to make it timely and shareable:\n${trendingContext}\n` : ''}${blockedBlock}
 Return ONLY the prompt text, nothing else.`;
 

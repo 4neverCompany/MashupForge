@@ -18,6 +18,7 @@ import {
 } from '@/lib/smartScheduler';
 import { getErrorMessage } from '@/lib/errors';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
+import { MASHUPFORGE_AI_PERSONA } from '@/lib/agent-prompt';
 import { setPipelineBusy } from '@/lib/pipeline-busy';
 import {
   saveCheckpoint,
@@ -301,14 +302,17 @@ export function usePipelineDaemon(deps: UsePipelineDaemonDeps) {
       ? `\nTrending right now in the user's active franchises (use this to drive concept picks if relevant — recent releases, fan reactions, crossover potential):\n${trendingBlurb}\n`
       : '';
 
-    const base = `${s.agentPrompt || 'You are an elite AI art director.'}
-Active Niches: ${s.agentNiches?.join(', ') || 'All'}
-Active Genres: ${s.agentGenres?.join(', ') || 'All'}${trendingBlock}`;
+    // AI-ROLE-REDESIGN (2026-05-22): Content Pillars / Style Tags
+    // labels + MashupForge AI persona fallback. agentNiches /
+    // agentGenres keys unchanged for storage back-compat.
+    const base = `${s.agentPrompt || MASHUPFORGE_AI_PERSONA}
+Content Pillars: ${s.agentNiches?.join(', ') || 'All — pick freely'}
+Style Tags: ${s.agentGenres?.join(', ') || 'All — pick freely'}${trendingBlock}`;
 
     const systemContext = themed
       ? `${base}
 
-Pick ONE specific, unifying theme that fits the active niches/genres — a single crossover universe pairing, era mashup, visual motif, or narrative angle. Then generate ${count} variations that all riff on that same theme from different angles (different characters, scenes, moods, or compositions within the theme).
+Pick ONE specific, unifying theme that fits the Content Pillars + Style Tags — a single crossover universe pairing, era mashup, visual motif, or narrative angle. Then generate ${count} variations that all riff on that same theme from different angles (different characters, scenes, moods, or compositions within the theme).
 
 The theme should be concrete, not generic — e.g. "Retro Saturday Morning Cartoons × Cosmic Horror" is good, "cool mashups" is not.
 
@@ -325,7 +329,7 @@ Example:
       : `${base}
 
 Generate ${count} unique, creative content ideas for social media posts.
-Each idea should be visually striking, shareable, and aligned with the niches/genres.
+Each idea should be visually striking, shareable, and aligned with the Content Pillars + Style Tags above.
 Return ONLY a JSON array of objects with "concept" and "context" fields. Example:
 [{"concept": "Darth Vader as a grimdark Warhammer inquisitor...", "context": "Star Wars × WH40k crossover"}]`;
 

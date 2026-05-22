@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import { Send, Search, MessageSquare, Loader2, ExternalLink, Image as ImageIcon, Sparkles, Columns, RefreshCw, History } from 'lucide-react';
 import { useMashup, LEONARDO_MODELS } from './MashupContext';
 import { streamAI, extractJsonArrayFromLLM, stripThinkBlocks } from '@/lib/aiClient';
+import { MASHUPFORGE_AI_PERSONA } from '@/lib/agent-prompt';
 import { HealthStrip } from './platform/HealthStrip';
 import { ReadAloudButton } from './mmx/ReadAloudButton';
 
@@ -82,9 +83,13 @@ export function Sidebar() {
         { id: modelMsgId, role: 'model', text: '', streaming: true },
       ]);
       try {
-        const systemInstruction = `${settings.agentPrompt || 'You are an expert on all fantasy and sci-fi universes (Marvel, DC, Star Wars, Warhammer 40k, etc.). Help the user brainstorm crossover ideas and answer questions.'}
-              Niches: ${settings.agentNiches?.join(', ') || 'None'}.
-              Genres: ${settings.agentGenres?.join(', ') || 'None'}.`;
+        // AI-ROLE-REDESIGN (2026-05-22): chat-mode system prompt now
+        // uses the MashupForge AI persona + Content Pillars / Style
+        // Tags vocabulary. Settings keys (agentNiches, agentGenres)
+        // unchanged for storage back-compat.
+        const systemInstruction = `${settings.agentPrompt || MASHUPFORGE_AI_PERSONA}
+              Content Pillars: ${settings.agentNiches?.join(', ') || 'None — answer freely'}.
+              Style Tags: ${settings.agentGenres?.join(', ') || 'None — answer freely'}.`;
 
         let acc = '';
         for await (const delta of streamAI(userMsg, {
@@ -172,13 +177,17 @@ export function Sidebar() {
         const trendingBlock = trendingSummary
           ? `\n\nCURRENT TRENDING CONTEXT — base your ideas on these real trends to make them timely and shareable:\n${trendingSummary}\n`
           : '';
-        const niches = settings.agentNiches?.join(', ') || 'Marvel, DC, Star Wars, Warhammer 40k';
-        const genres = settings.agentGenres?.join(', ') || 'Cinematic Crossovers, Epic Action, Visual Storytelling';
+        // AI-ROLE-REDESIGN (2026-05-22): MashupForge AI persona +
+        // Content Pillars / Style Tags vocabulary. Settings fallback
+        // values stay as concrete examples so empty-configuration
+        // users still see useful idea-gen output.
+        const pillars = settings.agentNiches?.join(', ') || 'Marvel, DC, Star Wars, Warhammer 40k';
+        const styles = settings.agentGenres?.join(', ') || 'Cinematic Crossovers, Epic Action, Visual Storytelling';
 
-        const message = `${settings.agentPrompt || 'You are an elite AI art director and social media growth hacker.'}
+        const message = `${settings.agentPrompt || MASHUPFORGE_AI_PERSONA}
 
-Active Niches: ${niches}
-Active Genres: ${genres}
+Content Pillars: ${pillars}
+Style Tags: ${styles}
 ${trendingBlock}
 
 Topic: ${userMsg}

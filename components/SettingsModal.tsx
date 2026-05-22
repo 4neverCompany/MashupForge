@@ -1718,7 +1718,7 @@ export function SettingsModal({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Platform Niches</label>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Content Pillars</label>
                     <div className="flex flex-wrap gap-2 mb-2">
                       {settings.agentNiches?.map((n) => (
                         <span
@@ -1769,7 +1769,7 @@ export function SettingsModal({
 
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Target Genres</label>
+                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Style Tags</label>
                     <div className="flex flex-wrap gap-2 mb-2">
                       {settings.agentGenres?.map((g) => (
                         <span

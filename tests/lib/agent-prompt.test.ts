@@ -38,15 +38,18 @@ describe('buildDefaultAgentPrompt — V080-DES-003', () => {
     expect(out).not.toContain('Genre12');
   });
 
-  it('falls back to neutral phrasing when niches/genres are empty', () => {
+  it('falls back to neutral phrasing when pillars/styles are empty', () => {
+    // AI-ROLE-REDESIGN (2026-05-22): fallback vocab updated alongside
+    // the persona — "niche" → "space" to match the Content Pillars
+    // framing.
     const out = buildDefaultAgentPrompt({ niches: [], genres: [] });
-    expect(out).toContain('whichever niche the user is exploring');
+    expect(out).toContain('whichever space the user is exploring');
     expect(out).toContain('across a flexible range of styles');
   });
 
-  it('falls back to neutral phrasing when niches/genres are omitted entirely', () => {
+  it('falls back to neutral phrasing when pillars/styles are omitted entirely', () => {
     const out = buildDefaultAgentPrompt();
-    expect(out).toContain('whichever niche the user is exploring');
+    expect(out).toContain('whichever space the user is exploring');
     expect(out).toContain('across a flexible range of styles');
   });
 
@@ -61,10 +64,19 @@ describe('buildDefaultAgentPrompt — V080-DES-003', () => {
     expect(out).not.toMatch(/Warhammer 40k/i);
   });
 
-  it('mentions that runtime tags override the baseline', () => {
+  it('AI-ROLE-REDESIGN: opens with the MashupForge AI persona, drops "prompt generator" framing', () => {
     const out = buildDefaultAgentPrompt({ niches: ['X'], genres: ['Y'] });
-    expect(out).toMatch(/Active Niches and Active Genres/i);
-    expect(out).toMatch(/override/i);
+    expect(out).toMatch(/MashupForge AI/);
+    expect(out).toMatch(/co-pilot/i);
+    expect(out).not.toMatch(/prompt generator/i);
+    expect(out).not.toMatch(/Master Content Creator and Social Media Growth Strategist/);
+  });
+
+  it('AI-ROLE-REDESIGN: uses Content Pillars / Style Tags vocabulary, not Active Niches / Active Genres', () => {
+    const out = buildDefaultAgentPrompt({ niches: ['X'], genres: ['Y'] });
+    expect(out).toMatch(/Content Pillars/);
+    expect(out).toMatch(/Style Tags/);
+    expect(out).not.toMatch(/Active Niches and Active Genres/);
   });
 
   it('exports the curated default tag lists for the SettingsModal reset', () => {
