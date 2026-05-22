@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Settings as SettingsIcon,
@@ -96,6 +96,12 @@ import {
   DEFAULT_GENRES as RECOMMENDED_GENRES,
   buildDefaultAgentPrompt,
 } from '@/lib/agent-prompt';
+import {
+  getAllBlocked,
+  getAllUserWhitelisted,
+  addUserWhitelist,
+  removeUserWhitelist,
+} from '@/lib/trademark-outcomes';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -158,6 +164,17 @@ export function SettingsModal({
   }, []);
   // Inline personality-save input — replaces the blocking prompt() dialog.
   const [personalityName, setPersonalityName] = useState<string | null>(null);
+  // TRADEMARK-STAGED-PIPELINE (2026-05-22): bump on every blocklist /
+  // whitelist mutation. The store lives in localStorage; this tick
+  // forces the next render to re-read it.
+  const [trademarkStoreTick, setTrademarkStoreTick] = useState(0);
+  const bumpTrademarkStore = () => setTrademarkStoreTick((t) => t + 1);
+  // The trademark store lives in localStorage; bumping the tick forces
+  // a re-read on mutation. The lint rule can't see the read-through dep.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const trademarkBlocklist = useMemo(() => getAllBlocked(), [trademarkStoreTick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const trademarkWhitelist = useMemo(() => getAllUserWhitelisted(), [trademarkStoreTick]);
   // Which password fields are currently revealed.
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
   const toggleReveal = (field: string) =>
@@ -1925,6 +1942,70 @@ export function SettingsModal({
                   {(!settings.savedPersonalities || settings.savedPersonalities.length === 0) && (
                     <div className="text-center py-4 border border-dashed border-zinc-800 rounded-xl">
                       <p className="text-xs text-zinc-500 italic">No saved personalities yet.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* TRADEMARK-STAGED-PIPELINE (2026-05-22): visibility +
+                  control surface for the auto-managed blocklist. Auto-
+                  blocked names come from Leonardo TRADEMARK errors
+                  observed in past runs; whitelist is a hard override
+                  the user controls. */}
+              <div className="space-y-4 pt-4 border-t border-zinc-800/50">
+                <div>
+                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Trademark Blocklist</label>
+                  <p className="text-[10px] text-zinc-500 leading-tight mt-1">
+                    Names Leonardo has rejected in the past. The retry pipeline swaps these on stage 2/3 of a TRADEMARK block. Whitelist a name to let it pass verbatim.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Auto-blocked ({trademarkBlocklist.length})</div>
+                  {trademarkBlocklist.length === 0 ? (
+                    <div className="text-center py-3 border border-dashed border-zinc-800 rounded-xl">
+                      <p className="text-[10px] text-zinc-500 italic">No auto-blocked names yet.</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {trademarkBlocklist.map((name) => (
+                        <span key={name} className="inline-flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-300 text-[10px] rounded-xl border border-red-500/30">
+                          {name}
+                          <button
+                            type="button"
+                            onClick={() => { addUserWhitelist(name); bumpTrademarkStore(); }}
+                            title="Whitelist this name (let it pass on next attempt)"
+                            className="ml-1 text-[9px] uppercase tracking-wider text-emerald-300 hover:text-emerald-200"
+                          >
+                            Whitelist
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">User-whitelisted ({trademarkWhitelist.length})</div>
+                  {trademarkWhitelist.length === 0 ? (
+                    <div className="text-center py-3 border border-dashed border-zinc-800 rounded-xl">
+                      <p className="text-[10px] text-zinc-500 italic">No whitelisted names yet.</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {trademarkWhitelist.map((name) => (
+                        <span key={name} className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-500/10 text-emerald-300 text-[10px] rounded-xl border border-emerald-500/30">
+                          {name}
+                          <button
+                            type="button"
+                            onClick={() => { removeUserWhitelist(name); bumpTrademarkStore(); }}
+                            title="Remove from whitelist (let auto-block take over again)"
+                            className="ml-1"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>

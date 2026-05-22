@@ -8,7 +8,7 @@ import { MASTERPROMPT_INSTRUCTIONS } from '@/lib/masterpromptTemplate';
 import { getErrorMessage } from '@/lib/errors';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { extractTrademarkNames } from '@/lib/extract-trademark-names';
-import { preflightGenericize, setOutcome, getOutcome } from '@/lib/trademark-outcomes';
+import { planStagedSubstitution, setOutcome } from '@/lib/trademark-outcomes';
 import { MASHUPFORGE_AI_PERSONA } from '@/lib/agent-prompt';
 import {
   type GeneratedImage,
@@ -476,56 +476,6 @@ interface SubmitResult {
 }
 
 /**
- * TRADEMARK-SURGICAL-REWRITE v3 (2026-05-22): deterministic name-swap
- * retry — now driven by HISTORY, not the static seed list.
- *
- * Maurice's bug report: "Mandalorian" was being substituted during
- * retry even though gallery posts proved past Mandalorian prompts had
- * gone through Leonardo without issue. v2's substitute logic was:
- *   extractTrademarkNames(prompt) → preflightGenericize(prompt, all extracted)
- * That used the 80-name static seed list as the primary filter,
- * ignoring whether any of those names had actually caused a rejection.
- * Static-list-driven blocking treats every famous franchise name as
- * suspect even when Leonardo would accept it. Wrong default.
- *
- * v3 only substitutes names that the outcome store records as
- * 'blocked' — i.e., that have actually triggered a TRADEMARK error in
- * a prior run (captured via onModelError's single-name auto-flag
- * from aa2a068, or via the seed SEED_BLOCKED list for the few names
- * Maurice observed in his logs). Names recorded as 'allowed'
- * (success-path marking, below) or 'unknown' (never observed)
- * pass through unchanged.
- *
- * Returns null when:
- *   - no seed-listed names appear in the prompt, OR
- *   - none of the seed-listed names that appear have outcome 'blocked'
- * Caller rethrows the moderation error so the user sees a real
- * "TRADEMARK blocked" message and edits manually. The onModelError
- * single-name capture (still active) will mark the offending name
- * 'blocked' for next time — the system learns iteratively rather
- * than pre-emptively blocking everything famous.
- *
- * NSFW / EXTREME_VIOLENCE / CHILD continue to use the LLM rewrite
- * path (buildModerationRewriteInstruction) — that's a legitimate
- * softening task, not a one-word-swap task.
- */
-function trademarkSubstituteOrNull(
-  failedPrompt: string,
-): { prompt: string; swapped: string[] } | null {
-  const extracted = extractTrademarkNames(failedPrompt);
-  if (extracted.length === 0) return null;
-  // Filter to names with outcome='blocked' — historical rejection
-  // signal is the primary trigger. 'allowed' / 'unknown' names pass.
-  const known = extracted.filter((name) => getOutcome(name) === 'blocked');
-  if (known.length === 0) return null;
-  const result = preflightGenericize(failedPrompt, known);
-  // Reinforce the 'blocked' status on swapped names — they've now
-  // been observed in a second blocking prompt, so the signal stays.
-  for (const name of result.swapped) setOutcome(name, 'blocked');
-  return result;
-}
-
-/**
  * SUCCESS-PATH-ALLOWED-MARKING (2026-05-22): when a generation
  * succeeds on first try (no retry), every trademark-list name that
  * appeared in the submitted prompt is recorded as 'allowed' in the
@@ -548,15 +498,25 @@ function markPromptNamesAllowed(prompt: string): void {
 }
 
 /**
- * One-retry moderation recovery. Leonardo's moderation is empirically
- * non-deterministic — a 3-attempt cascade with aggressive rewrites and
- * defensive negative prompts gave marginal improvement for significant
- * complexity. This helper does the simple thing: submit, and if it
- * fails with a moderation classification, ask pi for a clean rewrite
- * and try exactly one more time. No classification-aware branching,
- * no forbidden lists, no negative-prompt escalation.
+ * TRADEMARK-STAGED-PIPELINE (2026-05-22): 3-stage moderation recovery.
  *
- * Non-moderation errors rethrow immediately and skip the retry.
+ * Maurice's spec: a TRADEMARK/COPYRIGHT block does NOT pre-emptively
+ * rewrite the user's prompt and does NOT swap every famous name at
+ * once. It tries the original verbatim, then a single-term minimal
+ * swap, then a single-term rich descriptor swap — surfacing the error
+ * only after all three fail.
+ *
+ *   Stage 1: original prompt VERBATIM.
+ *   Stage 2: on TRADEMARK fail, pick ONE term (planStagedSubstitution),
+ *            swap with the minimal placeholder ("a character"), retry.
+ *   Stage 3: still TRADEMARK fail, swap the SAME term with the rich
+ *            GENERIC_FOR descriptor, retry. This is the last resort.
+ *
+ * Non-TRADEMARK moderation (NSFW / EXTREME_VIOLENCE / CHILD) keeps
+ * the single-shot LLM rewrite — that's a legitimate softening task,
+ * not a one-word-swap task, and the staged pipeline doesn't help.
+ *
+ * Non-moderation errors rethrow immediately.
  */
 async function submitWithOneRetry(
   initialPrompt: string,
@@ -564,11 +524,9 @@ async function submitWithOneRetry(
   callbacks: ModerationRetryCallback,
   provider?: 'pi' | 'nca' | 'mmx' | 'vercel-ai',
 ): Promise<SubmitResult> {
+  // STAGE 1 — original prompt verbatim.
   try {
     const success = await submitLeonardoAndPoll({ prompt: initialPrompt, ...baseParams });
-    // SUCCESS-PATH-ALLOWED-MARKING: names that appeared in this
-    // first-try-successful prompt are now confirmed allowed. Sticky-
-    // blocked guard in setOutcome ensures we never revive a known-bad.
     markPromptNamesAllowed(initialPrompt);
     return { success, finalPrompt: initialPrompt, retried: false };
   } catch (err) {
@@ -576,33 +534,45 @@ async function submitWithOneRetry(
     const classifications = lErr.moderationClassification || [];
     if (classifications.length === 0) throw err;
 
-    callbacks.onRetry(classifications);
-
-    // TRADEMARK-SURGICAL-REWRITE v2 (2026-05-22): deterministic name-swap
-    // for TRADEMARK/COPYRIGHT instead of LLM rewrite. See
-    // trademarkSubstituteOrNull doc for rationale.
     const upper = classifications.map((c) => c.toUpperCase());
     const isTrademark = upper.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
-    let activePrompt: string;
-    if (isTrademark) {
-      const sub = trademarkSubstituteOrNull(lErr.failedPrompt || initialPrompt);
-      if (!sub) {
-        // No known names in the prompt — no safe substitution. Surface
-        // the original moderation error so the user edits manually
-        // rather than rolling the dice on a bad rewrite.
-        throw err;
-      }
-      activePrompt = sub.prompt;
-    } else {
+
+    callbacks.onRetry(classifications);
+
+    if (!isTrademark) {
+      // NSFW / EXTREME_VIOLENCE / CHILD — single LLM rewrite, one retry.
       const rewritten = await streamAIToString(
         buildModerationRewriteInstruction(lErr.failedPrompt || initialPrompt, classifications),
         { mode: 'enhance', provider },
       );
-      activePrompt = (rewritten || '').trim() || initialPrompt;
+      const activePrompt = (rewritten || '').trim() || initialPrompt;
+      const success = await submitLeonardoAndPoll({ prompt: activePrompt, ...baseParams });
+      return { success, finalPrompt: activePrompt, retried: true };
     }
 
-    const success = await submitLeonardoAndPoll({ prompt: activePrompt, ...baseParams });
-    return { success, finalPrompt: activePrompt, retried: true };
+    const plan = planStagedSubstitution(lErr.failedPrompt || initialPrompt);
+    if (!plan) {
+      // No eligible name to swap (none extracted, or all user-whitelisted).
+      // Surface the original moderation error so the user edits manually.
+      throw err;
+    }
+    // The picked term is by definition a real Leonardo blocker now —
+    // record it so future prompts skip it pre-flight.
+    setOutcome(plan.targetName, 'blocked');
+
+    // STAGE 2 — minimal placeholder swap.
+    try {
+      const success = await submitLeonardoAndPoll({ prompt: plan.stage2Prompt, ...baseParams });
+      return { success, finalPrompt: plan.stage2Prompt, retried: true };
+    } catch (err2) {
+      const l2 = err2 as LeonardoGenerationError;
+      const c2 = (l2.moderationClassification || []).map((c) => c.toUpperCase());
+      const stillTrademark = c2.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
+      if (!stillTrademark) throw err2;
+      // STAGE 3 — same target, rich descriptor.
+      const success = await submitLeonardoAndPoll({ prompt: plan.stage3Prompt, ...baseParams });
+      return { success, finalPrompt: plan.stage3Prompt, retried: true };
+    }
   }
 }
 
@@ -627,6 +597,7 @@ async function submitViaAiImageWithOneRetry(
   context: AiImageContext,
   callbacks: ModerationRetryCallback,
 ): Promise<SubmitResult> {
+  // STAGE 1 — original idea (server enhances + submits).
   try {
     const r = await submitViaAiImage({
       ...baseParams,
@@ -634,8 +605,6 @@ async function submitViaAiImageWithOneRetry(
       idea: initialIdea,
       skipEnhance: false,
     });
-    // SUCCESS-PATH-ALLOWED-MARKING: the enhanced prompt is what
-    // Leonardo accepted; mark trademark names found there as allowed.
     markPromptNamesAllowed(r.enhancedPrompt);
     return { success: r, finalPrompt: r.enhancedPrompt, retried: false };
   } catch (err) {
@@ -643,33 +612,58 @@ async function submitViaAiImageWithOneRetry(
     const classifications = lErr.moderationClassification || [];
     if (classifications.length === 0) throw err;
 
-    callbacks.onRetry(classifications);
-
-    // TRADEMARK-SURGICAL-REWRITE v2 (2026-05-22): deterministic name-swap
-    // for TRADEMARK/COPYRIGHT, LLM rewrite for other classes. Same
-    // rationale as submitWithOneRetry above.
     const upper = classifications.map((c) => c.toUpperCase());
     const isTrademark = upper.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
-    let activePrompt: string;
-    if (isTrademark) {
-      const sub = trademarkSubstituteOrNull(lErr.failedPrompt || initialIdea);
-      if (!sub) throw err;
-      activePrompt = sub.prompt;
-    } else {
+
+    callbacks.onRetry(classifications);
+
+    if (!isTrademark) {
       const rewritten = await streamAIToString(
         buildModerationRewriteInstruction(lErr.failedPrompt || initialIdea, classifications),
         { mode: 'enhance', provider: 'vercel-ai' },
       );
-      activePrompt = (rewritten || '').trim() || initialIdea;
+      const activePrompt = (rewritten || '').trim() || initialIdea;
+      const r = await submitViaAiImage({
+        ...baseParams,
+        ...context,
+        idea: activePrompt,
+        skipEnhance: true,
+      });
+      return { success: r, finalPrompt: r.enhancedPrompt, retried: true };
     }
 
-    const r = await submitViaAiImage({
-      ...baseParams,
-      ...context,
-      idea: activePrompt,
-      skipEnhance: true,
-    });
-    return { success: r, finalPrompt: r.enhancedPrompt, retried: true };
+    // TRADEMARK-STAGED-PIPELINE: plan against the enhanced prompt that
+    // Leonardo actually saw (lErr.failedPrompt), not the rough idea —
+    // the orchestrator's enhancement may have introduced names that
+    // aren't in the user's idea string.
+    const plan = planStagedSubstitution(lErr.failedPrompt || initialIdea);
+    if (!plan) throw err;
+    setOutcome(plan.targetName, 'blocked');
+
+    // STAGE 2 — minimal swap. skipEnhance so the orchestrator submits
+    // the swapped prompt verbatim.
+    try {
+      const r = await submitViaAiImage({
+        ...baseParams,
+        ...context,
+        idea: plan.stage2Prompt,
+        skipEnhance: true,
+      });
+      return { success: r, finalPrompt: r.enhancedPrompt, retried: true };
+    } catch (err2) {
+      const l2 = err2 as LeonardoGenerationError;
+      const c2 = (l2.moderationClassification || []).map((c) => c.toUpperCase());
+      const stillTrademark = c2.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
+      if (!stillTrademark) throw err2;
+      // STAGE 3 — rich descriptor swap, same target term.
+      const r = await submitViaAiImage({
+        ...baseParams,
+        ...context,
+        idea: plan.stage3Prompt,
+        skipEnhance: true,
+      });
+      return { success: r, finalPrompt: r.enhancedPrompt, retried: true };
+    }
   }
 }
 

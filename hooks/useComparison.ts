@@ -7,7 +7,7 @@ import { buildEnhancedPrompt } from '@/lib/image-prompt-builder';
 import { streamAIToString } from '@/lib/aiClient';
 import { buildModerationRewriteInstruction } from './useImageGeneration';
 import { extractTrademarkNames } from '@/lib/extract-trademark-names';
-import { preflightGenericize, setOutcome, getOutcome } from '@/lib/trademark-outcomes';
+import { planStagedSubstitution, setOutcome } from '@/lib/trademark-outcomes';
 import { getErrorMessage } from '@/lib/errors';
 import {
   type GeneratedImage,
@@ -310,21 +310,18 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
             throw new Error('Timeout polling Leonardo generation');
           };
 
-          // One-retry on moderation block. MXIMG-001's
-          // `submitWithOneRetry` doctrine lives in useImageGeneration.ts
-          // but never reaches production — porting the pattern here so
-          // the live Compare/Pipeline path stops silently dropping
-          // moderated generations.
+          // TRADEMARK-STAGED-PIPELINE (2026-05-22): 3-stage retry on
+          // moderation block. Stage 1 = original prompt verbatim;
+          // Stage 2 = minimal placeholder swap of ONE term; Stage 3 =
+          // rich GENERIC_FOR descriptor swap of the same term. See
+          // submitWithOneRetry in useImageGeneration.ts for the
+          // canonical version of this flow — keep them in sync.
           let activePrompt = submitPrompt;
           let result: SubmitSuccess;
           let retried = false;
           try {
+            // STAGE 1 — original prompt verbatim.
             result = await submitOnce(activePrompt);
-            // SUCCESS-PATH-ALLOWED-MARKING (2026-05-22): trademark names
-            // in this first-try-successful prompt are now confirmed
-            // allowed. Future TRADEMARK blocks involving these names
-            // will skip them during substitution. Sticky-blocked guard
-            // in setOutcome prevents reviving a known-bad name.
             const allowedCandidates = extractTrademarkNames(activePrompt);
             for (const name of allowedCandidates) setOutcome(name, 'allowed');
           } catch (err) {
@@ -334,52 +331,40 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
             setProgress(
               `Blocked by ${cls.join(', ')} — rewriting for ${modelName}…`,
             );
-            // Surface the in-flight error on the placeholder so the user
-            // sees what's happening instead of a frozen spinner.
             setComparisonResults(prev => prev.map(img =>
               img.id === placeholders[i].id
                 ? { ...img, error: `Blocked by ${cls.join(', ')} — rewriting…` }
                 : img
             ));
-            // TRADEMARK-SURGICAL-REWRITE v2 (2026-05-22): deterministic
-            // name-swap for TRADEMARK/COPYRIGHT, LLM rewrite for other
-            // classes. Same rationale as submitWithOneRetry in
-            // useImageGeneration.ts — the LLM is unreliable at the
-            // "preserve every word except this name" instruction shape.
             const upper = cls.map((c) => c.toUpperCase());
             const isTrademark = upper.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
-            if (isTrademark) {
-              const failedPrompt = e.failedPrompt ?? activePrompt;
-              // TRADEMARK-SURGICAL-REWRITE v3 (2026-05-22): filter to
-              // names with outcome 'blocked' — historical rejection
-              // signal drives substitution, not the static seed list.
-              // 'allowed' / 'unknown' names pass through. Maurice's
-              // "Mandalorian was being substituted even though gallery
-              // shows it succeeds" bug: now Mandalorian only gets
-              // substituted if a prior run explicitly recorded it as
-              // 'blocked' via onModelError.
-              const extracted = extractTrademarkNames(failedPrompt);
-              const known = extracted.filter((name) => getOutcome(name) === 'blocked');
-              if (known.length === 0) {
-                // No known-blocked names in the prompt — rethrow so the
-                // user sees the original TRADEMARK error. onModelError's
-                // single-name capture (if exactly one candidate is in
-                // the prompt) will flag the name 'blocked' for next
-                // time so the system learns iteratively.
-                throw err;
-              }
-              const sub = preflightGenericize(failedPrompt, known);
-              for (const name of sub.swapped) setOutcome(name, 'blocked');
-              activePrompt = sub.prompt;
-            } else {
+            if (!isTrademark) {
               const rewritten = await streamAIToString(
                 buildModerationRewriteInstruction(e.failedPrompt ?? activePrompt, cls),
                 { mode: 'enhance', provider: settings.activeAiAgent, model: settings.activeTextModel },
               );
               activePrompt = (rewritten || '').trim() || activePrompt;
+              retried = true;
+              result = await submitOnce(activePrompt);
+            } else {
+              const plan = planStagedSubstitution(e.failedPrompt ?? activePrompt);
+              if (!plan) throw err;
+              setOutcome(plan.targetName, 'blocked');
+              retried = true;
+              try {
+                // STAGE 2 — minimal swap.
+                activePrompt = plan.stage2Prompt;
+                result = await submitOnce(activePrompt);
+              } catch (err2) {
+                const e2 = err2 as SubmitError;
+                const cls2 = (e2.moderationClassification ?? []).map((c) => c.toUpperCase());
+                const stillTrademark = cls2.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
+                if (!stillTrademark) throw err2;
+                // STAGE 3 — rich descriptor swap, same target term.
+                activePrompt = plan.stage3Prompt;
+                result = await submitOnce(activePrompt);
+              }
             }
-            retried = true;
-            result = await submitOnce(activePrompt);
           }
           const { imageUrl, imageId, seed } = result;
 

@@ -5,6 +5,12 @@ import {
   getAllBlocked,
   genericFor,
   preflightGenericize,
+  addUserWhitelist,
+  removeUserWhitelist,
+  isUserWhitelisted,
+  getAllUserWhitelisted,
+  isEffectivelyBlocked,
+  planStagedSubstitution,
   __resetForTests,
 } from '@/lib/trademark-outcomes';
 
@@ -206,5 +212,124 @@ describe('preflightGenericize', () => {
     expect(result.prompt).not.toContain("T'Challa");
     expect(result.prompt).toMatch(/panther/i);
     expect(result.prompt).toContain('leaps from a tree');
+  });
+});
+
+describe('TRADEMARK-STAGED-PIPELINE (2026-05-22): user whitelist', () => {
+  beforeEach(() => {
+    setupLocalStorage();
+    __resetForTests();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('addUserWhitelist + isUserWhitelisted + getAllUserWhitelisted round-trip', () => {
+    expect(isUserWhitelisted('Mandalorian')).toBe(false);
+    addUserWhitelist('Mandalorian');
+    expect(isUserWhitelisted('Mandalorian')).toBe(true);
+    expect(getAllUserWhitelisted()).toContain('Mandalorian');
+  });
+
+  it('addUserWhitelist is idempotent', () => {
+    addUserWhitelist('Mandalorian');
+    addUserWhitelist('Mandalorian');
+    expect(getAllUserWhitelisted().filter((n) => n === 'Mandalorian')).toHaveLength(1);
+  });
+
+  it('removeUserWhitelist deletes the entry', () => {
+    addUserWhitelist('Mandalorian');
+    removeUserWhitelist('Mandalorian');
+    expect(isUserWhitelisted('Mandalorian')).toBe(false);
+    expect(getAllUserWhitelisted()).not.toContain('Mandalorian');
+  });
+
+  it('whitelisting a seed-blocked name hides it from getAllBlocked', () => {
+    // Spider-Man is SEED_BLOCKED → getOutcome stays "blocked" (the
+    // auto signal is unchanged) but the UI-facing blocklist must
+    // respect the user override.
+    expect(getAllBlocked()).toContain('Spider-Man');
+    addUserWhitelist('Spider-Man');
+    expect(getAllBlocked()).not.toContain('Spider-Man');
+    // The auto outcome itself is preserved — the whitelist is an
+    // override at the read sites, not an erase of history.
+    expect(getOutcome('Spider-Man')).toBe('blocked');
+  });
+
+  it('isEffectivelyBlocked respects the whitelist', () => {
+    setOutcome('Mandalorian', 'blocked');
+    expect(isEffectivelyBlocked('Mandalorian')).toBe(true);
+    addUserWhitelist('Mandalorian');
+    expect(isEffectivelyBlocked('Mandalorian')).toBe(false);
+  });
+});
+
+describe('planStagedSubstitution — TRADEMARK-STAGED-PIPELINE', () => {
+  beforeEach(() => {
+    setupLocalStorage();
+    __resetForTests();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns null when the prompt has no trademark names', () => {
+    expect(planStagedSubstitution('an original character on a hill')).toBeNull();
+  });
+
+  it('prefers names with outcome="blocked" over other extracted names', () => {
+    // The prompt mentions two trademark names; only Spider-Man is
+    // SEED_BLOCKED. Plan must target Spider-Man, not Yoda.
+    setOutcome('Yoda', 'allowed');
+    const plan = planStagedSubstitution('Spider-Man fights Yoda in the rain');
+    expect(plan).not.toBeNull();
+    expect(plan!.targetName).toBe('Spider-Man');
+  });
+
+  it('falls back to longest extracted name when nothing is outcome="blocked"', () => {
+    // No name in this prompt has outcome="blocked" — Iron Man and
+    // Mandalorian are both unknown by default. Picker prefers the
+    // longer canonical (Mandalorian, 11 chars).
+    const plan = planStagedSubstitution('a Mandalorian beside Thor in a forest');
+    expect(plan).not.toBeNull();
+    expect(plan!.targetName).toBe('Mandalorian');
+  });
+
+  it('stage2Prompt swaps target with the minimal placeholder', () => {
+    const plan = planStagedSubstitution('Spider-Man swinging through Tokyo at night');
+    expect(plan).not.toBeNull();
+    expect(plan!.stage2Prompt).toContain('a character');
+    expect(plan!.stage2Prompt).not.toContain('Spider-Man');
+    expect(plan!.stage2Prompt).toContain('swinging through Tokyo at night');
+  });
+
+  it('stage3Prompt swaps target with the rich GENERIC_FOR descriptor', () => {
+    const plan = planStagedSubstitution('Spider-Man swinging through Tokyo at night');
+    expect(plan).not.toBeNull();
+    expect(plan!.stage3Prompt).not.toContain('Spider-Man');
+    expect(plan!.stage3Prompt).toMatch(/spider/i);
+    expect(plan!.stage3Prompt).toContain('swinging through Tokyo at night');
+  });
+
+  it('skips user-whitelisted names entirely — returns null when only whitelisted names match', () => {
+    addUserWhitelist('Mandalorian');
+    expect(planStagedSubstitution('the Mandalorian rides his speeder')).toBeNull();
+  });
+
+  it('skips user-whitelisted names — picks a non-whitelisted alternative', () => {
+    // Spider-Man is blocked. User whitelists Spider-Man. Plan must
+    // fall back to the only other trademark name in the prompt (Yoda),
+    // not pick Spider-Man.
+    addUserWhitelist('Spider-Man');
+    const plan = planStagedSubstitution('Spider-Man fights Yoda in the rain');
+    expect(plan).not.toBeNull();
+    expect(plan!.targetName).toBe('Yoda');
+  });
+
+  it('returns null when the prompt has only user-whitelisted blocked names', () => {
+    addUserWhitelist('Spider-Man');
+    expect(planStagedSubstitution('Spider-Man poses for a photo')).toBeNull();
   });
 });

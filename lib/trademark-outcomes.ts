@@ -25,7 +25,7 @@
 // logs. New names land via the post-flight TRADEMARK signal as the
 // pipeline runs.
 
-import { TRADEMARK_SEED_LIST } from './extract-trademark-names';
+import { TRADEMARK_SEED_LIST, extractTrademarkNames } from './extract-trademark-names';
 
 export type NameOutcome = 'blocked' | 'allowed' | 'unknown';
 
@@ -101,8 +101,13 @@ export function setOutcome(name: string, outcome: NameOutcome): void {
  */
 export function getAllBlocked(): string[] {
   const map = readMap();
+  // TRADEMARK-STAGED-PIPELINE (2026-05-22): respect the user whitelist
+  // — names the user has explicitly marked safe must not appear in
+  // the blocked list (the AI prompt hint shouldn't tell the model to
+  // avoid a name the user has greenlit).
+  const whitelist = readUserWhitelist();
   return Object.entries(map)
-    .filter(([, v]) => v === 'blocked')
+    .filter(([k, v]) => v === 'blocked' && !whitelist.has(k))
     .map(([k]) => k);
 }
 
@@ -111,9 +116,87 @@ export function __resetForTests(): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(USER_WHITELIST_KEY);
   } catch {
     // Best-effort.
   }
+}
+
+// ── User whitelist (TRADEMARK-STAGED-PIPELINE, 2026-05-22) ──────────────
+//
+// Maurice flagged that the auto outcome store's sticky-blocked guard
+// blocks the user from un-blocking names they know are safe (e.g.
+// Mandalorian historically passed gallery generations but got
+// auto-flagged once and stayed blocked). The user-whitelist layer is a
+// hard override that sits on top of the auto outcome store: any name
+// in the whitelist is treated as ALLOWED regardless of what the auto
+// store says. Auto-marking ('blocked') still happens on TRADEMARK
+// failures (see useIdeaProcessor onModelError) but its read-side
+// effect is suppressed by the whitelist.
+//
+// Two layers, intentionally separate:
+//   - mashup_trademark_outcomes: auto-managed, sticky-blocked semantics
+//     (the system learns from real Leonardo errors).
+//   - mashup_trademark_user_whitelist: user-controlled, no stickiness;
+//     the user can add/remove freely.
+
+const USER_WHITELIST_KEY = 'mashup_trademark_user_whitelist';
+
+function readUserWhitelist(): Set<string> {
+  if (typeof window === 'undefined') return new Set();
+  try {
+    const raw = window.localStorage.getItem(USER_WHITELIST_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((x): x is string => typeof x === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeUserWhitelist(s: Set<string>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(USER_WHITELIST_KEY, JSON.stringify([...s]));
+  } catch {
+    // Best-effort.
+  }
+}
+
+/** Add a name to the user-whitelist. Idempotent. */
+export function addUserWhitelist(name: string): void {
+  const s = readUserWhitelist();
+  s.add(name);
+  writeUserWhitelist(s);
+}
+
+/** Remove a name from the user-whitelist. Idempotent. */
+export function removeUserWhitelist(name: string): void {
+  const s = readUserWhitelist();
+  s.delete(name);
+  writeUserWhitelist(s);
+}
+
+/** True iff the user has explicitly whitelisted this name. */
+export function isUserWhitelisted(name: string): boolean {
+  return readUserWhitelist().has(name);
+}
+
+/** All names the user has whitelisted (sorted for stable UI display). */
+export function getAllUserWhitelisted(): string[] {
+  return [...readUserWhitelist()].sort();
+}
+
+/**
+ * Effective "should I block this name?" check. True only when the auto
+ * outcome store says blocked AND the user hasn't whitelisted it. This
+ * is what the retry-substitution path should use — getOutcome() alone
+ * misses the user-whitelist override.
+ */
+export function isEffectivelyBlocked(name: string): boolean {
+  if (isUserWhitelisted(name)) return false;
+  return getOutcome(name) === 'blocked';
 }
 
 /**
@@ -261,6 +344,84 @@ export function preflightGenericize(prompt: string, blockedNames: string[]): Pre
     }
   }
   return { prompt: out, swapped };
+}
+
+// ── Staged retry helpers (TRADEMARK-STAGED-PIPELINE, 2026-05-22) ────────
+//
+// Maurice's spec: a TRADEMARK/COPYRIGHT block triggers a 3-stage
+// retry, not a single attempt. Stage 1 is the original prompt; stage
+// 2 is a minimal placeholder swap of ONE term; stage 3 is the same
+// term swapped with the rich GENERIC_FOR descriptor. The picker below
+// is the single source of truth for "which term should we swap?" so
+// both retry sites (submitWithOneRetry, submitViaAiImageWithOneRetry,
+// useComparison inline retry) pick the same target.
+//
+// Selection precedence:
+//   1. Skip any name the user has whitelisted (hard override).
+//   2. Prefer names recorded as outcome='blocked' in the auto store —
+//      the system has already learned these are real blockers (from
+//      onModelError single-name auto-flag or SEED_BLOCKED).
+//   3. Within each tier, prefer the LONGEST canonical name — multi-
+//      word names are more specific (e.g. "Miles Morales" before
+//      "Morales") and reduce false-positive substring matches.
+//   4. If no candidate survives, return null and the caller surfaces
+//      the original moderation error.
+//
+// We deliberately do NOT use the LLM to pick the target — the failed
+// prompt's text + the outcome store are deterministic signals; an LLM
+// pick would re-introduce the variance Maurice flagged in earlier
+// iterations of the rewrite path.
+
+const MINIMAL_PLACEHOLDER = 'a character';
+
+function replaceNameInPrompt(prompt: string, name: string, replacement: string): string {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(escaped, 'gi');
+  return prompt.replace(re, replacement);
+}
+
+export interface StagedSubstitutionPlan {
+  /** The single trademark name targeted across stages 2 and 3. */
+  targetName: string;
+  /** Original prompt with `targetName` replaced by a minimal placeholder. */
+  stage2Prompt: string;
+  /** Original prompt with `targetName` replaced by its rich GENERIC_FOR descriptor. */
+  stage3Prompt: string;
+}
+
+/**
+ * Pick the single trademark term to substitute and build the stage 2
+ * + stage 3 prompts. Returns null when no candidate is eligible (the
+ * caller must then rethrow the original moderation error).
+ *
+ * `extractedCandidates` is optional — pass `extractTrademarkNames(prompt)`
+ * here if you already computed it (avoids duplicate scans).
+ */
+export function planStagedSubstitution(
+  prompt: string,
+  extractedCandidates?: string[],
+): StagedSubstitutionPlan | null {
+  // Lazy require to avoid a circular dep with extract-trademark-names
+  // (which re-exports TRADEMARK_SEED_LIST from below).
+  const names = extractedCandidates ?? extractTrademarkNames(prompt);
+  if (names.length === 0) return null;
+
+  const whitelist = readUserWhitelist();
+  const eligible = names.filter((n) => !whitelist.has(n));
+  if (eligible.length === 0) return null;
+
+  // Tier 1: explicitly blocked. Tier 2: any extracted name.
+  const blocked = eligible.filter((n) => getOutcome(n) === 'blocked');
+  const tier = blocked.length > 0 ? blocked : eligible;
+  // Longest canonical first — multi-word > single-word.
+  const sorted = [...tier].sort((a, b) => b.length - a.length);
+  const targetName = sorted[0];
+
+  return {
+    targetName,
+    stage2Prompt: replaceNameInPrompt(prompt, targetName, MINIMAL_PLACEHOLDER),
+    stage3Prompt: replaceNameInPrompt(prompt, targetName, genericFor(targetName)),
+  };
 }
 
 // Re-export the seed list so callers that need to know "what names
