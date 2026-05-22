@@ -2,6 +2,19 @@
 
 All notable changes to MashupForge are documented in this file.
 
+## [0.9.44] — 2026-05-22
+
+### Added
+- **infra:** EVENT-LOG-AUTO-EMIT — git hooks emit to project-events.jsonl
+
+### Fixed
+- **scheduler:** depth-first fill + pre-cycle week-filled check
+- **tauri:** cover loopback URLs in capability remote scope — REAL autostart ACL fix
+- **moderation:** surgical TRADEMARK rewrite — only swap the name, preserve everything else
+
+### Docs
+- **bmad:** DEPS-MAJOR-RESEARCH-MAY22 — @types/node 25 + eslint 10 research
+
 ## [0.9.43] — 2026-05-21
 
 _Internal-only release; no user-facing changes since v0.9.43._
