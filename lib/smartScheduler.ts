@@ -350,6 +350,23 @@ export function findBestSlots(
      * Undefined = no cap = pre-fix behaviour (preserves existing tests).
      */
     postsPerDay?: number;
+    /**
+     * AUTO-SCHEDULE-DEPTH-FIRST (2026-05-22): controls how the picker
+     * spreads slots across days vs within a day.
+     *
+     * - `'breadth'` (default, back-compat): score every (date, hour)
+     *   globally and pick highest after a soft per-day penalty. Tends
+     *   to spread one post per day across the horizon at each day's
+     *   peak heatmap hour. Maurice reported 12 posts all queued at
+     *   19:00 across 12 different days — exactly this behaviour.
+     * - `'depth'`: iterate days chronologically. For each day not yet
+     *   at the `postsPerDay` cap, pick the highest-weight heatmap hour
+     *   still available, repeat until the day's cap is hit, then move
+     *   to the next day. Fills each day's heatmap-ordered hours before
+     *   spilling to the next day. Pipeline + manual modal both use
+     *   this — see pickFillWeekSlot + useSmartScheduler.
+     */
+    fillMode?: 'breadth' | 'depth';
   },
 ): SlotScore[] {
   const eng = engagement || loadEngagementData();
@@ -358,6 +375,7 @@ export function findBestSlots(
   const caps = options?.caps || {};
   const horizonDays = Math.max(1, options?.horizonDays ?? 14);
   const postsPerDay = options?.postsPerDay;
+  const fillMode = options?.fillMode ?? 'breadth';
   const platDayCounts = buildPerDayPlatformCounts(existingPosts);
   const dayCounts = buildPerDayCounts(existingPosts);
 
@@ -391,6 +409,40 @@ export function findBestSlots(
   const now = new Date();
   const startDate = new Date(now);
   startDate.setDate(startDate.getDate() + 1);
+
+  // AUTO-SCHEDULE-DEPTH-FIRST (2026-05-22): when fillMode='depth',
+  // iterate days chronologically and fill each day's heatmap-ordered
+  // hours up to postsPerDay before moving to the next day. Bypasses the
+  // global score-max picker below. Maurice's pipeline + manual modal
+  // use this path. The breadth-first picker stays as the default for
+  // back-compat with existing call sites that don't set fillMode.
+  if (fillMode === 'depth') {
+    const selectedDepth: SlotScore[] = [];
+    const sortedHours = [...eng.hours]
+      .filter((h) => h.hour >= 6 && h.hour <= 23)
+      .sort((a, b) => b.weight - a.weight);
+    for (let dayOffset = 0; dayOffset < horizonDays && selectedDepth.length < count; dayOffset++) {
+      const checkDate = new Date(startDate);
+      checkDate.setDate(checkDate.getDate() + dayOffset);
+      const dateStr = formatLocalDate(checkDate);
+      if (dayWouldExceedCap(dateStr)) continue;
+      // Fill this day's hours (heatmap-ordered) until the cap or until
+      // the global `count` request is satisfied.
+      const dayEng = eng.days.find((d) => d.day === checkDate.getDay());
+      for (const { hour, weight } of sortedHours) {
+        if (selectedDepth.length >= count) break;
+        if (postsPerDay != null && (dayCountsLocal[dateStr] || 0) >= postsPerDay) break;
+        const time = `${String(hour).padStart(2, '0')}:00`;
+        if (taken.has(`${dateStr}T${time}`)) continue;
+        if (dayWouldExceedCap(dateStr)) break; // platform cap hit mid-fill
+        const reason = `${weight}h weight, ${dayEng?.multiplier ?? 0}x day${eng.source === 'instagram' ? ' (IG data, depth-first)' : ' (research, depth-first)'}`;
+        selectedDepth.push({ date: dateStr, time, score: weight, reason });
+        taken.add(`${dateStr}T${time}`);
+        dayCountsLocal[dateStr] = (dayCountsLocal[dateStr] || 0) + 1;
+      }
+    }
+    return selectedDepth;
+  }
 
   // Pre-build the candidate (date, hour) grid so each round only re-scores
   // — the grid itself is fixed.
@@ -462,6 +514,8 @@ export function findBestSlot(
     horizonDays?: number;
     /** AUTO-SCHEDULE-FIX (2026-05-21): see `findBestSlots`. */
     postsPerDay?: number;
+    /** AUTO-SCHEDULE-DEPTH-FIRST (2026-05-22): see `findBestSlots`. */
+    fillMode?: 'breadth' | 'depth';
   },
 ): { date: string; time: string } {
   const slots = findBestSlots(existingPosts, 1, engagement, options);

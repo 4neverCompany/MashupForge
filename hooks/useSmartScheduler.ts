@@ -69,8 +69,13 @@ export function useSmartScheduler({
       // on the dominant engagement day. ceil(count / 14) targets roughly
       // even fill over the 14-day horizon: 5 posts → 1/day → spreads
       // over 5+ days; 20 posts → 2/day; 50 posts → 4/day.
+      //
+      // AUTO-SCHEDULE-DEPTH-FIRST (2026-05-22): depth-first fill so
+      // multi-slot picks fill each day's heatmap-ordered hours before
+      // moving on, instead of clustering at the dominant hour across
+      // days. Matches Maurice's expected behaviour for the modal.
       const postsPerDay = Math.max(1, Math.ceil(count / 14));
-      const newSlots = findBestSlots(scheduledPosts, count, eng, { postsPerDay });
+      const newSlots = findBestSlots(scheduledPosts, count, eng, { postsPerDay, fillMode: 'depth' });
       setSlots(newSlots);
       if (newSlots.length > 0) {
         setForm({ date: newSlots[0].date, time: newSlots[0].time, platforms: defaultPlatforms });

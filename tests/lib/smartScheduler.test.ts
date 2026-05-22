@@ -176,6 +176,88 @@ describe('findBestSlots', () => {
     });
   });
 
+  describe('AUTO-SCHEDULE-DEPTH-FIRST (2026-05-22): fillMode=depth', () => {
+    it('fills each day\'s heatmap-ordered hours before moving to the next day', () => {
+      // Maurice's reported failure mode: 12 posts all queued at 19:00
+      // across 12 days because the breadth-first picker spread one
+      // pick per day at each day's peak hour. Depth-first should
+      // cluster picks on the earliest day at varied hours instead.
+      // Fixture has 3 distinct hours (12, 18, 20) — pick exactly that
+      // many so the test asserts pure within-day fill without spilling.
+      const slots = findBestSlots([], 3, makeEngagement(), {
+        postsPerDay: 6,
+        fillMode: 'depth',
+      });
+      expect(slots).toHaveLength(3);
+      // All 3 should land on the SAME (earliest) day in depth mode.
+      const dates = new Set(slots.map((s) => s.date));
+      expect(dates.size).toBe(1);
+      // And they should be at 3 DISTINCT hours, picked highest-weight first.
+      const hours = slots.map((s) => Number.parseInt(s.time.slice(0, 2), 10));
+      expect(new Set(hours).size).toBe(3);
+      // The first slot must be the peak hour (highest weight in the
+      // makeEngagement profile is hour 20 at weight 0.95).
+      expect(hours[0]).toBe(20);
+      // Second pick should be next-highest weight (18 at 0.85).
+      expect(hours[1]).toBe(18);
+    });
+
+    it('spills to the next day once the cap is reached', () => {
+      // Fixture has 3 distinct hours per day. Asking for 6 → fills
+      // day 1 (3 picks) then day 2 (3 picks). Even with postsPerDay=6
+      // the depth-first picker still spills at the hour-exhaustion
+      // boundary, not just at the postsPerDay cap.
+      const slots = findBestSlots([], 6, makeEngagement(), {
+        postsPerDay: 6,
+        fillMode: 'depth',
+      });
+      expect(slots).toHaveLength(6);
+      const day1 = slots[0].date;
+      const day2 = slots[3].date;
+      expect(day1).not.toBe(day2);
+      expect(slots.slice(0, 3).every((s) => s.date === day1)).toBe(true);
+      expect(slots.slice(3, 6).every((s) => s.date === day2)).toBe(true);
+    });
+
+    it('respects postsPerDay as an explicit cap before hour exhaustion', () => {
+      // postsPerDay=2 means each day caps at 2 picks even though the
+      // fixture has 3 distinct hours. 6 picks → 3 days × 2 picks each.
+      const slots = findBestSlots([], 6, makeEngagement(), {
+        postsPerDay: 2,
+        fillMode: 'depth',
+      });
+      expect(slots).toHaveLength(6);
+      const dateCounts = new Map<string, number>();
+      for (const s of slots) dateCounts.set(s.date, (dateCounts.get(s.date) ?? 0) + 1);
+      // 3 distinct dates, each with exactly 2 picks
+      expect(dateCounts.size).toBe(3);
+      for (const c of dateCounts.values()) expect(c).toBe(2);
+    });
+
+    it('respects existing posts on a day toward the per-day cap', () => {
+      // 5 existing posts on the engagement-best day already; depth=2/day
+      // means that day is over-cap. Picker must skip to next day.
+      const eng = makeEngagement();
+      const firstSlot = findBestSlots([], 1, eng)[0];
+      const saturated = firstSlot.date;
+      const existing = [
+        { date: saturated, time: '08:00', platforms: ['instagram'] },
+        { date: saturated, time: '20:00', platforms: ['instagram'] },
+      ];
+      const slots = findBestSlots(existing, 1, eng, { postsPerDay: 2, fillMode: 'depth' });
+      expect(slots[0].date).not.toBe(saturated);
+    });
+
+    it('back-compat: omitting fillMode preserves breadth-first behaviour', () => {
+      // Same call without fillMode should still pass the existing
+      // postsPerDay=1 same-call cap test — confirming the new option
+      // is additive, not a behaviour change for existing callers.
+      const slots = findBestSlots([], 5, makeEngagement(), { postsPerDay: 1 });
+      const dates = slots.map((s) => s.date);
+      expect(new Set(dates).size).toBe(dates.length); // breadth: one per day
+    });
+  });
+
   it('reason string mentions IG data when source is instagram', () => {
     const eng = makeEngagement();
     eng.source = 'instagram';

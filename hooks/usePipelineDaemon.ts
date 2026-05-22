@@ -536,6 +536,60 @@ Return ONLY a JSON array of objects with "concept" and "context" fields. Example
           // memory across a long-running continuous run.
           const accumulatedPosts: ScheduledPost[] = [];
 
+          // AUTO-SCHEDULE-DEPTH-FIRST companion (2026-05-22, Issue 4):
+          // pre-cycle fill check. Maurice reported auto-resume on app
+          // restart kept generating even when the weekly post limit was
+          // already met. The existing branch-decision logic at line ~720
+          // only runs AFTER processIdea, so the first cycle of a freshly-
+          // started run would always burn an idea + image-gen + schedule
+          // before checking whether anything was needed. Now: at the
+          // START of every cycle, compute fill status; if filled AND no
+          // pending_approval items remain, skip directly to the sleep
+          // path instead of generating. Same `interval`-minute sleep
+          // shape as the post-processing branch — just hoisted earlier
+          // so we don't waste a cycle on a week that's already done.
+          {
+            const settingsTargetDaysAtStart = readTargetDays();
+            const targetPerDayAtStart =
+              latestPropsRef.current.settings.pipelinePostsPerDay ?? 2;
+            const allPostsAtStart =
+              latestPropsRef.current.settings.scheduledPosts || [];
+            const horizonDaysAtStart = Math.max(settingsTargetDaysAtStart, 14);
+            const fillAtStart = computeWeekFillStatus(
+              allPostsAtStart,
+              horizonDaysAtStart,
+              targetPerDayAtStart,
+            );
+            if (fillAtStart.filled && fillAtStart.pendingApprovalTotal === 0) {
+              const intervalMinAtStart = readInterval();
+              addLog(
+                'pipeline-week-confirmed',
+                '',
+                'success',
+                `Pre-cycle check: week already filled (${fillAtStart.scheduledTotal}/${fillAtStart.targetTotal} across ${horizonDaysAtStart}d, 0 pending) — sleeping ${intervalMinAtStart}m without generating`,
+              );
+              setPipelineProgress({
+                current: 0,
+                total: 0,
+                currentStep: `Next week in ${intervalMinAtStart} min`,
+                currentIdea: '',
+              });
+              const sleepMsAtStart = intervalMinAtStart * 60 * 1000;
+              const sliceMsAtStart = 2000;
+              for (
+                let slept = 0;
+                slept < sleepMsAtStart && !runAbort.signal.aborted;
+                slept += sliceMsAtStart
+              ) {
+                await wait(Math.min(sliceMsAtStart, sleepMsAtStart - slept));
+              }
+              // Reset the one-shot prompt so the next horizon roll-over
+              // can fire 'pipeline-week-confirmed' again.
+              weekFilledPromptedThisRun = false;
+              continue;
+            }
+          }
+
           let pendingIdeas = latestPropsRef.current.ideas.filter(i => i.status === 'idea');
 
           if (pendingIdeas.length === 0) {

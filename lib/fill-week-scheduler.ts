@@ -53,7 +53,19 @@ export function pickFillWeekSlot(opts: PickFillWeekSlotOptions): FillWeekSlotRes
   // raw=2.4 even after 5 Saturday posts (20/6=3.3 > 2.4/1). The hard cap
   // forces the picker to bounce off a full day and land on the next
   // engagement-best day instead.
-  const slot = findBestSlot(posts, engagement, { platforms, caps, horizonDays, postsPerDay });
+  // AUTO-SCHEDULE-DEPTH-FIRST (2026-05-22): pipeline path uses depth-first
+  // fill — each day fills its heatmap-ordered hours up to postsPerDay
+  // before spilling to the next day. Previously findBestSlots' soft
+  // score-max picker spread one post per day across days at each day's
+  // peak hour, producing Maurice's "12 posts all at 19:00" cluster
+  // across 12 different days.
+  const slot = findBestSlot(posts, engagement, {
+    platforms,
+    caps,
+    horizonDays,
+    postsPerDay,
+    fillMode: 'depth',
+  });
 
   // Week classification: both `findBestSlots` and `computeWeekFillStatus`
   // anchor on TOMORROW (today is excluded — we never schedule into it),
