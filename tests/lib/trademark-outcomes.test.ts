@@ -69,6 +69,40 @@ describe('trademark-outcomes store', () => {
     expect(blocked).toContain('Batman');     // from this test
     expect(blocked).not.toContain('Yoda');   // explicitly allowed
   });
+
+  describe('TRADEMARK-SURGICAL-REWRITE v3 (2026-05-22): history-driven filter', () => {
+    it("Mandalorian regression: 'unknown' status means substitution does NOT match it", () => {
+      // Maurice's bug: Mandalorian was being substituted even though
+      // gallery showed past Mandalorian prompts had succeeded. After
+      // v3, only outcome='blocked' names are candidates for swap.
+      // Mandalorian is NOT in SEED_BLOCKED (only Spider-Family is), so
+      // its default outcome is 'unknown' → not in the blocked list.
+      expect(getOutcome('Mandalorian')).toBe('unknown');
+      const blocked = getAllBlocked();
+      expect(blocked).not.toContain('Mandalorian');
+    });
+
+    it("explicit 'allowed' marking keeps a name out of the blocked list", () => {
+      // Success-path marking from useImageGeneration's first-try
+      // success branch records each name as 'allowed'. The blocked
+      // list must NOT include them.
+      setOutcome('Mandalorian', 'allowed');
+      setOutcome('Iron Man', 'allowed');
+      expect(getOutcome('Mandalorian')).toBe('allowed');
+      const blocked = getAllBlocked();
+      expect(blocked).not.toContain('Mandalorian');
+      expect(blocked).not.toContain('Iron Man');
+    });
+
+    it('seed-blocked names stay blocked even after a coincidental "allowed" mark', () => {
+      // Spider-Man is in SEED_BLOCKED. If a later prompt containing
+      // Spider-Man somehow succeeds (e.g. a manual workaround), the
+      // sticky-blocked guard in setOutcome keeps Spider-Man flagged.
+      expect(getOutcome('Spider-Man')).toBe('blocked');
+      setOutcome('Spider-Man', 'allowed'); // attempted revive
+      expect(getOutcome('Spider-Man')).toBe('blocked');
+    });
+  });
 });
 
 describe('genericFor', () => {

@@ -8,7 +8,7 @@ import { MASTERPROMPT_INSTRUCTIONS } from '@/lib/masterpromptTemplate';
 import { getErrorMessage } from '@/lib/errors';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { extractTrademarkNames } from '@/lib/extract-trademark-names';
-import { preflightGenericize, setOutcome } from '@/lib/trademark-outcomes';
+import { preflightGenericize, setOutcome, getOutcome } from '@/lib/trademark-outcomes';
 import {
   type GeneratedImage,
   type GenerateOptions,
@@ -475,42 +475,75 @@ interface SubmitResult {
 }
 
 /**
- * TRADEMARK-SURGICAL-REWRITE v2 (2026-05-22): deterministic name-swap
- * retry. Maurice's aa2a068 used an LLM with strict "preserve every word
- * EXACTLY" instructions but the model still embellished — Tony Stark
- * "Mark 42 nanotech fused with daemon-bone plating, lightning-wreathed
- * Daemonhammer raised high" became a fully re-imagined scene with new
- * adjectives ("crimson-armored", "shattered battlefield"), new clauses
- * ("crackling warp lightning erupting from his gauntlet"), and lost
- * details ("Mark 42" disappeared). LLMs are fundamentally unreliable
- * at the "rewrite this one word but leave everything else alone"
- * instruction shape.
+ * TRADEMARK-SURGICAL-REWRITE v3 (2026-05-22): deterministic name-swap
+ * retry — now driven by HISTORY, not the static seed list.
  *
- * Fix: replace the LLM call with deterministic substitution for
- * TRADEMARK / COPYRIGHT only. extractTrademarkNames scans the prompt
- * against our 80-name seed list; preflightGenericize swaps each match
- * with its curated visual descriptor (colors, silhouette, signature
- * props) and leaves everything else byte-for-byte identical.
+ * Maurice's bug report: "Mandalorian" was being substituted during
+ * retry even though gallery posts proved past Mandalorian prompts had
+ * gone through Leonardo without issue. v2's substitute logic was:
+ *   extractTrademarkNames(prompt) → preflightGenericize(prompt, all extracted)
+ * That used the 80-name static seed list as the primary filter,
+ * ignoring whether any of those names had actually caused a rejection.
+ * Static-list-driven blocking treats every famous franchise name as
+ * suspect even when Leonardo would accept it. Wrong default.
  *
- * Returns null when no known names were found in the prompt — caller
- * should rethrow the moderation error so the user knows to edit the
- * prompt manually (we have no safe substitution for unknown IP).
+ * v3 only substitutes names that the outcome store records as
+ * 'blocked' — i.e., that have actually triggered a TRADEMARK error in
+ * a prior run (captured via onModelError's single-name auto-flag
+ * from aa2a068, or via the seed SEED_BLOCKED list for the few names
+ * Maurice observed in his logs). Names recorded as 'allowed'
+ * (success-path marking, below) or 'unknown' (never observed)
+ * pass through unchanged.
+ *
+ * Returns null when:
+ *   - no seed-listed names appear in the prompt, OR
+ *   - none of the seed-listed names that appear have outcome 'blocked'
+ * Caller rethrows the moderation error so the user sees a real
+ * "TRADEMARK blocked" message and edits manually. The onModelError
+ * single-name capture (still active) will mark the offending name
+ * 'blocked' for next time — the system learns iteratively rather
+ * than pre-emptively blocking everything famous.
  *
  * NSFW / EXTREME_VIOLENCE / CHILD continue to use the LLM rewrite
- * path (buildModerationRewriteInstruction) — the LLM is reliable
- * there because "soften the violence" is genuinely a rewrite task,
- * not a one-word-swap task.
+ * path (buildModerationRewriteInstruction) — that's a legitimate
+ * softening task, not a one-word-swap task.
  */
 function trademarkSubstituteOrNull(
   failedPrompt: string,
 ): { prompt: string; swapped: string[] } | null {
   const extracted = extractTrademarkNames(failedPrompt);
   if (extracted.length === 0) return null;
-  const result = preflightGenericize(failedPrompt, extracted);
-  // Mark each swapped name as 'blocked' in the outcome store so future
-  // pre-flight catches it before submission. Failure-path learning loop.
+  // Filter to names with outcome='blocked' — historical rejection
+  // signal is the primary trigger. 'allowed' / 'unknown' names pass.
+  const known = extracted.filter((name) => getOutcome(name) === 'blocked');
+  if (known.length === 0) return null;
+  const result = preflightGenericize(failedPrompt, known);
+  // Reinforce the 'blocked' status on swapped names — they've now
+  // been observed in a second blocking prompt, so the signal stays.
   for (const name of result.swapped) setOutcome(name, 'blocked');
   return result;
+}
+
+/**
+ * SUCCESS-PATH-ALLOWED-MARKING (2026-05-22): when a generation
+ * succeeds on first try (no retry), every trademark-list name that
+ * appeared in the submitted prompt is recorded as 'allowed' in the
+ * outcome store. Future TRADEMARK blocks involving other prompts that
+ * happen to contain these names won't auto-substitute them — the
+ * substitution path filters to names with outcome 'blocked' only.
+ *
+ * setOutcome's sticky-blocked guard (lib/trademark-outcomes.ts) means
+ * we can never revive a previously-blocked name to 'allowed' by a
+ * coincidental success — once a name has reliably failed, the
+ * 'allowed' marking is a no-op.
+ *
+ * Only call on FIRST-TRY successes (the success path before the
+ * retry catch). A success that came AFTER a retry doesn't prove the
+ * names are allowed — the retry's substitution may have removed them.
+ */
+function markPromptNamesAllowed(prompt: string): void {
+  const names = extractTrademarkNames(prompt);
+  for (const name of names) setOutcome(name, 'allowed');
 }
 
 /**
@@ -532,6 +565,10 @@ async function submitWithOneRetry(
 ): Promise<SubmitResult> {
   try {
     const success = await submitLeonardoAndPoll({ prompt: initialPrompt, ...baseParams });
+    // SUCCESS-PATH-ALLOWED-MARKING: names that appeared in this
+    // first-try-successful prompt are now confirmed allowed. Sticky-
+    // blocked guard in setOutcome ensures we never revive a known-bad.
+    markPromptNamesAllowed(initialPrompt);
     return { success, finalPrompt: initialPrompt, retried: false };
   } catch (err) {
     const lErr = err as LeonardoGenerationError;
@@ -596,6 +633,9 @@ async function submitViaAiImageWithOneRetry(
       idea: initialIdea,
       skipEnhance: false,
     });
+    // SUCCESS-PATH-ALLOWED-MARKING: the enhanced prompt is what
+    // Leonardo accepted; mark trademark names found there as allowed.
+    markPromptNamesAllowed(r.enhancedPrompt);
     return { success: r, finalPrompt: r.enhancedPrompt, retried: false };
   } catch (err) {
     const lErr = err as LeonardoGenerationError;

@@ -7,7 +7,7 @@ import { buildEnhancedPrompt } from '@/lib/image-prompt-builder';
 import { streamAIToString } from '@/lib/aiClient';
 import { buildModerationRewriteInstruction } from './useImageGeneration';
 import { extractTrademarkNames } from '@/lib/extract-trademark-names';
-import { preflightGenericize, setOutcome } from '@/lib/trademark-outcomes';
+import { preflightGenericize, setOutcome, getOutcome } from '@/lib/trademark-outcomes';
 import { getErrorMessage } from '@/lib/errors';
 import {
   type GeneratedImage,
@@ -320,6 +320,13 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
           let retried = false;
           try {
             result = await submitOnce(activePrompt);
+            // SUCCESS-PATH-ALLOWED-MARKING (2026-05-22): trademark names
+            // in this first-try-successful prompt are now confirmed
+            // allowed. Future TRADEMARK blocks involving these names
+            // will skip them during substitution. Sticky-blocked guard
+            // in setOutcome prevents reviving a known-bad name.
+            const allowedCandidates = extractTrademarkNames(activePrompt);
+            for (const name of allowedCandidates) setOutcome(name, 'allowed');
           } catch (err) {
             const e = err as SubmitError;
             const cls = e.moderationClassification ?? [];
@@ -343,13 +350,25 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
             const isTrademark = upper.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
             if (isTrademark) {
               const failedPrompt = e.failedPrompt ?? activePrompt;
+              // TRADEMARK-SURGICAL-REWRITE v3 (2026-05-22): filter to
+              // names with outcome 'blocked' — historical rejection
+              // signal drives substitution, not the static seed list.
+              // 'allowed' / 'unknown' names pass through. Maurice's
+              // "Mandalorian was being substituted even though gallery
+              // shows it succeeds" bug: now Mandalorian only gets
+              // substituted if a prior run explicitly recorded it as
+              // 'blocked' via onModelError.
               const extracted = extractTrademarkNames(failedPrompt);
-              if (extracted.length === 0) {
-                // No known names in the prompt — no safe substitution.
-                // Rethrow so the user edits manually.
+              const known = extracted.filter((name) => getOutcome(name) === 'blocked');
+              if (known.length === 0) {
+                // No known-blocked names in the prompt — rethrow so the
+                // user sees the original TRADEMARK error. onModelError's
+                // single-name capture (if exactly one candidate is in
+                // the prompt) will flag the name 'blocked' for next
+                // time so the system learns iteratively.
                 throw err;
               }
-              const sub = preflightGenericize(failedPrompt, extracted);
+              const sub = preflightGenericize(failedPrompt, known);
               for (const name of sub.swapped) setOutcome(name, 'blocked');
               activePrompt = sub.prompt;
             } else {
