@@ -47,7 +47,11 @@ describe('findBestSlots', () => {
     vi.useFakeTimers();
     // Pin to a fixed Wednesday so weekend bonuses and day rotations
     // are deterministic across CI/local runs.
-    vi.setSystemTime(new Date('2026-04-15T10:00:00Z'));
+    // INCLUDE-TODAY (2026-05-22): pinned to 03:00 UTC = 05:00 CEST so
+    // all engagement-fixture hours (12, 18, 20) are still future when
+    // "today" is considered as a candidate day. Earlier pin of 10:00
+    // UTC = 12:00 local would have excluded the 12:00 hour from today.
+    vi.setSystemTime(new Date('2026-04-15T03:00:00Z'));
   });
 
   afterEach(() => {
@@ -75,15 +79,31 @@ describe('findBestSlots', () => {
     }
   });
 
-  it('starts the search from tomorrow, never today', () => {
-    // findBestSlots emits LOCAL date strings — derive `todayStr` the same
-    // way to avoid a UTC/local mismatch on hosts that span a date line
-    // relative to the pinned 10:00 UTC anchor.
-    const today = new Date('2026-04-15T10:00:00Z');
+  it('INCLUDE-TODAY (2026-05-22): includes today as a candidate when there are future hours left', () => {
+    // findBestSlots emits LOCAL date strings — derive `todayStr` the
+    // same way to avoid a UTC/local mismatch. beforeEach pins to
+    // 03:00 UTC = 05:00 CEST, so all engagement-fixture hours (12, 18,
+    // 20) are future and should be considered for today.
+    const today = new Date('2026-04-15T03:00:00Z');
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const slots = findBestSlots([], 10, makeEngagement());
-    for (const s of slots) {
-      expect(s.date).not.toBe(todayStr);
+    const slots = findBestSlots([], 3, makeEngagement(), { fillMode: 'depth', postsPerDay: 6 });
+    // With depth-fill + cap=6, the first three picks all land on today
+    // (highest-weight hours: 20, 18, 12 → all in the future at 05:00 local).
+    expect(slots.every((s) => s.date === todayStr)).toBe(true);
+  });
+
+  it('INCLUDE-TODAY: skips today\'s already-passed hours', () => {
+    // Override the timer to mid-afternoon so the 12:00 fixture hour is
+    // in the past. 14:00 UTC = 16:00 CEST. Only 18 and 20 should be
+    // valid for today; 12:00 must be skipped.
+    vi.setSystemTime(new Date('2026-04-15T14:00:00Z'));
+    const today = new Date('2026-04-15T14:00:00Z');
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const slots = findBestSlots([], 5, makeEngagement(), { fillMode: 'depth', postsPerDay: 6 });
+    const todaySlots = slots.filter((s) => s.date === todayStr);
+    for (const s of todaySlots) {
+      const hour = Number.parseInt(s.time.slice(0, 2), 10);
+      expect(hour).toBeGreaterThan(16); // strictly after current local hour
     }
   });
 
@@ -369,7 +389,11 @@ describe('findBestSlots', () => {
 describe('findBestSlot', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-04-15T10:00:00Z'));
+    // INCLUDE-TODAY (2026-05-22): pinned to 03:00 UTC = 05:00 CEST so
+    // all engagement-fixture hours (12, 18, 20) are still future when
+    // "today" is considered as a candidate day. Earlier pin of 10:00
+    // UTC = 12:00 local would have excluded the 12:00 hour from today.
+    vi.setSystemTime(new Date('2026-04-15T03:00:00Z'));
   });
 
   afterEach(() => {
@@ -402,7 +426,11 @@ describe('loadEngagementData / saveEngagementData', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-04-15T10:00:00Z'));
+    // INCLUDE-TODAY (2026-05-22): pinned to 03:00 UTC = 05:00 CEST so
+    // all engagement-fixture hours (12, 18, 20) are still future when
+    // "today" is considered as a candidate day. Earlier pin of 10:00
+    // UTC = 12:00 local would have excluded the 12:00 hour from today.
+    vi.setSystemTime(new Date('2026-04-15T03:00:00Z'));
     store = setupLocalStorageStub();
   });
 

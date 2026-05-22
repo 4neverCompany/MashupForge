@@ -55,7 +55,7 @@ export interface WeekFillStatus {
   filled: boolean;
   /** Percentage 0..100, rounded to the nearest int for UI use. */
   percent: number;
-  /** Ordered from tomorrow forward (days.length === targetDays). */
+  /** Ordered from today forward (days.length === targetDays). */
   days: DayFill[];
   /**
    * Sum of `pending_approval` posts across all days in the horizon.
@@ -70,7 +70,7 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
 /**
  * Build a per-day breakdown of `scheduled` and `pending_approval` posts
- * in each of the next `targetDays` days, starting from TOMORROW (today is
+ * in each of the next `targetDays` days, starting from TODAY (was tomorrow
  * excluded — matches `findBestSlots` in smartScheduler.ts which also
  * schedules from tomorrow, so the daemon's "filled?" check and the
  * scheduler's slot-pick agree on which days count). Posts in the past
@@ -94,8 +94,13 @@ export function computeWeekFillStatus(
   const days: DayFill[] = [];
   const today = new Date(now);
   today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
+  // INCLUDE-TODAY (2026-05-22): the per-day breakdown now starts from
+  // TODAY instead of tomorrow. findBestSlots was updated to consider
+  // today's remaining hours as candidate slots; this anchor change
+  // keeps the daemon's "filled?" check aligned with what the scheduler
+  // actually picks. Posts in the past are still filtered by the
+  // `ts < now.getTime()` guard below, so today's already-elapsed hours
+  // don't inflate the scheduled count.
 
   const scheduledCounts = new Map<string, number>();
   const pendingCounts = new Map<string, number>();
@@ -118,8 +123,8 @@ export function computeWeekFillStatus(
   }
 
   for (let i = 0; i < targetDays; i++) {
-    const d = new Date(tomorrow);
-    d.setDate(tomorrow.getDate() + i);
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
     const dateStr = formatLocalDate(d);
     const scheduledCount = scheduledCounts.get(dateStr) ?? 0;
     const pendingApprovalCount = pendingCounts.get(dateStr) ?? 0;

@@ -192,8 +192,11 @@ describe('pickContinuousBranch — daemon decision (PIPELINE-CONT-V2)', () => {
 
   function fullWeekOf(status: ScheduledPost['status']): ScheduledPost[] {
     // 14 days × 2 posts each = 28 posts, all the given status.
+    // INCLUDE-TODAY (2026-05-22): horizon starts TODAY, not tomorrow.
+    // Anchor on today (00:00) so today's posts at 14:00 / 20:00 (both
+    // after the noon NOW) get counted instead of filtered as past.
     const tomorrow = new Date(NOW);
-    tomorrow.setDate(NOW.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
     const out: ScheduledPost[] = [];
     for (let i = 0; i < 14; i++) {
       const d = new Date(tomorrow);
@@ -249,8 +252,11 @@ describe('pickContinuousBranch — daemon decision (PIPELINE-CONT-V2)', () => {
   it('mixed half-scheduled half-pending → continue (not filled)', () => {
     // 14 scheduled + 14 pending across 14 days (1 each per day).
     // scheduledCount per day = 1, target = 2 → never filled.
+    // INCLUDE-TODAY (2026-05-22): horizon starts TODAY, not tomorrow.
+    // Anchor on today (00:00) so today's posts at 14:00 / 20:00 (both
+    // after the noon NOW) get counted instead of filtered as past.
     const tomorrow = new Date(NOW);
-    tomorrow.setDate(NOW.getDate() + 1);
+    tomorrow.setHours(0, 0, 0, 0);
     const posts: ScheduledPost[] = [];
     for (let i = 0; i < 14; i++) {
       const d = new Date(tomorrow);

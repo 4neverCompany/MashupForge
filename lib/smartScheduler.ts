@@ -406,9 +406,22 @@ export function findBestSlots(
   // within one call.
   const dayCountsLocal = { ...dayCounts };
 
+  // INCLUDE-TODAY (2026-05-22): pipeline scheduler now considers TODAY
+  // as a candidate day for slot picks. Previously startDate was anchored
+  // on TOMORROW (the +1 below) — Maurice's bug report flagged that
+  // approved content was always pushed to tomorrow even when today had
+  // empty capacity. The exclusion was deliberate ("today is already
+  // passed") but wrong: at 14:00 a 20:00 today slot is still in the
+  // future, and the autoposter handles the wait correctly.
+  //
+  // Past-hour filter is applied inside the dayOffset===0 (today) loop
+  // so we don't schedule for an hour that's already gone (e.g. 8:00 at
+  // 18:30). `eng.hours` is iterated below; the filter is the same for
+  // both depth-first and breadth-first paths.
   const now = new Date();
   const startDate = new Date(now);
-  startDate.setDate(startDate.getDate() + 1);
+  startDate.setHours(0, 0, 0, 0);
+  const currentHour = now.getHours();
 
   // AUTO-SCHEDULE-DEPTH-FIRST (2026-05-22): when fillMode='depth',
   // iterate days chronologically and fill each day's heatmap-ordered
@@ -429,9 +442,15 @@ export function findBestSlots(
       // Fill this day's hours (heatmap-ordered) until the cap or until
       // the global `count` request is satisfied.
       const dayEng = eng.days.find((d) => d.day === checkDate.getDay());
+      const isToday = dayOffset === 0;
       for (const { hour, weight } of sortedHours) {
         if (selectedDepth.length >= count) break;
         if (postsPerDay != null && (dayCountsLocal[dateStr] || 0) >= postsPerDay) break;
+        // INCLUDE-TODAY: skip hours already past the current wall clock
+        // when picking for today. Same-hour gets skipped too (no
+        // sub-hour granularity in the candidate grid; "18:00 today" at
+        // 18:30 is in the past).
+        if (isToday && hour <= currentHour) continue;
         const time = `${String(hour).padStart(2, '0')}:00`;
         if (taken.has(`${dateStr}T${time}`)) continue;
         if (dayWouldExceedCap(dateStr)) break; // platform cap hit mid-fill
@@ -457,8 +476,12 @@ export function findBestSlots(
     // the existing posts. Same-call rounds also check via dayAtPostsPerDayCap
     // in the selection loop below.
     if (dayAtPostsPerDayCap(dateStr, dayCountsLocal[dateStr] || 0)) continue;
+    const isToday = dayOffset === 0;
     for (const { hour } of eng.hours) {
       if (hour < 6 || hour > 23) continue;
+      // INCLUDE-TODAY (2026-05-22): skip already-past hours when the
+      // candidate is for today. See depth-first branch above.
+      if (isToday && hour <= currentHour) continue;
       candidates.push({
         date: dateStr,
         hour,

@@ -24,10 +24,13 @@ function post(
   };
 }
 
-// Monday 2026-04-20 at noon local — stable anchor for all cases.
-// The window starts TOMORROW (today is excluded — matches findBestSlots
-// in smartScheduler.ts which also schedules from tomorrow), so for a
-// 7-day target the days are 2026-04-21 .. 2026-04-27.
+// Monday 2026-04-19 at noon local — stable anchor for all cases.
+// INCLUDE-TODAY (2026-05-22): the window now starts TODAY (was tomorrow
+// pre-fix — matches findBestSlots which also considers today as a
+// candidate now). For a 7-day target the days are 2026-04-19 ..
+// 2026-04-25. Posts dated TODAY at a time AFTER `now` count toward
+// the schedule; posts at an earlier hour today are filtered out by
+// the `ts < now.getTime()` guard.
 const NOW = new Date(2026, 3, 20, 12, 0, 0);
 
 describe('computeWeekFillStatus', () => {
@@ -39,22 +42,23 @@ describe('computeWeekFillStatus', () => {
     expect(s.filled).toBe(false);
     expect(s.percent).toBe(0);
     expect(s.days).toHaveLength(7);
-    // First day is TOMORROW (today is excluded from the window).
-    expect(s.days[0].date).toBe('2026-04-21');
-    expect(s.days[0].dayLabel).toBe('Tue');
+    // INCLUDE-TODAY (2026-05-22): first day is TODAY (was tomorrow
+    // pre-fix). 2026-04-20 is a Monday, so the labels start on Mon.
+    expect(s.days[0].date).toBe('2026-04-20');
+    expect(s.days[0].dayLabel).toBe('Mon');
     expect(s.days.every(d => d.gap === 2)).toBe(true);
-    // Last day is tomorrow + 6 = Mon 2026-04-27.
-    expect(s.days[6].date).toBe('2026-04-27');
-    expect(s.days[6].dayLabel).toBe('Mon');
+    // Last day is today + 6 = Sun 2026-04-26.
+    expect(s.days[6].date).toBe('2026-04-26');
+    expect(s.days[6].dayLabel).toBe('Sun');
   });
 
   it('counts only scheduled, tracks pending_approval separately, ignores posted + failed', () => {
     const posts: ScheduledPost[] = [
-      post('2026-04-21', '18:00', 'scheduled'),
-      post('2026-04-21', '20:00', 'pending_approval'),
-      post('2026-04-21', '22:00', 'posted'),    // excluded entirely
-      post('2026-04-22', '10:00', 'failed'),    // excluded entirely
-      post('2026-04-23', '09:00', 'scheduled'),
+      post('2026-04-20', '18:00', 'scheduled'),
+      post('2026-04-20', '20:00', 'pending_approval'),
+      post('2026-04-20', '22:00', 'posted'),    // excluded entirely
+      post('2026-04-21', '10:00', 'failed'),    // excluded entirely
+      post('2026-04-22', '09:00', 'scheduled'),
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
     // scheduledCount is now scheduled-only — pending_approval is split off
@@ -69,14 +73,16 @@ describe('computeWeekFillStatus', () => {
   });
 
   it('pending_approval posts do not satisfy fill — daemon must keep generating', () => {
-    // 7 days * 2/day = 14 slots. Place 14 pending_approval posts → filled
-    // must stay false because none are scheduled (publishable) yet.
-    const tomorrow = new Date(NOW);
-    tomorrow.setDate(NOW.getDate() + 1);
+    // 7 days * 2/day = 14 slots. INCLUDE-TODAY (2026-05-22): place 14
+    // pending_approval posts starting TODAY. Both slot times (14:00,
+    // 20:00) are after the noon NOW so today's two pending posts
+    // aren't filtered as past.
+    const today = new Date(NOW);
+    today.setHours(0, 0, 0, 0);
     const posts: ScheduledPost[] = [];
     for (let i = 0; i < 7; i++) {
-      const d = new Date(tomorrow);
-      d.setDate(tomorrow.getDate() + i);
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
       const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       posts.push(post(ds, '14:00', 'pending_approval'));
       posts.push(post(ds, '20:00', 'pending_approval'));
@@ -93,10 +99,10 @@ describe('computeWeekFillStatus', () => {
   it('mixed scheduled + pending_approval: only scheduled count toward fill', () => {
     // Tomorrow has 2 scheduled (filled), day after has 2 pending_approval (not filled).
     const posts: ScheduledPost[] = [
-      post('2026-04-21', '14:00', 'scheduled'),
-      post('2026-04-21', '20:00', 'scheduled'),
-      post('2026-04-22', '14:00', 'pending_approval'),
-      post('2026-04-22', '20:00', 'pending_approval'),
+      post('2026-04-20', '14:00', 'scheduled'),
+      post('2026-04-20', '20:00', 'scheduled'),
+      post('2026-04-21', '14:00', 'pending_approval'),
+      post('2026-04-21', '20:00', 'pending_approval'),
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
     expect(s.days[0].scheduledCount).toBe(2);
@@ -112,12 +118,12 @@ describe('computeWeekFillStatus', () => {
 
   it('pendingApprovalTotal sums across days; terminal statuses excluded from both buckets', () => {
     const posts: ScheduledPost[] = [
+      post('2026-04-20', '14:00', 'pending_approval'),
       post('2026-04-21', '14:00', 'pending_approval'),
       post('2026-04-22', '14:00', 'pending_approval'),
-      post('2026-04-23', '14:00', 'pending_approval'),
-      post('2026-04-21', '15:00', 'posted'),     // terminal, excluded
-      post('2026-04-21', '16:00', 'failed'),     // terminal, excluded
-      post('2026-04-21', '17:00', 'rejected'),   // terminal, excluded
+      post('2026-04-20', '15:00', 'posted'),     // terminal, excluded
+      post('2026-04-20', '16:00', 'failed'),     // terminal, excluded
+      post('2026-04-20', '17:00', 'rejected'),   // terminal, excluded
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
     expect(s.pendingApprovalTotal).toBe(3);
@@ -126,9 +132,9 @@ describe('computeWeekFillStatus', () => {
 
   it('pending_approval posts outside the horizon are ignored from pendingApprovalTotal', () => {
     const posts: ScheduledPost[] = [
-      post('2026-04-21', '14:00', 'pending_approval'),  // day 1 — counted
-      post('2026-04-27', '14:00', 'pending_approval'),  // day 7 (last day) — counted
-      post('2026-04-28', '14:00', 'pending_approval'),  // day 8 — outside horizon
+      post('2026-04-20', '14:00', 'pending_approval'),  // day 1 — counted
+      post('2026-04-26', '14:00', 'pending_approval'),  // day 7 (last day) — counted
+      post('2026-04-27', '14:00', 'pending_approval'),  // day 8 — outside horizon
       post('2026-05-15', '14:00', 'pending_approval'),  // far future — outside
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
@@ -141,14 +147,16 @@ describe('computeWeekFillStatus', () => {
     // 4 scheduled (over the 2/day target) + 3 pending_approval on day 0.
     // scheduledCount=4, pendingApprovalCount=3 — but capped contribution=2.
     // Other days remain empty → not filled.
+    // INCLUDE-TODAY (2026-05-22): NOW is noon today; use only future
+    // hours so the ts < now filter doesn't drop any.
     const posts: ScheduledPost[] = [
-      post('2026-04-21', '10:00', 'scheduled'),
-      post('2026-04-21', '12:00', 'scheduled'),
-      post('2026-04-21', '14:00', 'scheduled'),
-      post('2026-04-21', '16:00', 'scheduled'),
-      post('2026-04-21', '18:00', 'pending_approval'),
-      post('2026-04-21', '20:00', 'pending_approval'),
-      post('2026-04-21', '22:00', 'pending_approval'),
+      post('2026-04-20', '12:00', 'scheduled'),
+      post('2026-04-20', '13:00', 'scheduled'),
+      post('2026-04-20', '14:00', 'scheduled'),
+      post('2026-04-20', '15:00', 'scheduled'),
+      post('2026-04-20', '18:00', 'pending_approval'),
+      post('2026-04-20', '20:00', 'pending_approval'),
+      post('2026-04-20', '22:00', 'pending_approval'),
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
     expect(s.days[0].scheduledCount).toBe(4);
@@ -158,23 +166,26 @@ describe('computeWeekFillStatus', () => {
     expect(s.filled).toBe(false);
   });
 
-  it('posts dated today are off-window (today is excluded — scheduler starts tomorrow)', () => {
+  it('INCLUDE-TODAY (2026-05-22): today\'s FUTURE hours count, today\'s past hours are filtered, yesterday is off-window', () => {
+    // NOW is Monday 2026-04-20 at noon local. The window now starts
+    // TODAY, so day[0] = 2026-04-20.
     const posts: ScheduledPost[] = [
-      post('2026-04-20', '14:00', 'scheduled'), // today → off-window
-      post('2026-04-20', '23:00', 'scheduled'), // today → off-window
-      post('2026-04-21', '09:00', 'scheduled'), // tomorrow → counted
+      post('2026-04-19', '14:00', 'scheduled'), // yesterday → off-window entirely
+      post('2026-04-19', '23:00', 'scheduled'), // yesterday → off-window
+      post('2026-04-20', '09:00', 'scheduled'), // today PAST (09:00 < 12:00) → filtered by ts < now
+      post('2026-04-20', '20:00', 'scheduled'), // today FUTURE → counted
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
-    // Today's posts don't appear in any day bucket.
-    expect(s.days[0].date).toBe('2026-04-21');
+    expect(s.days[0].date).toBe('2026-04-20');
+    // Only the future-today post counts; yesterday + past-today are excluded.
     expect(s.days[0].scheduledCount).toBe(1);
     expect(s.scheduledTotal).toBe(1);
   });
 
   it('posts outside the target window are ignored', () => {
     const posts: ScheduledPost[] = [
-      post('2026-04-27', '12:00'),   // day 6 of window (within 7)
-      post('2026-04-28', '12:00'),   // day 7 (outside 7)
+      post('2026-04-26', '12:00'),   // day 6 of window (within 7)
+      post('2026-04-27', '12:00'),   // day 7 (outside 7)
       post('2026-05-05', '12:00'),   // far future
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
@@ -183,13 +194,16 @@ describe('computeWeekFillStatus', () => {
   });
 
   it('filled=true and percent=100 when target is met exactly', () => {
-    // 7 days * 2/day = 14 posts. Place 2 on each day starting tomorrow.
-    const tomorrow = new Date(NOW);
-    tomorrow.setDate(NOW.getDate() + 1);
+    // 7 days * 2/day = 14 posts. INCLUDE-TODAY (2026-05-22): window
+    // now starts TODAY, so place 2 on each day starting today.
+    // Both slot times (14:00, 20:00) are AFTER the noon NOW, so
+    // today's two posts won't be filtered as past.
+    const today = new Date(NOW);
+    today.setHours(0, 0, 0, 0);
     const posts: ScheduledPost[] = [];
     for (let i = 0; i < 7; i++) {
-      const d = new Date(tomorrow);
-      d.setDate(tomorrow.getDate() + i);
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
       const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       posts.push(post(ds, '14:00'));
       posts.push(post(ds, '20:00'));
@@ -202,19 +216,20 @@ describe('computeWeekFillStatus', () => {
 
   it('over-target total caps each day at postsPerDay; raw per-day count preserved', () => {
     // Fill the full week (14), then add 3 extras on day 0 (raw=17, capped=14).
-    const tomorrow = new Date(NOW);
-    tomorrow.setDate(NOW.getDate() + 1);
+    // INCLUDE-TODAY (2026-05-22): horizon starts TODAY, place from today.
+    const today = new Date(NOW);
+    today.setHours(0, 0, 0, 0);
     const posts: ScheduledPost[] = [];
     for (let i = 0; i < 7; i++) {
-      const d = new Date(tomorrow);
-      d.setDate(tomorrow.getDate() + i);
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
       const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       posts.push(post(ds, '14:00'));
       posts.push(post(ds, '20:00'));
     }
-    posts.push(post('2026-04-21', '15:00'));
-    posts.push(post('2026-04-21', '16:00'));
-    posts.push(post('2026-04-21', '17:00'));
+    posts.push(post('2026-04-20', '15:00'));
+    posts.push(post('2026-04-20', '16:00'));
+    posts.push(post('2026-04-20', '17:00'));
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
     // Aggregate is capped at targetTotal — no overflow counting.
     expect(s.scheduledTotal).toBe(14);
@@ -231,7 +246,7 @@ describe('computeWeekFillStatus', () => {
     // Was the bug shape: previously this would have summed to 8 toward the
     // 14-target, making the meter look 57% full when the week is mostly empty.
     const posts: ScheduledPost[] = Array.from({ length: 8 }, (_, k) =>
-      post('2026-04-21', `${String(13 + k).padStart(2, '0')}:00`),
+      post('2026-04-20', `${String(13 + k).padStart(2, '0')}:00`),
     );
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
     expect(s.days[0].scheduledCount).toBe(8);
@@ -243,9 +258,9 @@ describe('computeWeekFillStatus', () => {
 
   it('respects a non-default postsPerDay', () => {
     const posts: ScheduledPost[] = [
-      post('2026-04-21', '14:00'),
-      post('2026-04-21', '20:00'),
-      post('2026-04-21', '22:00'),
+      post('2026-04-20', '14:00'),
+      post('2026-04-20', '20:00'),
+      post('2026-04-20', '22:00'),
     ];
     const s = computeWeekFillStatus(posts, 7, 4, NOW);
     expect(s.targetTotal).toBe(28);
@@ -257,7 +272,7 @@ describe('computeWeekFillStatus', () => {
   it('malformed date string on a post is skipped rather than throwing', () => {
     const posts: ScheduledPost[] = [
       post('not-a-date', '14:00'),
-      post('2026-04-21', '14:00'),
+      post('2026-04-20', '14:00'),
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
     expect(s.scheduledTotal).toBe(1);
@@ -278,28 +293,29 @@ describe('computeWeekFillStatus', () => {
     expect(s.filled).toBe(false);
   });
 
-  // BUG-PIPELINE-001 regression: start-of-window must remain tomorrow at
-  // any hour of the day. The original bug fired specifically when the
-  // pipeline ran late in the evening (>23:00) — at that hour, the older
-  // "start from today" code summed `targetPerDay` slots that the
-  // scheduler (which always picks from tomorrow) could never fill, so the
-  // continuous-mode loop never converged. Pinning `NOW` at 23:30 here
-  // proves the helper agrees with `findBestSlots` regardless of clock.
-  it('BUG-PIPELINE-001: window starts from tomorrow even when called at 23:30', () => {
+  // INCLUDE-TODAY (2026-05-22): late-evening behaviour. Even when NOW
+  // is 23:30 — past every realistic engagement hour — the window's
+  // first day is still TODAY. Posts at past-today hours are filtered
+  // by ts < now.getTime() but the day itself stays in `days[]` so the
+  // UI can show a 0-of-target indicator for "today is done."
+  it('INCLUDE-TODAY: at 23:30 today, first day is still today; past-today posts are filtered', () => {
     const lateNight = new Date(2026, 3, 20, 23, 30, 0); // Mon 23:30 local
     const s = computeWeekFillStatus([], 7, 2, lateNight);
-    expect(s.days[0].date).toBe('2026-04-21');
-    expect(s.days[0].dayLabel).toBe('Tue');
-    expect(s.days[6].date).toBe('2026-04-27');
-    // A post placed in today's last hour must NOT count toward the
-    // window — the scheduler can't put new posts there anyway.
-    const todaysLatePost = computeWeekFillStatus(
-      [post('2026-04-20', '23:45', 'scheduled')],
+    expect(s.days[0].date).toBe('2026-04-20');
+    expect(s.days[0].dayLabel).toBe('Mon');
+    expect(s.days[6].date).toBe('2026-04-26');
+    // A post placed earlier today must NOT count — already in the past
+    // per the ts < now.getTime() guard.
+    const todayPastPost = computeWeekFillStatus(
+      [post('2026-04-20', '18:00', 'scheduled')], // 18:00 < 23:30
       7,
       2,
       lateNight,
     );
-    expect(todaysLatePost.scheduledTotal).toBe(0);
-    expect(todaysLatePost.days.find(d => d.date === '2026-04-20')).toBeUndefined();
+    expect(todayPastPost.scheduledTotal).toBe(0);
+    // The day IS in the window now (it's today), but the post itself
+    // didn't add to scheduledCount because it was filtered as past.
+    expect(todayPastPost.days[0].date).toBe('2026-04-20');
+    expect(todayPastPost.days[0].scheduledCount).toBe(0);
   });
 });

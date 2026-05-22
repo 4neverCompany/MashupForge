@@ -67,14 +67,16 @@ export function pickFillWeekSlot(opts: PickFillWeekSlotOptions): FillWeekSlotRes
     fillMode: 'depth',
   });
 
-  // Week classification: both `findBestSlots` and `computeWeekFillStatus`
-  // anchor on TOMORROW (today is excluded — we never schedule into it),
-  // so week 1 = [tomorrow, tomorrow+7) = [today+1, today+8). Anything at
-  // today+8 or later is week 2.
+  // Week classification: post INCLUDE-TODAY (2026-05-22), both
+  // `findBestSlots` and `computeWeekFillStatus` anchor on TODAY. Week 1
+  // is the 7-day window starting today = [today, today+7). Anything
+  // landing at today+7 or later is week 2. The cutoff slid by one day
+  // vs the prior "tomorrow + 7" convention; consumers that read the
+  // `week: 1 | 2` field are unchanged — same number of days in week 1.
   const today = new Date(now ?? new Date());
   today.setHours(0, 0, 0, 0);
   const week2Start = new Date(today);
-  week2Start.setDate(today.getDate() + 8);
+  week2Start.setDate(today.getDate() + 7);
   const slotDate = new Date(`${slot.date}T00:00:00`);
   const week: 1 | 2 = slotDate.getTime() >= week2Start.getTime() ? 2 : 1;
 

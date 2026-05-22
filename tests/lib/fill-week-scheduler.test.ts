@@ -61,7 +61,8 @@ describe('pickFillWeekSlot — horizon switches with week-1 fill state', () => {
     const slotDate = new Date(`${result.date}T00:00:00`);
     // Week 1 = [tomorrow, tomorrow+7) = [today+1, today+8).
     const today = new Date(NOW); today.setHours(0, 0, 0, 0);
-    const week2Start = new Date(today); week2Start.setDate(today.getDate() + 8);
+    // INCLUDE-TODAY: week 2 starts at today+7 (was today+8 pre-fix).
+    const week2Start = new Date(today); week2Start.setDate(today.getDate() + 7);
     expect(slotDate.getTime()).toBeLessThan(week2Start.getTime());
   });
 
@@ -70,8 +71,9 @@ describe('pickFillWeekSlot — horizon switches with week-1 fill state', () => {
     // each at engagement-best hours, so any further slot must spill into
     // week 2 once the horizon expands to 14.
     const posts: ScheduledPost[] = [];
+    // INCLUDE-TODAY (2026-05-22): horizon starts TODAY, not tomorrow.
     const today = new Date(NOW); today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+    const tomorrow = today;
     for (let i = 0; i < 7; i++) {
       const d = new Date(tomorrow);
       d.setDate(tomorrow.getDate() + i);
@@ -87,7 +89,8 @@ describe('pickFillWeekSlot — horizon switches with week-1 fill state', () => {
     });
     expect(result.week).toBe(2);
     const slotDate = new Date(`${result.date}T00:00:00`);
-    const week2Start = new Date(today); week2Start.setDate(today.getDate() + 8);
+    // INCLUDE-TODAY: week 2 starts at today+7 (was today+8 pre-fix).
+    const week2Start = new Date(today); week2Start.setDate(today.getDate() + 7);
     expect(slotDate.getTime()).toBeGreaterThanOrEqual(week2Start.getTime());
   });
 
@@ -95,8 +98,9 @@ describe('pickFillWeekSlot — horizon switches with week-1 fill state', () => {
     // Only 4 days of week 1 (tomorrow .. tomorrow+3) saturated → 3 days
     // still have gaps. The 7-day horizon must keep selection inside week 1.
     const posts: ScheduledPost[] = [];
+    // INCLUDE-TODAY (2026-05-22): horizon starts TODAY, not tomorrow.
     const today = new Date(NOW); today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+    const tomorrow = today;
     for (let i = 0; i < 4; i++) {
       const d = new Date(tomorrow);
       d.setDate(tomorrow.getDate() + i);
