@@ -730,6 +730,45 @@ Return ONLY a JSON array of objects with "concept" and "context" fields. Example
               if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
             }
 
+            // PIPELINE-DAILY-CAP-CHECK (2026-05-22, Maurice's
+            // /tmp/dev-pipeline-counter-bug.md): re-check fill status
+            // after each idea's posts land in settings. If the horizon
+            // is now filled and no pending approvals remain, break out
+            // of the batch — don't burn the remaining ideas on a week
+            // that's already done. Same logic as the pre-cycle check
+            // from 08d76f7 but applied PER IDEA so an approval mid-batch
+            // (which flips pending_approval → scheduled) is observed
+            // immediately. latestPropsRef.current.settings is updated
+            // via useEffect on every deps.settings change, so approvals
+            // that happen DURING the batch loop reflect on the next
+            // iteration's check — Issue 2 of the bug report.
+            if (i < pendingIdeas.length - 1 && !runAbort.signal.aborted) {
+              const targetDaysCheck = readTargetDays();
+              const postsPerDayCheck =
+                latestPropsRef.current.settings.pipelinePostsPerDay ?? 2;
+              const horizonCheck = Math.max(targetDaysCheck, 14);
+              const fillCheck = computeWeekFillStatus(
+                [
+                  ...(latestPropsRef.current.settings.scheduledPosts || []),
+                  ...accumulatedPosts,
+                ],
+                horizonCheck,
+                postsPerDayCheck,
+              );
+              if (
+                fillCheck.filled
+                && fillCheck.pendingApprovalTotal === 0
+              ) {
+                addLog(
+                  'pipeline-cap-reached',
+                  '',
+                  'success',
+                  `Daily cap met after idea ${i + 1}/${pendingIdeas.length} (${fillCheck.scheduledTotal}/${fillCheck.targetTotal} across ${horizonCheck}d, 0 pending) — stopping batch, ${pendingIdeas.length - i - 1} idea${pendingIdeas.length - i - 1 === 1 ? '' : 's'} stays queued`,
+                );
+                break;
+              }
+            }
+
             if (i < pendingIdeas.length - 1 && !runAbort.signal.aborted) {
               const d = readDelay();
               setPipelineProgress(prev =>
