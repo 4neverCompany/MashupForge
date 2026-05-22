@@ -30,7 +30,7 @@ import {
 import { awaitImagesOrSkip } from '@/lib/image-readiness';
 import { generateNegativePrompt } from '@/lib/negative-prompts';
 import { extractTrademarkNames } from '@/lib/extract-trademark-names';
-import { getAllBlocked, setOutcome, preflightGenericize } from '@/lib/trademark-outcomes';
+import { getAllBlocked, setOutcome } from '@/lib/trademark-outcomes';
 import type { WriteCheckpointBase } from './usePipelineDaemon';
 import { useDesktopConfig } from './useDesktopConfig';
 
@@ -248,28 +248,21 @@ Return ONLY the prompt text, nothing else.`;
             suggestedOptions = { negativePrompt: baseNegative };
           }
 
-          // TRADEMARK-LEARNING (2026-05-21): pre-flight pass that swaps
-          // any known-blocked trademarked name in the prompt with its
-          // generic descriptor BEFORE submitting to the image API.
-          // Avoids burning a Leonardo call (and the user-visible
-          // "blocked, rewriting…" status flash) on names we already
-          // know fail. Unknown names pass through unchanged — the
-          // classification-aware retry from 4bc046b still handles
-          // first-time failures.
-          const blockedNames = getAllBlocked();
-          let activePrompt = prompt;
-          if (blockedNames.length > 0) {
-            const pre = preflightGenericize(prompt, blockedNames);
-            if (pre.swapped.length > 0) {
-              addLog(
-                'moderation',
-                idea.id,
-                'success',
-                `Pre-flight swapped ${pre.swapped.length} known-blocked name${pre.swapped.length === 1 ? '' : 's'} → generics: ${pre.swapped.join(', ')}`,
-              );
-              activePrompt = pre.prompt;
-            }
-          }
+          // TRADEMARK-NO-PREFLIGHT-REWRITE (2026-05-22): Maurice's
+          // addendum to /tmp/dev-trademark-bug.md — the rewrite should
+          // ONLY fire after a real moderation failure, not proactively
+          // before generation is attempted. Pre-flight substitution
+          // (introduced 9401247, tightened aa2a068) re-wrote prompts
+          // that would have succeeded as-is, losing user composition.
+          // We pass the user's prompt through verbatim; if a model
+          // rejects with TRADEMARK/COPYRIGHT, useImageGeneration's
+          // submitWithOneRetry (and useComparison's inline retry)
+          // handle the deterministic name-swap as a fallback. The
+          // outcome store's getAllBlocked() result still feeds the AI
+          // prompt hint in expandIdeaToPrompt above so the upstream
+          // AI generalises names while AUTHORING fresh content — that
+          // path doesn't rewrite user input, it shapes new prompts.
+          const activePrompt = prompt;
 
           imageReadyPromise = generateComparison(activePrompt, modelIds, {
             skipEnhance: false,

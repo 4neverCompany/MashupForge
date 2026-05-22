@@ -7,6 +7,8 @@ import { buildEnhancedPrompt } from '@/lib/image-prompt-builder';
 import { MASTERPROMPT_INSTRUCTIONS } from '@/lib/masterpromptTemplate';
 import { getErrorMessage } from '@/lib/errors';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
+import { extractTrademarkNames } from '@/lib/extract-trademark-names';
+import { preflightGenericize, setOutcome } from '@/lib/trademark-outcomes';
 import {
   type GeneratedImage,
   type GenerateOptions,
@@ -473,6 +475,45 @@ interface SubmitResult {
 }
 
 /**
+ * TRADEMARK-SURGICAL-REWRITE v2 (2026-05-22): deterministic name-swap
+ * retry. Maurice's aa2a068 used an LLM with strict "preserve every word
+ * EXACTLY" instructions but the model still embellished — Tony Stark
+ * "Mark 42 nanotech fused with daemon-bone plating, lightning-wreathed
+ * Daemonhammer raised high" became a fully re-imagined scene with new
+ * adjectives ("crimson-armored", "shattered battlefield"), new clauses
+ * ("crackling warp lightning erupting from his gauntlet"), and lost
+ * details ("Mark 42" disappeared). LLMs are fundamentally unreliable
+ * at the "rewrite this one word but leave everything else alone"
+ * instruction shape.
+ *
+ * Fix: replace the LLM call with deterministic substitution for
+ * TRADEMARK / COPYRIGHT only. extractTrademarkNames scans the prompt
+ * against our 80-name seed list; preflightGenericize swaps each match
+ * with its curated visual descriptor (colors, silhouette, signature
+ * props) and leaves everything else byte-for-byte identical.
+ *
+ * Returns null when no known names were found in the prompt — caller
+ * should rethrow the moderation error so the user knows to edit the
+ * prompt manually (we have no safe substitution for unknown IP).
+ *
+ * NSFW / EXTREME_VIOLENCE / CHILD continue to use the LLM rewrite
+ * path (buildModerationRewriteInstruction) — the LLM is reliable
+ * there because "soften the violence" is genuinely a rewrite task,
+ * not a one-word-swap task.
+ */
+function trademarkSubstituteOrNull(
+  failedPrompt: string,
+): { prompt: string; swapped: string[] } | null {
+  const extracted = extractTrademarkNames(failedPrompt);
+  if (extracted.length === 0) return null;
+  const result = preflightGenericize(failedPrompt, extracted);
+  // Mark each swapped name as 'blocked' in the outcome store so future
+  // pre-flight catches it before submission. Failure-path learning loop.
+  for (const name of result.swapped) setOutcome(name, 'blocked');
+  return result;
+}
+
+/**
  * One-retry moderation recovery. Leonardo's moderation is empirically
  * non-deterministic — a 3-attempt cascade with aggressive rewrites and
  * defensive negative prompts gave marginal improvement for significant
@@ -499,11 +540,28 @@ async function submitWithOneRetry(
 
     callbacks.onRetry(classifications);
 
-    const rewritten = await streamAIToString(
-      buildModerationRewriteInstruction(lErr.failedPrompt || initialPrompt, classifications),
-      { mode: 'enhance', provider },
-    );
-    const activePrompt = (rewritten || '').trim() || initialPrompt;
+    // TRADEMARK-SURGICAL-REWRITE v2 (2026-05-22): deterministic name-swap
+    // for TRADEMARK/COPYRIGHT instead of LLM rewrite. See
+    // trademarkSubstituteOrNull doc for rationale.
+    const upper = classifications.map((c) => c.toUpperCase());
+    const isTrademark = upper.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
+    let activePrompt: string;
+    if (isTrademark) {
+      const sub = trademarkSubstituteOrNull(lErr.failedPrompt || initialPrompt);
+      if (!sub) {
+        // No known names in the prompt — no safe substitution. Surface
+        // the original moderation error so the user edits manually
+        // rather than rolling the dice on a bad rewrite.
+        throw err;
+      }
+      activePrompt = sub.prompt;
+    } else {
+      const rewritten = await streamAIToString(
+        buildModerationRewriteInstruction(lErr.failedPrompt || initialPrompt, classifications),
+        { mode: 'enhance', provider },
+      );
+      activePrompt = (rewritten || '').trim() || initialPrompt;
+    }
 
     const success = await submitLeonardoAndPoll({ prompt: activePrompt, ...baseParams });
     return { success, finalPrompt: activePrompt, retried: true };
@@ -546,11 +604,23 @@ async function submitViaAiImageWithOneRetry(
 
     callbacks.onRetry(classifications);
 
-    const rewritten = await streamAIToString(
-      buildModerationRewriteInstruction(lErr.failedPrompt || initialIdea, classifications),
-      { mode: 'enhance', provider: 'vercel-ai' },
-    );
-    const activePrompt = (rewritten || '').trim() || initialIdea;
+    // TRADEMARK-SURGICAL-REWRITE v2 (2026-05-22): deterministic name-swap
+    // for TRADEMARK/COPYRIGHT, LLM rewrite for other classes. Same
+    // rationale as submitWithOneRetry above.
+    const upper = classifications.map((c) => c.toUpperCase());
+    const isTrademark = upper.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
+    let activePrompt: string;
+    if (isTrademark) {
+      const sub = trademarkSubstituteOrNull(lErr.failedPrompt || initialIdea);
+      if (!sub) throw err;
+      activePrompt = sub.prompt;
+    } else {
+      const rewritten = await streamAIToString(
+        buildModerationRewriteInstruction(lErr.failedPrompt || initialIdea, classifications),
+        { mode: 'enhance', provider: 'vercel-ai' },
+      );
+      activePrompt = (rewritten || '').trim() || initialIdea;
+    }
 
     const r = await submitViaAiImage({
       ...baseParams,

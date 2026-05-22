@@ -6,6 +6,8 @@ import { enhancePromptForModel } from '@/lib/modelOptimizer';
 import { buildEnhancedPrompt } from '@/lib/image-prompt-builder';
 import { streamAIToString } from '@/lib/aiClient';
 import { buildModerationRewriteInstruction } from './useImageGeneration';
+import { extractTrademarkNames } from '@/lib/extract-trademark-names';
+import { preflightGenericize, setOutcome } from '@/lib/trademark-outcomes';
 import { getErrorMessage } from '@/lib/errors';
 import {
   type GeneratedImage,
@@ -332,11 +334,31 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
                 ? { ...img, error: `Blocked by ${cls.join(', ')} — rewriting…` }
                 : img
             ));
-            const rewritten = await streamAIToString(
-              buildModerationRewriteInstruction(e.failedPrompt ?? activePrompt, cls),
-              { mode: 'enhance', provider: settings.activeAiAgent, model: settings.activeTextModel },
-            );
-            activePrompt = (rewritten || '').trim() || activePrompt;
+            // TRADEMARK-SURGICAL-REWRITE v2 (2026-05-22): deterministic
+            // name-swap for TRADEMARK/COPYRIGHT, LLM rewrite for other
+            // classes. Same rationale as submitWithOneRetry in
+            // useImageGeneration.ts — the LLM is unreliable at the
+            // "preserve every word except this name" instruction shape.
+            const upper = cls.map((c) => c.toUpperCase());
+            const isTrademark = upper.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
+            if (isTrademark) {
+              const failedPrompt = e.failedPrompt ?? activePrompt;
+              const extracted = extractTrademarkNames(failedPrompt);
+              if (extracted.length === 0) {
+                // No known names in the prompt — no safe substitution.
+                // Rethrow so the user edits manually.
+                throw err;
+              }
+              const sub = preflightGenericize(failedPrompt, extracted);
+              for (const name of sub.swapped) setOutcome(name, 'blocked');
+              activePrompt = sub.prompt;
+            } else {
+              const rewritten = await streamAIToString(
+                buildModerationRewriteInstruction(e.failedPrompt ?? activePrompt, cls),
+                { mode: 'enhance', provider: settings.activeAiAgent, model: settings.activeTextModel },
+              );
+              activePrompt = (rewritten || '').trim() || activePrompt;
+            }
             retried = true;
             result = await submitOnce(activePrompt);
           }
