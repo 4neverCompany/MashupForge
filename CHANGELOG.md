@@ -2,6 +2,18 @@
 
 All notable changes to MashupForge are documented in this file.
 
+## [0.9.45] — 2026-05-22
+
+### Added
+- **ai:** redesign agent role — MashupForge AI co-pilot, Content Pillars / Style Tags
+
+### Fixed
+- **moderation:** history-driven trademark filter + success-path 'allowed' marking
+- **scheduler:** include today as a candidate day for slot picks
+- **pipeline:** inter-idea daily-cap check stops batch when horizon fills
+- **moderation:** deterministic TRADEMARK retry + drop proactive pre-flight rewrite
+- **infra:** EVENT-LOG-AUTO-EMIT hooks survive simple-git-hooks reinstall
+
 ## [0.9.44] — 2026-05-22
 
 ### Added
