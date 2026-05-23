@@ -2,6 +2,12 @@
 
 All notable changes to MashupForge are documented in this file.
 
+## [0.9.47] — 2026-05-23
+
+### Fixed
+- **pipeline:** quota-aware continue-gen + calendar-analysed schedule fallback
+- **trademark+style:** dedupe style hint, remove stale preflightGenericize
+
 ## [0.9.46] — 2026-05-23
 
 ### Added
