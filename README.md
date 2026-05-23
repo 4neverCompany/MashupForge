@@ -9,7 +9,8 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.1-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-4.3-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Motion](https://img.shields.io/badge/Motion-12-FF0088?style=for-the-badge&logo=framer&logoColor=white)](https://motion.dev/)
 [![Leonardo.ai](https://img.shields.io/badge/Leonardo.ai-v2-C5A062?style=for-the-badge)](https://leonardo.ai)
 [![pi.dev](https://img.shields.io/badge/pi.dev-RPC-00E6FF?style=for-the-badge)](https://pi.dev)
 
@@ -124,7 +125,8 @@ MashupForge/
 
 - **Framework:** Next.js 16 (Turbopack) + React 19
 - **Language:** TypeScript 6.0
-- **Styling:** Tailwind CSS 4 + `@tailwindcss/typography`
+- **Styling:** Tailwind CSS 4.3 + `@tailwindcss/typography`
+- **Animations:** Motion 12
 - **Image AI:** Leonardo.ai v2 (Nano Banana family, GPT Image) + MiniMax `image-01`
 - **Text AI:** pi.dev RPC subprocess (local, multi-provider)
 - **Desktop:** Tauri 2 — system tray, autostart, auto-update, single-instance
