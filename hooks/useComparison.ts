@@ -323,7 +323,7 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
             // STAGE 1 — original prompt verbatim.
             result = await submitOnce(activePrompt);
             const allowedCandidates = extractTrademarkNames(activePrompt);
-            for (const name of allowedCandidates) setOutcome(name, 'allowed');
+            for (const name of allowedCandidates) setOutcome(name, 'allowed', modelId);
           } catch (err) {
             const e = err as SubmitError;
             const cls = e.moderationClassification ?? [];
@@ -347,9 +347,9 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
               retried = true;
               result = await submitOnce(activePrompt);
             } else {
-              const plan = planStagedSubstitution(e.failedPrompt ?? activePrompt);
+              const plan = planStagedSubstitution(e.failedPrompt ?? activePrompt, modelId);
               if (!plan) throw err;
-              setOutcome(plan.targetName, 'blocked');
+              setOutcome(plan.targetName, 'blocked', modelId);
               retried = true;
               try {
                 // STAGE 2 — minimal swap.

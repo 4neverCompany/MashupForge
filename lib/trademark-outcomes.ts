@@ -1,53 +1,68 @@
-// TRADEMARK-LEARNING (2026-05-21): localStorage-backed outcome store
-// for known-IP names. Companion to lib/extract-trademark-names.ts.
+// TRADEMARK-LEARNING (2026-05-21, per-model rewrite 2026-05-23):
+// localStorage-backed outcome store for known-IP names. Companion to
+// lib/extract-trademark-names.ts.
 //
 // The pipeline records two signals into this store as it runs:
 //
 // 1. Pre-flight (in useIdeaProcessor.triggerImageGeneration) — extract
 //    names from the prompt, look each up, and rewrite the prompt to
 //    replace 'blocked' names with generic equivalents BEFORE submitting
-//    to Leonardo. Saves the API call and the user-visible "blocked,
+//    to the provider. Saves the API call and the user-visible "blocked,
 //    retrying" status flash.
 //
 // 2. Post-flight outcome — when generation comes back with TRADEMARK
-//    moderation, mark every extracted name 'blocked'. When generation
-//    succeeds without moderation, mark every extracted name 'allowed'
+//    moderation, mark the extracted name 'blocked' FOR THE SPECIFIC
+//    MODEL that returned the block. When generation succeeds without
+//    moderation, mark every extracted name 'allowed' for that model
 //    (but only when not already 'blocked' — a blocked name doesn't get
 //    revived by a coincidental successful prompt that contained it).
 //
-// The store is intentionally a flat name→outcome map persisted to
-// localStorage. No per-model granularity (Leonardo's moderation
-// applies across the board), no expiry (a name that's blocked stays
-// blocked until the user manually clears the store via DevTools).
+// IMG-INVEST-001 issue 2: the store is now PER-MODEL. Different image
+// providers (Leonardo's nano-banana family vs MiniMax-native vs GPT-Image
+// models) have very different moderation strictness — a name blocked by
+// nano-banana-2 might happily pass through gpt-image-2. The previous flat
+// `Record<string, NameOutcome>` poisoned all models with a single
+// upstream's filter; per-model storage lets each model learn its own
+// blocklist organically.
 //
-// Bootstrap: on first read with no persisted entries, seed
-// SEED_BLOCKED with the names Maurice observed failing in pipeline
-// logs. New names land via the post-flight TRADEMARK signal as the
-// pipeline runs.
+// Storage shape: `Record<name, Record<modelId, NameOutcome>>`.
+//
+// Bootstrap: no seed list. Brief explicitly says "system must relearn
+// per model going forward." First-time users start with an empty store;
+// the post-flight TRADEMARK signal fills it in as the pipeline runs.
+//
+// Migration: the v1 key `mashup_trademark_outcomes` (flat model-agnostic
+// map) and the v1 whitelist key `mashup_trademark_user_whitelist` are
+// wiped on the first v2 read. Users will re-experience some moderation
+// blocks until the per-model store fills back up — that's the expected
+// "relearn" behaviour.
 
 import { TRADEMARK_SEED_LIST, extractTrademarkNames } from './extract-trademark-names';
 
 export type NameOutcome = 'blocked' | 'allowed' | 'unknown';
 
-const STORAGE_KEY = 'mashup_trademark_outcomes';
+const STORAGE_KEY = 'mashup_trademark_outcomes_v2';
+const LEGACY_STORAGE_KEY = 'mashup_trademark_outcomes';
 
-/**
- * Initial blocklist observed in Maurice's logs as of 2026-05-21.
- * Names land here only if the user has no persisted store yet — once
- * the store exists, this seed is ignored so user-observed outcomes
- * don't get overwritten on every load.
- */
-const SEED_BLOCKED: readonly string[] = [
-  'Spider-Man',
-  'Spidey',
-  'Miles Morales',
-  'Peter Parker',
-];
+/** name → modelId → outcome. */
+type OutcomeMap = Record<string, Record<string, NameOutcome>>;
 
-type OutcomeMap = Record<string, NameOutcome>;
+let legacyWiped = false;
+function wipeLegacyOnce(): void {
+  if (legacyWiped) return;
+  legacyWiped = true;
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_USER_WHITELIST_KEY);
+  } catch {
+    // Best-effort.
+  }
+}
 
 function readMap(): OutcomeMap {
   if (typeof window === 'undefined') return {};
+  wipeLegacyOnce();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -57,13 +72,9 @@ function readMap(): OutcomeMap {
       }
     }
   } catch {
-    // Parse failure or storage access denied — fall through to seed.
+    // Parse failure or storage access denied — start fresh.
   }
-  // No persisted store yet: seed with the observed blocks and persist.
-  const seeded: OutcomeMap = {};
-  for (const name of SEED_BLOCKED) seeded[name] = 'blocked';
-  writeMap(seeded);
-  return seeded;
+  return {};
 }
 
 function writeMap(map: OutcomeMap): void {
@@ -71,26 +82,28 @@ function writeMap(map: OutcomeMap): void {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
   } catch {
-    // Quota exceeded or storage unavailable — best-effort, the next
-    // call will re-seed from SEED_BLOCKED if writes keep failing.
+    // Quota exceeded or storage unavailable — best-effort.
   }
 }
 
-/** Return the recorded outcome for `name`. Unknown = no observation yet. */
-export function getOutcome(name: string): NameOutcome {
+/** Return the recorded outcome for `name` on `modelId`. Unknown = no observation yet. */
+export function getOutcome(name: string, modelId: string): NameOutcome {
   const map = readMap();
-  return map[name] ?? 'unknown';
+  return map[name]?.[modelId] ?? 'unknown';
 }
 
 /**
- * Record an outcome for `name`. Idempotent. A 'blocked' marking never
- * gets overwritten by 'allowed' — once a name has reliably failed,
- * subsequent coincidental successes shouldn't revive it.
+ * Record an outcome for `name` on `modelId`. Idempotent. A 'blocked'
+ * marking on a specific (name, modelId) pair never gets overwritten by
+ * 'allowed' — once a name has reliably failed on this model, subsequent
+ * coincidental successes shouldn't revive it.
  */
-export function setOutcome(name: string, outcome: NameOutcome): void {
+export function setOutcome(name: string, outcome: NameOutcome, modelId: string): void {
   const map = readMap();
-  if (map[name] === 'blocked' && outcome !== 'blocked') return;
-  map[name] = outcome;
+  const cur = map[name]?.[modelId];
+  if (cur === 'blocked' && outcome !== 'blocked') return;
+  if (!map[name]) map[name] = {};
+  map[name][modelId] = outcome;
   writeMap(map);
 }
 
@@ -98,28 +111,45 @@ export function setOutcome(name: string, outcome: NameOutcome): void {
  * Return every name currently flagged 'blocked'. Used by the AI prompt
  * builder to inject a "TRADEMARKED CHARACTERS TO AVOID" line so the
  * upstream prompt-enhance step learns from past failures.
+ *
+ * - With `modelId`: names blocked specifically for that model.
+ * - Without `modelId`: the union — any name blocked for at least one
+ *   model. Useful when the caller hasn't picked a model yet (e.g. the
+ *   pipeline's expandIdeaToPrompt step runs before model selection).
  */
-export function getAllBlocked(): string[] {
+export function getAllBlocked(modelId?: string): string[] {
   const map = readMap();
   // TRADEMARK-STAGED-PIPELINE (2026-05-22): respect the user whitelist
   // — names the user has explicitly marked safe must not appear in
   // the blocked list (the AI prompt hint shouldn't tell the model to
   // avoid a name the user has greenlit).
   const whitelist = readUserWhitelist();
-  return Object.entries(map)
-    .filter(([k, v]) => v === 'blocked' && !whitelist.has(k))
-    .map(([k]) => k);
+  const out: string[] = [];
+  for (const [name, perModel] of Object.entries(map)) {
+    if (whitelist.has(name)) continue;
+    if (modelId === undefined) {
+      if (Object.values(perModel).some((v) => v === 'blocked')) out.push(name);
+    } else if (perModel[modelId] === 'blocked') {
+      out.push(name);
+    }
+  }
+  return out;
 }
 
-/** Test seam — clear the store entirely (only the test file uses this). */
+/** Test seam — clear the store entirely (only test files use this). */
 export function __resetForTests(): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.removeItem(STORAGE_KEY);
     window.localStorage.removeItem(USER_WHITELIST_KEY);
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_USER_WHITELIST_KEY);
   } catch {
     // Best-effort.
   }
+  // Reset the once-flag so tests that re-stub localStorage see the
+  // legacy wipe fire again on the next read.
+  legacyWiped = false;
 }
 
 // ── User whitelist (TRADEMARK-STAGED-PIPELINE, 2026-05-22) ──────────────
@@ -134,16 +164,16 @@ export function __resetForTests(): void {
 // failures (see useIdeaProcessor onModelError) but its read-side
 // effect is suppressed by the whitelist.
 //
-// Two layers, intentionally separate:
-//   - mashup_trademark_outcomes: auto-managed, sticky-blocked semantics
-//     (the system learns from real Leonardo errors).
-//   - mashup_trademark_user_whitelist: user-controlled, no stickiness;
-//     the user can add/remove freely.
+// The whitelist is intentionally NOT per-model: it expresses user
+// intent ("I personally vouch this name is safe") which doesn't depend
+// on which model is rendering.
 
-const USER_WHITELIST_KEY = 'mashup_trademark_user_whitelist';
+const USER_WHITELIST_KEY = 'mashup_trademark_user_whitelist_v2';
+const LEGACY_USER_WHITELIST_KEY = 'mashup_trademark_user_whitelist';
 
 function readUserWhitelist(): Set<string> {
   if (typeof window === 'undefined') return new Set();
+  wipeLegacyOnce();
   try {
     const raw = window.localStorage.getItem(USER_WHITELIST_KEY);
     if (!raw) return new Set();
@@ -189,14 +219,14 @@ export function getAllUserWhitelisted(): string[] {
 }
 
 /**
- * Effective "should I block this name?" check. True only when the auto
- * outcome store says blocked AND the user hasn't whitelisted it. This
- * is what the retry-substitution path should use — getOutcome() alone
- * misses the user-whitelist override.
+ * Effective "should I block this name on this model?" check. True only
+ * when the auto outcome store says blocked for the given model AND the
+ * user hasn't whitelisted it. This is what the retry-substitution path
+ * should use — getOutcome() alone misses the user-whitelist override.
  */
-export function isEffectivelyBlocked(name: string): boolean {
+export function isEffectivelyBlocked(name: string, modelId: string): boolean {
   if (isUserWhitelisted(name)) return false;
-  return getOutcome(name) === 'blocked';
+  return getOutcome(name, modelId) === 'blocked';
 }
 
 /**
@@ -358,9 +388,9 @@ export function preflightGenericize(prompt: string, blockedNames: string[]): Pre
 //
 // Selection precedence:
 //   1. Skip any name the user has whitelisted (hard override).
-//   2. Prefer names recorded as outcome='blocked' in the auto store —
-//      the system has already learned these are real blockers (from
-//      onModelError single-name auto-flag or SEED_BLOCKED).
+//   2. Prefer names recorded as outcome='blocked' for THIS MODEL in
+//      the auto store — the system has already learned these are real
+//      blockers for this specific provider.
 //   3. Within each tier, prefer the LONGEST canonical name — multi-
 //      word names are more specific (e.g. "Miles Morales" before
 //      "Morales") and reduce false-positive substring matches.
@@ -394,15 +424,19 @@ export interface StagedSubstitutionPlan {
  * + stage 3 prompts. Returns null when no candidate is eligible (the
  * caller must then rethrow the original moderation error).
  *
+ * `modelId` scopes Tier 1 (history-blocked) lookups to a single model
+ * — a name blocked by Leonardo nano-banana-2 doesn't bias the picker
+ * when planning a retry for gpt-image-2. Tier 2 (any extracted name)
+ * stays model-agnostic.
+ *
  * `extractedCandidates` is optional — pass `extractTrademarkNames(prompt)`
  * here if you already computed it (avoids duplicate scans).
  */
 export function planStagedSubstitution(
   prompt: string,
+  modelId: string,
   extractedCandidates?: string[],
 ): StagedSubstitutionPlan | null {
-  // Lazy require to avoid a circular dep with extract-trademark-names
-  // (which re-exports TRADEMARK_SEED_LIST from below).
   const names = extractedCandidates ?? extractTrademarkNames(prompt);
   if (names.length === 0) return null;
 
@@ -410,8 +444,8 @@ export function planStagedSubstitution(
   const eligible = names.filter((n) => !whitelist.has(n));
   if (eligible.length === 0) return null;
 
-  // Tier 1: explicitly blocked. Tier 2: any extracted name.
-  const blocked = eligible.filter((n) => getOutcome(n) === 'blocked');
+  // Tier 1: explicitly blocked FOR THIS MODEL. Tier 2: any extracted name.
+  const blocked = eligible.filter((n) => getOutcome(n, modelId) === 'blocked');
   const tier = blocked.length > 0 ? blocked : eligible;
   // Longest canonical first — multi-word > single-word.
   const sorted = [...tier].sort((a, b) => b.length - a.length);

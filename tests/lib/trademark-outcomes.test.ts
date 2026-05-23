@@ -14,6 +14,10 @@ import {
   __resetForTests,
 } from '@/lib/trademark-outcomes';
 
+// Two representative model ids the production code emits today.
+const MODEL_LEONARDO = 'nano-banana-2';
+const MODEL_GPT = 'gpt-image-2';
+
 function setupLocalStorage() {
   const store = new Map<string, string>();
   vi.stubGlobal('localStorage', {
@@ -27,7 +31,7 @@ function setupLocalStorage() {
   return store;
 }
 
-describe('trademark-outcomes store', () => {
+describe('trademark-outcomes store (per-model)', () => {
   beforeEach(() => {
     setupLocalStorage();
     __resetForTests();
@@ -37,77 +41,81 @@ describe('trademark-outcomes store', () => {
     vi.unstubAllGlobals();
   });
 
-  it('seeds the SEED_BLOCKED defaults on first read', () => {
-    expect(getOutcome('Spider-Man')).toBe('blocked');
-    expect(getOutcome('Miles Morales')).toBe('blocked');
-    expect(getOutcome('Peter Parker')).toBe('blocked');
-    expect(getOutcome('Spidey')).toBe('blocked');
+  it('returns "unknown" for unseeded names (no seed in per-model store)', () => {
+    expect(getOutcome('Batman', MODEL_LEONARDO)).toBe('unknown');
+    expect(getOutcome('Spider-Man', MODEL_LEONARDO)).toBe('unknown');
+    expect(getOutcome('SomeNewCharacter', MODEL_LEONARDO)).toBe('unknown');
   });
 
-  it('returns "unknown" for unseeded names', () => {
-    expect(getOutcome('Batman')).toBe('unknown');
-    expect(getOutcome('SomeNewCharacter')).toBe('unknown');
+  it('persists setOutcome between calls, scoped to (name, modelId)', () => {
+    setOutcome('Batman', 'blocked', MODEL_LEONARDO);
+    expect(getOutcome('Batman', MODEL_LEONARDO)).toBe('blocked');
+    // Other model is unaffected — that is the whole point of issue 2.
+    expect(getOutcome('Batman', MODEL_GPT)).toBe('unknown');
   });
 
-  it('persists setOutcome between calls', () => {
-    setOutcome('Batman', 'blocked');
-    expect(getOutcome('Batman')).toBe('blocked');
+  it('"blocked" markings are sticky per (name, modelId) — "allowed" cannot overwrite them on the same model', () => {
+    setOutcome('Batman', 'blocked', MODEL_LEONARDO);
+    setOutcome('Batman', 'allowed', MODEL_LEONARDO);
+    expect(getOutcome('Batman', MODEL_LEONARDO)).toBe('blocked');
   });
 
-  it('"blocked" markings are sticky — "allowed" cannot overwrite them', () => {
-    setOutcome('Batman', 'blocked');
-    setOutcome('Batman', 'allowed');
-    expect(getOutcome('Batman')).toBe('blocked');
+  it('blocking a name on one model does NOT block it on another model', () => {
+    setOutcome('Warhammer', 'blocked', MODEL_LEONARDO);
+    expect(getOutcome('Warhammer', MODEL_LEONARDO)).toBe('blocked');
+    expect(getOutcome('Warhammer', MODEL_GPT)).toBe('unknown');
+    // And learning on GPT later doesn't disturb the Leonardo block.
+    setOutcome('Warhammer', 'allowed', MODEL_GPT);
+    expect(getOutcome('Warhammer', MODEL_GPT)).toBe('allowed');
+    expect(getOutcome('Warhammer', MODEL_LEONARDO)).toBe('blocked');
   });
 
-  it('"allowed" markings can move to "blocked"', () => {
-    setOutcome('Yoda', 'allowed');
-    expect(getOutcome('Yoda')).toBe('allowed');
-    setOutcome('Yoda', 'blocked');
-    expect(getOutcome('Yoda')).toBe('blocked');
+  it('"allowed" markings can move to "blocked" on the same model', () => {
+    setOutcome('Yoda', 'allowed', MODEL_LEONARDO);
+    expect(getOutcome('Yoda', MODEL_LEONARDO)).toBe('allowed');
+    setOutcome('Yoda', 'blocked', MODEL_LEONARDO);
+    expect(getOutcome('Yoda', MODEL_LEONARDO)).toBe('blocked');
   });
 
-  it('getAllBlocked surfaces every name flagged "blocked"', () => {
-    setOutcome('Batman', 'blocked');
-    setOutcome('Yoda', 'allowed');
-    const blocked = getAllBlocked();
-    expect(blocked).toContain('Spider-Man'); // from seed
-    expect(blocked).toContain('Batman');     // from this test
-    expect(blocked).not.toContain('Yoda');   // explicitly allowed
+  it('getAllBlocked(modelId) returns names blocked for that model only', () => {
+    setOutcome('Batman', 'blocked', MODEL_LEONARDO);
+    setOutcome('Warhammer', 'blocked', MODEL_GPT);
+    setOutcome('Yoda', 'allowed', MODEL_LEONARDO);
+
+    expect(getAllBlocked(MODEL_LEONARDO)).toEqual(['Batman']);
+    expect(getAllBlocked(MODEL_GPT)).toEqual(['Warhammer']);
   });
 
-  describe('TRADEMARK-SURGICAL-REWRITE v3 (2026-05-22): history-driven filter', () => {
-    it("Mandalorian regression: 'unknown' status means substitution does NOT match it", () => {
-      // Maurice's bug: Mandalorian was being substituted even though
-      // gallery showed past Mandalorian prompts had succeeded. After
-      // v3, only outcome='blocked' names are candidates for swap.
-      // Mandalorian is NOT in SEED_BLOCKED (only Spider-Family is), so
-      // its default outcome is 'unknown' → not in the blocked list.
-      expect(getOutcome('Mandalorian')).toBe('unknown');
-      const blocked = getAllBlocked();
-      expect(blocked).not.toContain('Mandalorian');
-    });
+  it('getAllBlocked() with no modelId returns the union (any name blocked anywhere)', () => {
+    setOutcome('Batman', 'blocked', MODEL_LEONARDO);
+    setOutcome('Warhammer', 'blocked', MODEL_GPT);
+    setOutcome('Yoda', 'allowed', MODEL_LEONARDO);
 
-    it("explicit 'allowed' marking keeps a name out of the blocked list", () => {
-      // Success-path marking from useImageGeneration's first-try
-      // success branch records each name as 'allowed'. The blocked
-      // list must NOT include them.
-      setOutcome('Mandalorian', 'allowed');
-      setOutcome('Iron Man', 'allowed');
-      expect(getOutcome('Mandalorian')).toBe('allowed');
-      const blocked = getAllBlocked();
-      expect(blocked).not.toContain('Mandalorian');
-      expect(blocked).not.toContain('Iron Man');
-    });
+    const union = getAllBlocked();
+    expect(union).toContain('Batman');
+    expect(union).toContain('Warhammer');
+    expect(union).not.toContain('Yoda');
+  });
+});
 
-    it('seed-blocked names stay blocked even after a coincidental "allowed" mark', () => {
-      // Spider-Man is in SEED_BLOCKED. If a later prompt containing
-      // Spider-Man somehow succeeds (e.g. a manual workaround), the
-      // sticky-blocked guard in setOutcome keeps Spider-Man flagged.
-      expect(getOutcome('Spider-Man')).toBe('blocked');
-      setOutcome('Spider-Man', 'allowed'); // attempted revive
-      expect(getOutcome('Spider-Man')).toBe('blocked');
-    });
+describe('legacy migration', () => {
+  beforeEach(() => {
+    setupLocalStorage();
+    __resetForTests();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('wipes the v1 storage keys on first v2 read', () => {
+    window.localStorage.setItem('mashup_trademark_outcomes', '{"Spider-Man":"blocked"}');
+    window.localStorage.setItem('mashup_trademark_user_whitelist', '["Mandalorian"]');
+
+    // First read triggers the one-shot wipe.
+    expect(getOutcome('Spider-Man', MODEL_LEONARDO)).toBe('unknown');
+    expect(window.localStorage.getItem('mashup_trademark_outcomes')).toBeNull();
+    expect(window.localStorage.getItem('mashup_trademark_user_whitelist')).toBeNull();
   });
 });
 
@@ -245,27 +253,28 @@ describe('TRADEMARK-STAGED-PIPELINE (2026-05-22): user whitelist', () => {
     expect(getAllUserWhitelisted()).not.toContain('Mandalorian');
   });
 
-  it('whitelisting a seed-blocked name hides it from getAllBlocked', () => {
-    // Spider-Man is SEED_BLOCKED → getOutcome stays "blocked" (the
-    // auto signal is unchanged) but the UI-facing blocklist must
-    // respect the user override.
-    expect(getAllBlocked()).toContain('Spider-Man');
+  it('whitelisting a blocked name hides it from getAllBlocked across models', () => {
+    setOutcome('Spider-Man', 'blocked', MODEL_LEONARDO);
+    expect(getAllBlocked(MODEL_LEONARDO)).toContain('Spider-Man');
     addUserWhitelist('Spider-Man');
+    expect(getAllBlocked(MODEL_LEONARDO)).not.toContain('Spider-Man');
     expect(getAllBlocked()).not.toContain('Spider-Man');
     // The auto outcome itself is preserved — the whitelist is an
     // override at the read sites, not an erase of history.
-    expect(getOutcome('Spider-Man')).toBe('blocked');
+    expect(getOutcome('Spider-Man', MODEL_LEONARDO)).toBe('blocked');
   });
 
-  it('isEffectivelyBlocked respects the whitelist', () => {
-    setOutcome('Mandalorian', 'blocked');
-    expect(isEffectivelyBlocked('Mandalorian')).toBe(true);
+  it('isEffectivelyBlocked respects the whitelist per model', () => {
+    setOutcome('Mandalorian', 'blocked', MODEL_LEONARDO);
+    expect(isEffectivelyBlocked('Mandalorian', MODEL_LEONARDO)).toBe(true);
+    // A different model that hasn't seen it returns false (unknown).
+    expect(isEffectivelyBlocked('Mandalorian', MODEL_GPT)).toBe(false);
     addUserWhitelist('Mandalorian');
-    expect(isEffectivelyBlocked('Mandalorian')).toBe(false);
+    expect(isEffectivelyBlocked('Mandalorian', MODEL_LEONARDO)).toBe(false);
   });
 });
 
-describe('planStagedSubstitution — TRADEMARK-STAGED-PIPELINE', () => {
+describe('planStagedSubstitution — TRADEMARK-STAGED-PIPELINE (per-model)', () => {
   beforeEach(() => {
     setupLocalStorage();
     __resetForTests();
@@ -276,29 +285,46 @@ describe('planStagedSubstitution — TRADEMARK-STAGED-PIPELINE', () => {
   });
 
   it('returns null when the prompt has no trademark names', () => {
-    expect(planStagedSubstitution('an original character on a hill')).toBeNull();
+    expect(planStagedSubstitution('an original character on a hill', MODEL_LEONARDO)).toBeNull();
   });
 
-  it('prefers names with outcome="blocked" over other extracted names', () => {
-    // The prompt mentions two trademark names; only Spider-Man is
-    // SEED_BLOCKED. Plan must target Spider-Man, not Yoda.
-    setOutcome('Yoda', 'allowed');
-    const plan = planStagedSubstitution('Spider-Man fights Yoda in the rain');
+  it('prefers names with outcome="blocked" for the same model over other extracted names', () => {
+    // The prompt mentions two trademark names; Spider-Man is blocked
+    // on MODEL_LEONARDO. Plan must target Spider-Man, not Yoda.
+    setOutcome('Spider-Man', 'blocked', MODEL_LEONARDO);
+    setOutcome('Yoda', 'allowed', MODEL_LEONARDO);
+    const plan = planStagedSubstitution('Spider-Man fights Yoda in the rain', MODEL_LEONARDO);
     expect(plan).not.toBeNull();
     expect(plan!.targetName).toBe('Spider-Man');
   });
 
-  it('falls back to longest extracted name when nothing is outcome="blocked"', () => {
+  it('IGNORES blocks recorded for a different model when planning for this model', () => {
+    // Block Spider-Man for MODEL_LEONARDO but plan for MODEL_GPT —
+    // the picker should fall back to longest-extracted (Spider-Man)
+    // since neither name is blocked on MODEL_GPT.
+    setOutcome('Spider-Man', 'blocked', MODEL_LEONARDO);
+    const plan = planStagedSubstitution('Spider-Man fights Yoda in the rain', MODEL_GPT);
+    expect(plan).not.toBeNull();
+    // No tier-1 candidates for GPT → fall through to longest extracted
+    // (Spider-Man, 10 chars vs Yoda, 4 chars).
+    expect(plan!.targetName).toBe('Spider-Man');
+  });
+
+  it('falls back to longest extracted name when nothing is outcome="blocked" for this model', () => {
     // No name in this prompt has outcome="blocked" — Iron Man and
     // Mandalorian are both unknown by default. Picker prefers the
     // longer canonical (Mandalorian, 11 chars).
-    const plan = planStagedSubstitution('a Mandalorian beside Thor in a forest');
+    const plan = planStagedSubstitution('a Mandalorian beside Thor in a forest', MODEL_LEONARDO);
     expect(plan).not.toBeNull();
     expect(plan!.targetName).toBe('Mandalorian');
   });
 
   it('stage2Prompt swaps target with the minimal placeholder', () => {
-    const plan = planStagedSubstitution('Spider-Man swinging through Tokyo at night');
+    setOutcome('Spider-Man', 'blocked', MODEL_LEONARDO);
+    const plan = planStagedSubstitution(
+      'Spider-Man swinging through Tokyo at night',
+      MODEL_LEONARDO,
+    );
     expect(plan).not.toBeNull();
     expect(plan!.stage2Prompt).toContain('a character');
     expect(plan!.stage2Prompt).not.toContain('Spider-Man');
@@ -306,7 +332,11 @@ describe('planStagedSubstitution — TRADEMARK-STAGED-PIPELINE', () => {
   });
 
   it('stage3Prompt swaps target with the rich GENERIC_FOR descriptor', () => {
-    const plan = planStagedSubstitution('Spider-Man swinging through Tokyo at night');
+    setOutcome('Spider-Man', 'blocked', MODEL_LEONARDO);
+    const plan = planStagedSubstitution(
+      'Spider-Man swinging through Tokyo at night',
+      MODEL_LEONARDO,
+    );
     expect(plan).not.toBeNull();
     expect(plan!.stage3Prompt).not.toContain('Spider-Man');
     expect(plan!.stage3Prompt).toMatch(/spider/i);
@@ -315,21 +345,25 @@ describe('planStagedSubstitution — TRADEMARK-STAGED-PIPELINE', () => {
 
   it('skips user-whitelisted names entirely — returns null when only whitelisted names match', () => {
     addUserWhitelist('Mandalorian');
-    expect(planStagedSubstitution('the Mandalorian rides his speeder')).toBeNull();
+    expect(
+      planStagedSubstitution('the Mandalorian rides his speeder', MODEL_LEONARDO),
+    ).toBeNull();
   });
 
   it('skips user-whitelisted names — picks a non-whitelisted alternative', () => {
     // Spider-Man is blocked. User whitelists Spider-Man. Plan must
     // fall back to the only other trademark name in the prompt (Yoda),
     // not pick Spider-Man.
+    setOutcome('Spider-Man', 'blocked', MODEL_LEONARDO);
     addUserWhitelist('Spider-Man');
-    const plan = planStagedSubstitution('Spider-Man fights Yoda in the rain');
+    const plan = planStagedSubstitution('Spider-Man fights Yoda in the rain', MODEL_LEONARDO);
     expect(plan).not.toBeNull();
     expect(plan!.targetName).toBe('Yoda');
   });
 
   it('returns null when the prompt has only user-whitelisted blocked names', () => {
+    setOutcome('Spider-Man', 'blocked', MODEL_LEONARDO);
     addUserWhitelist('Spider-Man');
-    expect(planStagedSubstitution('Spider-Man poses for a photo')).toBeNull();
+    expect(planStagedSubstitution('Spider-Man poses for a photo', MODEL_LEONARDO)).toBeNull();
   });
 });

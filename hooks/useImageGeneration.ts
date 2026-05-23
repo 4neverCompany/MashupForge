@@ -509,9 +509,9 @@ interface SubmitResult {
  * retry catch). A success that came AFTER a retry doesn't prove the
  * names are allowed — the retry's substitution may have removed them.
  */
-function markPromptNamesAllowed(prompt: string): void {
+function markPromptNamesAllowed(prompt: string, modelId: string): void {
   const names = extractTrademarkNames(prompt);
-  for (const name of names) setOutcome(name, 'allowed');
+  for (const name of names) setOutcome(name, 'allowed', modelId);
 }
 
 /**
@@ -544,7 +544,7 @@ async function submitWithOneRetry(
   // STAGE 1 — original prompt verbatim.
   try {
     const success = await submitLeonardoAndPoll({ prompt: initialPrompt, ...baseParams });
-    markPromptNamesAllowed(initialPrompt);
+    markPromptNamesAllowed(initialPrompt, baseParams.modelId);
     return { success, finalPrompt: initialPrompt, retried: false };
   } catch (err) {
     const lErr = err as LeonardoGenerationError;
@@ -567,15 +567,15 @@ async function submitWithOneRetry(
       return { success, finalPrompt: activePrompt, retried: true };
     }
 
-    const plan = planStagedSubstitution(lErr.failedPrompt || initialPrompt);
+    const plan = planStagedSubstitution(lErr.failedPrompt || initialPrompt, baseParams.modelId);
     if (!plan) {
       // No eligible name to swap (none extracted, or all user-whitelisted).
       // Surface the original moderation error so the user edits manually.
       throw err;
     }
-    // The picked term is by definition a real Leonardo blocker now —
-    // record it so future prompts skip it pre-flight.
-    setOutcome(plan.targetName, 'blocked');
+    // The picked term is by definition a real blocker for this model now —
+    // record it so future prompts for this model skip it pre-flight.
+    setOutcome(plan.targetName, 'blocked', baseParams.modelId);
 
     // STAGE 2 — minimal placeholder swap.
     try {
@@ -622,7 +622,7 @@ async function submitViaAiImageWithOneRetry(
       idea: initialIdea,
       skipEnhance: false,
     });
-    markPromptNamesAllowed(r.enhancedPrompt);
+    markPromptNamesAllowed(r.enhancedPrompt, baseParams.modelId);
     return { success: r, finalPrompt: r.enhancedPrompt, retried: false };
   } catch (err) {
     const lErr = err as LeonardoGenerationError;
@@ -653,9 +653,9 @@ async function submitViaAiImageWithOneRetry(
     // Leonardo actually saw (lErr.failedPrompt), not the rough idea —
     // the orchestrator's enhancement may have introduced names that
     // aren't in the user's idea string.
-    const plan = planStagedSubstitution(lErr.failedPrompt || initialIdea);
+    const plan = planStagedSubstitution(lErr.failedPrompt || initialIdea, baseParams.modelId);
     if (!plan) throw err;
-    setOutcome(plan.targetName, 'blocked');
+    setOutcome(plan.targetName, 'blocked', baseParams.modelId);
 
     // STAGE 2 — minimal swap. skipEnhance so the orchestrator submits
     // the swapped prompt verbatim.

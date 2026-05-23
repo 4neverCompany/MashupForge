@@ -296,18 +296,18 @@ Return ONLY the prompt text, nothing else.`;
             // poisoning the learning store. Now: if there are multiple
             // candidate names, just log them so a human / future
             // disambiguation can act — don't auto-poison the store.
-            onModelError: (_modelId, modelName, err) => {
+            onModelError: (modelId, modelName, err) => {
               addLog('image-gen', idea.id, 'error', `${modelName} failed: ${err}`);
               if (/TRADEMARK|COPYRIGHT/i.test(err)) {
                 const observedNames = extractTrademarkNames(activePrompt);
                 if (observedNames.length === 1) {
                   const name = observedNames[0];
-                  setOutcome(name, 'blocked');
+                  setOutcome(name, 'blocked', modelId);
                   addLog(
                     'moderation',
                     idea.id,
                     'error',
-                    `TRADEMARK blocked: ${modelName} — marked "${name}" blocked for future pre-flight (sole candidate in prompt)`,
+                    `TRADEMARK blocked: ${modelName} — marked "${name}" blocked for ${modelName} for future pre-flight (sole candidate in prompt)`,
                   );
                 } else if (observedNames.length > 1) {
                   addLog(
