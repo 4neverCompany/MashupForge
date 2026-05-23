@@ -156,6 +156,15 @@ interface LeonardoSubmitParams {
   styleIds?: string[];
   apiKey?: string;
   quality?: string;
+  /**
+   * IMG-INVEST-001 issue 1: Leonardo's `prompt_enhance` knob, threaded
+   * from the model spec via lib/image-prompt-builder.ts. When omitted,
+   * the API route defaults to `'ON'` for back-compat. Pipeline-style
+   * model specs that set `prompt_enhance: 'OFF'` (to skip Leonardo's
+   * own rewrite because the client already enhanced) finally land
+   * through this field instead of being silently dropped.
+   */
+  promptEnhance?: 'ON' | 'OFF';
 }
 
 interface LeonardoSuccess {
@@ -229,6 +238,7 @@ async function submitLeonardoAndPoll(params: LeonardoSubmitParams): Promise<Leon
       styleIds: params.styleIds,
       apiKey: params.apiKey,
       quality: params.quality || 'HIGH',
+      promptEnhance: params.promptEnhance,
     }),
   });
   if (!res.ok) {
@@ -270,6 +280,12 @@ interface AiImageSubmitParams {
   genres?: string[];
   apiKey?: string;
   skipEnhance?: boolean;
+  /**
+   * IMG-INVEST-001 issue 1: forward the model spec's prompt_enhance
+   * value all the way to Leonardo so pipeline-style specs can disable
+   * Leonardo's own enhancement (we already MiniMax-enhanced server-side).
+   */
+  promptEnhance?: 'ON' | 'OFF';
 }
 
 interface AiImageSubmitResult extends LeonardoSuccess {
@@ -293,6 +309,7 @@ async function submitViaAiImage(params: AiImageSubmitParams): Promise<AiImageSub
       genres: params.genres,
       apiKey: params.apiKey,
       skipEnhance: params.skipEnhance === true,
+      promptEnhance: params.promptEnhance,
     }),
   });
   if (!res.ok) {
@@ -983,6 +1000,7 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
                 styleIds: sharedStyleIds,
                 quality: sharedQuality,
                 negativePrompt: generatedNegativePrompt,
+                promptEnhance: enhanced.leonardo.promptEnhance,
               },
               {
                 systemPrompt: settings.agentPrompt,
@@ -1003,6 +1021,7 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
                 styleIds: sharedStyleIds,
                 apiKey: settings.apiKeys.leonardo,
                 quality: sharedQuality,
+                promptEnhance: enhanced.leonardo.promptEnhance,
               },
               { onRetry: onModerationBlock },
               settings.activeAiAgent,
@@ -1207,6 +1226,7 @@ The user wants to re-roll an image based on this idea: "${prompt}". Enhance this
               styleIds: sharedStyleIds,
               quality: sharedQuality,
               negativePrompt: modelNegPrompt,
+              promptEnhance: enhanced.leonardo.promptEnhance,
             },
             {
               systemPrompt: settings.agentPrompt,
@@ -1227,6 +1247,7 @@ The user wants to re-roll an image based on this idea: "${prompt}". Enhance this
               styleIds: sharedStyleIds,
               apiKey: settings.apiKeys.leonardo,
               quality: sharedQuality,
+              promptEnhance: enhanced.leonardo.promptEnhance,
             },
             { onRetry: onModerationBlock },
             settings.activeAiAgent,

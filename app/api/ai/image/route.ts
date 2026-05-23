@@ -64,6 +64,7 @@ interface RequestBody {
   genres?: unknown;
   apiKey?: unknown;
   skipEnhance?: unknown;
+  promptEnhance?: unknown;
 }
 
 // Mirrored from `/api/leonardo` so a v2 model id round-trips to the
@@ -227,6 +228,8 @@ interface LeonardoSubmitArgs {
   quality?: 'LOW' | 'MEDIUM' | 'HIGH';
   quantity?: number;
   apiKey: string;
+  /** IMG-INVEST-001 issue 1: Leonardo `prompt_enhance` toggle. */
+  promptEnhance?: 'ON' | 'OFF';
 }
 
 /**
@@ -241,7 +244,9 @@ async function submitToLeonardo(args: LeonardoSubmitArgs): Promise<string> {
     width: args.width,
     height: args.height,
     quantity: Math.min(args.quantity ?? 1, 8),
-    prompt_enhance: 'ON',
+    // IMG-INVEST-001 issue 1: honour the caller's spec-driven choice;
+    // defaults to 'ON' for back-compat with legacy callers.
+    prompt_enhance: args.promptEnhance === 'OFF' ? 'OFF' : 'ON',
     quality: args.quality || 'HIGH',
   };
   if (args.modelId === 'gpt-image-1.5') {
@@ -315,6 +320,9 @@ export async function POST(req: Request): Promise<Response> {
   const width = typeof body.width === 'number' && Number.isFinite(body.width) ? Math.trunc(body.width) : 1024;
   const height = typeof body.height === 'number' && Number.isFinite(body.height) ? Math.trunc(body.height) : 1024;
   const skipEnhance = body.skipEnhance === true;
+  // IMG-INVEST-001 issue 1: surface caller's prompt_enhance choice.
+  const promptEnhance: 'ON' | 'OFF' | undefined =
+    body.promptEnhance === 'ON' || body.promptEnhance === 'OFF' ? body.promptEnhance : undefined;
   const quality =
     body.quality === 'LOW' || body.quality === 'MEDIUM' || body.quality === 'HIGH'
       ? body.quality
@@ -373,6 +381,7 @@ export async function POST(req: Request): Promise<Response> {
       quality,
       quantity,
       apiKey: leonardoKey,
+      promptEnhance,
     });
   } catch (e: unknown) {
     return NextResponse.json(

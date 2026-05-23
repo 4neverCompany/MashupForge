@@ -75,9 +75,10 @@ export async function POST(req: Request) {
       width,
       height,
       apiKey: customApiKey,
-      styleIds,     // UUID array for Nano Banana models
-      quality,      // LOW | MEDIUM | HIGH for GPT Image-1.5
+      styleIds,       // UUID array for Nano Banana models
+      quality,        // LOW | MEDIUM | HIGH for GPT Image-1.5
       quantity,
+      promptEnhance,  // IMG-INVEST-001 issue 1: 'ON' | 'OFF' from caller (model spec)
     } = await req.json();
     // Note: negative_prompt is intentionally not destructured. None of the v2
     // models supported by this route (nano-banana-2, gemini-image-2, gpt-image-1.5,
@@ -96,12 +97,20 @@ export async function POST(req: Request) {
     const apiModelId = MODEL_ID_MAP[modelId] || modelId;
 
     // ── Build v2 request body ────────────────────────────────────────────
+    // IMG-INVEST-001 issue 1: prompt_enhance is now driven by the model
+    // spec via lib/image-prompt-builder.ts → hooks/useImageGeneration.ts.
+    // Defaults to 'ON' so legacy callers (and any spec that doesn't set
+    // prompt_enhance) preserve the historical behaviour; pipeline-style
+    // specs that set it to 'OFF' finally land here instead of being
+    // silently overridden.
+    const resolvedPromptEnhance: 'ON' | 'OFF' =
+      promptEnhance === 'OFF' ? 'OFF' : 'ON';
     const parameters: Record<string, unknown> = {
       prompt: String(prompt),
       width: Number(width) || 1024,
       height: Number(height) || 1024,
       quantity: Math.min(Number(quantity) || 1, 8),
-      prompt_enhance: "ON",
+      prompt_enhance: resolvedPromptEnhance,
     };
 
     // Quality: sent for ALL models — tested against v2 API, accepted without error.
