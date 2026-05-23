@@ -2,6 +2,23 @@
 
 All notable changes to MashupForge are documented in this file.
 
+## [0.9.46] — 2026-05-23
+
+### Added
+- **trademark:** per-model blocklist storage
+- **trademark:** 3-stage retry pipeline + user whitelist UI
+
+### Fixed
+- **prompt-enhance:** force ON, drop our-side rewrite in Manual + Pipeline
+- **suggest:** accumulate STYLE_RULES matches; add explicit Ray Traced rule
+- **leonardo:** honor model-spec prompt_enhance instead of hardcoding ON
+- **suggest-params:** honor settings.enabledProviders, don't re-add disabled models
+- **suggest-card:** resync local state when suggestion prop changes
+
+### Docs
+- refresh README for v0.9.45 with Tailwind 4.3 and Motion 12
+- refresh README for v0.9.45
+
 ## [0.9.45] — 2026-05-23
 
 ### Added
