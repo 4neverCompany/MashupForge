@@ -152,9 +152,12 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
         const modelStyle = modelSupportsStyle
           ? (perModelStyle || enhancement.style || options?.style)
           : undefined;
-        const modelPrompt = modelSupportsStyle && modelStyle
-          ? `${enhancement.prompt}. Art style: ${modelStyle}`
-          : enhancement.prompt;
+        // STYLE-DEDUP: feed buildEnhancedPrompt the raw enhanced prompt and
+        // let it emit the single `style: <name>` keyword via styleName.
+        // The previous `${enhancement.prompt}. Art style: ${modelStyle}`
+        // concat duplicated the style — buildEnhancedPrompt below already
+        // appends it. Mirrors useImageGeneration.ts (modelPrompt = enhancement.prompt).
+        const modelPrompt = enhancement.prompt;
         const modelRatio =
           enhancement.aspectRatio || options?.aspectRatio || '1:1';
         const modelNegPrompt =

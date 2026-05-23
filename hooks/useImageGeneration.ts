@@ -567,6 +567,10 @@ async function submitWithOneRetry(
       return { success, finalPrompt: activePrompt, retried: true };
     }
 
+    // pollLeonardoGeneration always annotates failedPrompt on moderation
+    // errors (statusData.failedPrompt, or the submitted prompt as fallback),
+    // and we only reach here when classifications.length > 0 — so the
+    // `|| initialPrompt` branch is defensive padding, not a live fallback.
     const plan = planStagedSubstitution(lErr.failedPrompt || initialPrompt, baseParams.modelId);
     if (!plan) {
       // No eligible name to swap (none extracted, or all user-whitelisted).
@@ -652,7 +656,11 @@ async function submitViaAiImageWithOneRetry(
     // TRADEMARK-STAGED-PIPELINE: plan against the enhanced prompt that
     // Leonardo actually saw (lErr.failedPrompt), not the rough idea —
     // the orchestrator's enhancement may have introduced names that
-    // aren't in the user's idea string.
+    // aren't in the user's idea string. pollLeonardoGeneration always
+    // sets failedPrompt for moderation FAILED responses (server's
+    // statusData.failedPrompt or the submitted prompt as fallback), and
+    // this branch is only reached on classifications.length > 0, so the
+    // `|| initialIdea` is defensive padding for an unreachable case.
     const plan = planStagedSubstitution(lErr.failedPrompt || initialIdea, baseParams.modelId);
     if (!plan) throw err;
     setOutcome(plan.targetName, 'blocked', baseParams.modelId);

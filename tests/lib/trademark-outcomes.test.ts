@@ -4,7 +4,6 @@ import {
   setOutcome,
   getAllBlocked,
   genericFor,
-  preflightGenericize,
   addUserWhitelist,
   removeUserWhitelist,
   isUserWhitelisted,
@@ -155,71 +154,6 @@ describe('genericFor', () => {
 
   it('falls back to a permissive default for unknown names', () => {
     expect(genericFor('SomeFutureCharacter')).toBe('a popular character');
-  });
-});
-
-describe('preflightGenericize', () => {
-  beforeEach(() => {
-    setupLocalStorage();
-    __resetForTests();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('swaps known-blocked names with their generics — preserves all other text', () => {
-    // TRADEMARK-SURGICAL-REWRITE: assert the rest of the prompt survives
-    // verbatim (Maurice's rule #2: "ONLY change what triggered the block
-    // — keep everything else identical"). Generic content is asserted
-    // structurally so the test doesn't break when we tune the visual
-    // descriptors.
-    const result = preflightGenericize(
-      'Spider-Man swinging through Tokyo at night',
-      ['Spider-Man'],
-    );
-    expect(result.prompt).not.toContain('Spider-Man');
-    expect(result.prompt).toMatch(/spider/i);
-    expect(result.prompt).toContain('swinging through Tokyo at night');
-    expect(result.swapped).toEqual(['Spider-Man']);
-  });
-
-  it('handles multiple blocked names in one prompt', () => {
-    const result = preflightGenericize(
-      'Spider-Man and Grogu team up in a Mandalorian temple',
-      ['Spider-Man', 'Grogu', 'Mandalorian'],
-    );
-    expect(result.prompt).not.toMatch(/Spider-Man|Grogu|Mandalorian/);
-    expect(result.swapped.sort()).toEqual(['Grogu', 'Mandalorian', 'Spider-Man']);
-  });
-
-  it('case-insensitive substring match in the prompt', () => {
-    const result = preflightGenericize('spider-man epic pose', ['Spider-Man']);
-    expect(result.prompt).not.toMatch(/spider-man/i);
-    expect(result.prompt).toContain('epic pose');
-    expect(result.swapped).toContain('Spider-Man');
-  });
-
-  it('returns the original prompt + empty swapped when no names match', () => {
-    const result = preflightGenericize('an original character vista', ['Spider-Man']);
-    expect(result.prompt).toBe('an original character vista');
-    expect(result.swapped).toEqual([]);
-  });
-
-  it('multi-word names rewrite before their single-word fragments', () => {
-    // "Miles Morales" should be swapped as a unit; a hypothetical "Miles"
-    // alone in the blocked list wouldn't fragment the canonical name.
-    const result = preflightGenericize('Miles Morales lands on a rooftop', ['Miles Morales']);
-    expect(result.prompt).not.toContain('Miles Morales');
-    expect(result.prompt).toMatch(/spider/i);
-    expect(result.prompt).toContain('lands on a rooftop');
-  });
-
-  it('escapes regex metacharacters in name lookups (apostrophes, hyphens)', () => {
-    const result = preflightGenericize("T'Challa leaps from a tree", ["T'Challa"]);
-    expect(result.prompt).not.toContain("T'Challa");
-    expect(result.prompt).toMatch(/panther/i);
-    expect(result.prompt).toContain('leaps from a tree');
   });
 });
 

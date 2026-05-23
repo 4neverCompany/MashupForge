@@ -254,11 +254,11 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
           // We pass the user's prompt through verbatim; if a model
           // rejects with TRADEMARK/COPYRIGHT, useImageGeneration's
           // submitWithOneRetry (and useComparison's inline retry)
-          // handle the deterministic name-swap as a fallback. The
-          // outcome store's getAllBlocked() result still feeds the AI
-          // prompt hint in expandIdeaToPrompt above so the upstream
-          // AI generalises names while AUTHORING fresh content — that
-          // path doesn't rewrite user input, it shapes new prompts.
+          // handle the deterministic 3-stage name-swap as a fallback.
+          // The outcome store has no authoring-side reader anymore —
+          // expandIdeaToPrompt is a pure concept+context joiner; the
+          // only consumer of getAllBlocked() outside the retry path
+          // is the SettingsModal blocklist UI.
           const activePrompt = prompt;
 
           imageReadyPromise = generateComparison(activePrompt, modelIds, {

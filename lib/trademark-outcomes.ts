@@ -342,40 +342,6 @@ export function genericFor(name: string): string {
   return GENERIC_FOR[name.toLowerCase()] ?? 'a popular character';
 }
 
-/**
- * Rewrite `prompt` so every name flagged 'blocked' in the store is
- * replaced by its generic descriptor. Returns the rewritten prompt
- * plus the set of names that were swapped — callers log those for
- * pipeline visibility.
- *
- * Substring-replace by canonical-cased name. Case-insensitive match
- * via a regex per name so user prompts with off-canonical casing
- * ("spider-man") still get caught.
- */
-export interface PreflightResult {
-  prompt: string;
-  swapped: string[];
-}
-
-export function preflightGenericize(prompt: string, blockedNames: string[]): PreflightResult {
-  let out = prompt;
-  const swapped: string[] = [];
-  // Sort longest-first so multi-word names rewrite before their
-  // single-word fragments.
-  const ordered = [...blockedNames].sort((a, b) => b.length - a.length);
-  for (const name of ordered) {
-    const generic = genericFor(name);
-    // Escape regex metachars in the name (hyphens, apostrophes etc).
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(escaped, 'gi');
-    if (re.test(out)) {
-      out = out.replace(re, generic);
-      swapped.push(name);
-    }
-  }
-  return { prompt: out, swapped };
-}
-
 // ── Staged retry helpers (TRADEMARK-STAGED-PIPELINE, 2026-05-22) ────────
 //
 // Maurice's spec: a TRADEMARK/COPYRIGHT block triggers a 3-stage
