@@ -1910,14 +1910,35 @@ export function MainContent() {
       // we don't repeat the V082 failure of proposing styles for
       // gpt-image-1.5 etc. If the AI fails / parse fails, it silently
       // falls back to the rule engine.
+      //
+      // IMG-INVEST-001 issue 3: respect settings.enabledProviders.
+      // Without this filter, suggestions can re-introduce a model whose
+      // provider the user disabled (e.g. minimax) and then handleApply
+      // merges it back into comparisonModels — re-activating a model
+      // the user just turned off.
+      const enabledProviders = new Set<string>(settings.enabledProviders);
+      const eligibleModels = LEONARDO_MODELS.filter(
+        m => enabledProviders.has(m.provider ?? 'leonardo'),
+      );
+      const eligibleIncluded = comparisonModels.filter(id => {
+        const m = LEONARDO_MODELS.find(x => x.id === id);
+        return m ? enabledProviders.has(m.provider ?? 'leonardo') : false;
+      });
       const suggestion = await suggestParametersAI(
         {
           prompt: comparisonPrompt,
-          availableModels: LEONARDO_MODELS,
+          availableModels: eligibleModels,
           modelGuides: MODEL_PROMPT_GUIDES,
           availableStyles: LEONARDO_SHARED_STYLES,
           savedImages,
-          includedModelIds: comparisonModels,
+          includedModelIds: eligibleIncluded,
+          // Defence-in-depth: when only one provider is enabled, also
+          // pass it as the engine-level filter so suggestParameters'
+          // internal candidate pool is narrowed at its own boundary.
+          provider:
+            settings.enabledProviders.length === 1
+              ? settings.enabledProviders[0]
+              : undefined,
         },
         {
           aiCall: (message, signal) =>
@@ -1939,9 +1960,18 @@ export function MainContent() {
     options: Partial<GenerateOptions>,
     perModel: Record<string, PerModelSuggestion>,
   ) => {
+    // IMG-INVEST-001 issue 3: strip out any models whose provider the
+    // user has disabled. Belt-and-braces with the filter in
+    // handleSuggestParameters — a stale suggestion (e.g. from before
+    // the user toggled minimax off) must not re-activate the model.
+    const enabledProviders = new Set<string>(settings.enabledProviders);
+    const allowed = modelIds.filter(id => {
+      const m = LEONARDO_MODELS.find(x => x.id === id);
+      return m ? enabledProviders.has(m.provider ?? 'leonardo') : false;
+    });
     setComparisonModels(prev => {
       const merged = new Set(prev);
-      for (const id of modelIds) merged.add(id);
+      for (const id of allowed) merged.add(id);
       return Array.from(merged);
     });
     setComparisonOptions(prev => ({ ...prev, ...options }));
@@ -1949,7 +1979,7 @@ export function MainContent() {
     // can use its own style / aspectRatio / negativePrompt during
     // preview and generation instead of sharing the first model's values.
     const overrides: Record<string, { style?: string; aspectRatio?: string; negativePrompt?: string }> = {};
-    for (const id of modelIds) {
+    for (const id of allowed) {
       const entry = perModel[id];
       if (!entry) continue;
       overrides[id] = entry.type === 'image'
@@ -1962,7 +1992,13 @@ export function MainContent() {
     }
     setPerModelOverrides(overrides);
     setParamSuggestion(null);
-    showToast('Parameters applied. You can still tweak anything before generating.', 'success');
+    const droppedCount = modelIds.length - allowed.length;
+    showToast(
+      droppedCount > 0
+        ? `Parameters applied. ${droppedCount} suggested model${droppedCount === 1 ? '' : 's'} skipped — provider disabled in settings.`
+        : 'Parameters applied. You can still tweak anything before generating.',
+      'success',
+    );
   };
 
   const handleCompare = async () => {
