@@ -306,6 +306,54 @@ describe('suggestParameters', () => {
     expect(['Illustration', 'Graphic Design 2D', 'Creative']).toContain(b.style);
   });
 
+  it('RAY-TRACED-FIX (IMG-INVEST-001 issue 5): explicit raytrace keyword surfaces Ray Traced', () => {
+    // Pre-fix: the STYLE_RULES loop broke on first match, so any
+    // prompt that also mentioned a more common cue (e.g. "illustration"
+    // / "photograph") prevented the 3D/Ray-Traced rule from ever being
+    // evaluated. Even when the 3D rule did match, Ray Traced was 2nd in
+    // its list and the diversity walker preferred the 1st pick. The
+    // dedicated raytrace rule lifts Ray Traced to the top slot when
+    // the user spells out their intent.
+    const s = suggestParameters({
+      prompt: 'raytraced cyberpunk samurai with realistic lighting',
+      availableModels: [makeModel('nano-banana-2')],
+      modelGuides: { 'nano-banana-2': 'photoreal ray traced render' },
+      availableStyles: styles,
+      savedImages: [],
+    });
+    const entry = s.perModel['nano-banana-2'];
+    if (entry.type !== 'image') throw new Error('expected image');
+    expect(entry.style).toBe('Ray Traced');
+  });
+
+  it('RAY-TRACED-FIX: accumulates style candidates across all matching rules (no first-match break)', () => {
+    // Prompt mentions both an "illustration" cue (rule #3) and a
+    // "ray traced" cue (rule #4). With accumulation + interleaving,
+    // both rules contribute to the candidate list. With sibling models
+    // drawing from a shared pool, one model picks Illustration and the
+    // other picks Ray Traced — neither rule's candidate is blocked
+    // by the other rule firing first.
+    const s = suggestParameters({
+      prompt: 'illustration of a samurai with ray traced lighting',
+      availableModels: [makeModel('nano-banana-2'), makeModel('nano-banana-pro')],
+      modelGuides: {
+        'nano-banana-2': 'illustration sharp focus',
+        'nano-banana-pro': 'ray traced photoreal',
+      },
+      availableStyles: styles,
+      savedImages: [],
+    });
+    const a = s.perModel['nano-banana-2'];
+    const b = s.perModel['nano-banana-pro'];
+    if (a.type !== 'image' || b.type !== 'image') throw new Error('expected image');
+    const picks = new Set([a.style, b.style]);
+    // Both rules' top picks (Illustration AND Ray Traced) should be in
+    // the interleaved candidate set — sibling diversity assigns each
+    // model a distinct one.
+    expect(picks.has('Illustration') || picks.has('Ray Traced')).toBe(true);
+    expect(picks.size).toBe(2);
+  });
+
   it('V085-MODEL-STYLE-DIVERSITY: when only one candidate style is available, second sibling gets undefined', () => {
     // Only Illustration is in the available pool — Graphic Design 2D and
     // Creative are not. Sibling cannot find a non-colliding alternative

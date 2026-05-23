@@ -197,6 +197,17 @@ const STYLE_RULES: StyleRule[] = [
   { keywords: ['anime', 'cartoon', 'comic', 'manga', 'illustration'],
     styleNames: ['Illustration', 'Graphic Design 2D', 'Creative'],
     reason: 'illustrated / drawn style cue' },
+  // RAY-TRACED-FIX (IMG-INVEST-001 issue 5, 2026-05-23): dedicated
+  // explicit-raytrace rule above the generic 3D rule. When the user
+  // spells out raytracing intent (or asks for photoreal CGI),
+  // Ray Traced takes the top slot in this rule's candidate list so the
+  // diversity walker can actually pick it. Prior to this rule, the
+  // only path to Ray Traced was rule #5 below where it sat second and
+  // was unreachable for any prompt that also mentioned "illustration"
+  // or "photograph" first.
+  { keywords: ['raytraced', 'ray-traced', 'ray traced', 'path traced', 'path-traced', 'photoreal 3d', 'realistic render', 'physically based rendering', 'pbr'],
+    styleNames: ['Ray Traced', '3D Render', 'Graphic Design 3D'],
+    reason: 'explicit ray-traced realism cue' },
   { keywords: ['3d render', '3d', 'cgi', 'octane', 'blender'],
     styleNames: ['3D Render', 'Ray Traced', 'Graphic Design 3D'],
     reason: '3D / rendered look cue' },
@@ -278,15 +289,34 @@ function deriveHints(prompt: string): RuleHints {
       break;
     }
   }
+  // RAY-TRACED-FIX (IMG-INVEST-001 issue 5, 2026-05-23): accumulate
+  // matches across ALL STYLE_RULES instead of break-on-first. The old
+  // first-match-break made rules later in the list (e.g. the explicit
+  // raytrace rule and the 3D rule) unreachable for any prompt that
+  // mentioned a more common cue first ("illustration", "photograph").
+  // We now interleave each matching rule's candidate list: take the
+  // top pick from each rule, then the second pick from each, etc.
+  // This gives the diversity walker a richer candidate set so styles
+  // like Ray Traced can actually surface for prompts that mention
+  // both 3D intent AND illustration aesthetics.
+  const styleMatches: { candidates: readonly string[]; hit: string; reason: string }[] = [];
   for (const rule of STYLE_RULES) {
     const hit = firstHit(prompt, rule.keywords);
-    if (hit) {
-      hints.styleKeyword = {
-        candidates: rule.styleNames,
-        reason: `"${hit.trim()}" → ${rule.reason}`,
-      };
-      break;
+    if (hit) styleMatches.push({ candidates: rule.styleNames, hit, reason: rule.reason });
+  }
+  if (styleMatches.length > 0) {
+    const interleaved: string[] = [];
+    const maxLen = Math.max(...styleMatches.map((m) => m.candidates.length));
+    for (let i = 0; i < maxLen; i++) {
+      for (const m of styleMatches) {
+        const candidate = m.candidates[i];
+        if (candidate && !interleaved.includes(candidate)) interleaved.push(candidate);
+      }
     }
+    hints.styleKeyword = {
+      candidates: interleaved,
+      reason: styleMatches.map((m) => `"${m.hit.trim()}" → ${m.reason}`).join('; '),
+    };
   }
   hints.detailHit = firstHit(prompt, DETAIL_KEYWORDS);
   hints.shortVideoHit = firstHit(prompt, SHORT_VIDEO_KEYWORDS);
