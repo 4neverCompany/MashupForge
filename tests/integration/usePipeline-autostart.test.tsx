@@ -38,7 +38,7 @@ const daemonStub = {
   pipelineInterval: 0,
   pipelineTargetDays: 7,
   pipelineIdeasPerCycle: 5,
-  weekFillStatus: null,
+  weekFillStatus: null as unknown,
   runOuterLoop: vi.fn().mockResolvedValue(undefined),
   stopPipeline: vi.fn(),
   skipCurrentIdea: vi.fn(),
@@ -204,6 +204,61 @@ describe('BUG-PIPELINE-002 — usePipeline continuous-mode auto-start', () => {
 
     act(() => {
       void result.current.startPipeline();
+    });
+
+    expect(daemonStub.runOuterLoop).toHaveBeenCalledTimes(1);
+  });
+
+  // CONTINUE-GEN-QUOTA (BUG-1, 2026-05-23): when the weekly content
+  // quota is already met by scheduled + pending_approval posts combined,
+  // reopening the app must NOT auto-start the pipeline — the user has
+  // posts waiting for them to review, and burning a fresh cycle on a
+  // full week defeats the "continue generating" mental model.
+  it('does NOT auto-start when weekly quota is already met by scheduled + pending_approval combined', () => {
+    resetDaemon({
+      pipelineEnabled: true,
+      pipelineContinuous: true,
+      weekFillStatus: {
+        targetDays: 7,
+        postsPerDay: 2,
+        scheduledTotal: 4,
+        pendingApprovalTotal: 10,
+        targetTotal: 14,
+        filled: false,
+        percent: 28,
+        days: [],
+      } as unknown,
+    });
+
+    renderHook(() => usePipeline(makeDeps()));
+
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+
+    expect(daemonStub.runOuterLoop).not.toHaveBeenCalled();
+  });
+
+  it('still auto-starts when scheduled + pending_approval combined is below the quota', () => {
+    resetDaemon({
+      pipelineEnabled: true,
+      pipelineContinuous: true,
+      weekFillStatus: {
+        targetDays: 7,
+        postsPerDay: 2,
+        scheduledTotal: 3,
+        pendingApprovalTotal: 5,
+        targetTotal: 14,
+        filled: false,
+        percent: 21,
+        days: [],
+      } as unknown,
+    });
+
+    renderHook(() => usePipeline(makeDeps()));
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
     });
 
     expect(daemonStub.runOuterLoop).toHaveBeenCalledTimes(1);

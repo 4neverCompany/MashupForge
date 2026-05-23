@@ -543,6 +543,28 @@ export function findBestSlot(
 ): { date: string; time: string } {
   const slots = findBestSlots(existingPosts, 1, engagement, options);
   if (slots.length > 0) return { date: slots[0].date, time: slots[0].time };
+  // BUG-2 (2026-05-23) — calendar-analysed retry. When the caller's
+  // options narrow the pick (depth-first, postsPerDay cap, or a
+  // sub-14-day horizon) the picker can return empty even though days
+  // outside the caps still have engagement-scored room. Maurice's bug
+  // report: "after approval, auto-schedule just goes to tomorrow" —
+  // the pipeline path was hitting the absolute fallback below because
+  // every day in the depth-first 7-day window was at postsPerDay.
+  // The manual Auto Schedule button never trips this fallback because
+  // it never sets postsPerDay/fillMode/horizonDays — so we retry once
+  // with those same relaxed options before the tomorrow@19 fallback.
+  const constrained =
+    options != null &&
+    (options.postsPerDay != null ||
+      options.fillMode === 'depth' ||
+      (options.horizonDays != null && options.horizonDays < 14));
+  if (constrained) {
+    const relaxed = findBestSlots(existingPosts, 1, engagement, {
+      platforms: options?.platforms,
+      caps: options?.caps,
+    });
+    if (relaxed.length > 0) return { date: relaxed[0].date, time: relaxed[0].time };
+  }
   // Absolute fallback
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);

@@ -419,6 +419,55 @@ describe('findBestSlot', () => {
     const slot = findBestSlot([], empty);
     expect(slot.time).toBe('19:00');
   });
+
+  // BUG-2 (2026-05-23): when depth-first + postsPerDay saturates every
+  // day in the constrained horizon, retry the pick with breadth-first +
+  // 14-day + no postsPerDay cap (the same shape the manual Auto Schedule
+  // button uses) BEFORE falling through to the tomorrow @ 19:00
+  // absolute fallback. Without this, the pipeline's auto-schedule path
+  // would dump every new post on tomorrow @ 19:00 once the user had
+  // approved/queued enough posts to fill the depth-first window.
+  describe('BUG-2 (2026-05-23): calendar-analysed retry when constrained pick is empty', () => {
+    it('retries with breadth-first when depth-first saturates the 7-day horizon', () => {
+      const eng = makeEngagement();
+      // Saturate days 0..6 with 2 posts each (postsPerDay cap will hit).
+      const existing: ExistingPost[] = [];
+      const start = new Date('2026-04-15T03:00:00Z');
+      for (let d = 0; d < 7; d++) {
+        const day = new Date(start);
+        day.setDate(start.getDate() + d);
+        const dateStr = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+        existing.push({ date: dateStr, time: '20:00', status: 'pending_approval' });
+        existing.push({ date: dateStr, time: '18:00', status: 'pending_approval' });
+      }
+      const slot = findBestSlot(existing, eng, {
+        horizonDays: 7,
+        postsPerDay: 2,
+        fillMode: 'depth',
+      });
+      // The retry path uses 14-day breadth-first with no postsPerDay cap,
+      // so the picker can land a slot somewhere in days 0..13 even though
+      // depth-first refused. Crucially, the picked time must NOT be the
+      // absolute fallback's 19:00 default — calendar analysis picks the
+      // best engagement hour (20:00 is highest in the fixture).
+      expect(slot.time).toBe('20:00');
+    });
+
+    it('does NOT trigger the retry when the caller passes no constraints', () => {
+      // Sanity: an unconstrained call that returns empty (because the
+      // engagement is unusable) must still hit the tomorrow @ 19:00
+      // absolute fallback rather than looping in retry. The empty
+      // engagement makes findBestSlots return [] regardless of options.
+      const empty: CachedEngagement = {
+        hours: [],
+        days: [],
+        fetchedAt: Date.now(),
+        source: 'default',
+      };
+      const slot = findBestSlot([], empty);
+      expect(slot.time).toBe('19:00');
+    });
+  });
 });
 
 describe('loadEngagementData / saveEngagementData', () => {

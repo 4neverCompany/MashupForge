@@ -139,12 +139,29 @@ export function usePipeline(deps: UsePipelineDeps) {
   // honors a session-scoped userStoppedRef, and waits for the resume-
   // checkpoint hydration effect (which sets `pendingResume` async on
   // mount) so a recoverable crash isn't trampled by a fresh auto-start.
+  //
+  // CONTINUE-GEN-QUOTA (BUG-1, 2026-05-23): also skip auto-start when
+  // the weekly content quota is already met by `scheduled` +
+  // `pending_approval` posts combined. The user's mental model is
+  // "if my week is full, don't generate more" — regardless of whether
+  // those posts are awaiting approval. Without this gate, reopening
+  // the app with a queue full of pending approvals would burn a fresh
+  // cycle of ideas + image gen on a week that has nothing left to fill.
+  // The daemon's pre-cycle check at the start of every cycle uses the
+  // same fill measure, but it only fires AFTER runOuterLoop has spun
+  // up; gating here avoids the start-up cost entirely.
+  const quotaAlreadyMet = (() => {
+    const fill = daemon.weekFillStatus;
+    if (!fill) return false;
+    return fill.scheduledTotal + fill.pendingApprovalTotal >= fill.targetTotal;
+  })();
   useEffect(() => {
     if (autoStartFiredRef.current) return;
     if (!daemon.pipelineEnabled || !daemon.pipelineContinuous) return;
     if (daemon.pipelineRunning) return;
     if (userStoppedRef.current) return;
     if (daemon.pendingResume) return;
+    if (quotaAlreadyMet) return;
     // Short delay lets settings hydration / pendingResume async load
     // settle before we kick off a run; keeps the effect from racing
     // those mount-time effects in usePipelineDaemon.
@@ -154,6 +171,7 @@ export function usePipeline(deps: UsePipelineDeps) {
       if (daemon.pipelineRunning) return;
       if (userStoppedRef.current) return;
       if (daemon.pendingResume) return;
+      if (quotaAlreadyMet) return;
       autoStartFiredRef.current = true;
       void startPipeline();
     }, 2000);
@@ -163,6 +181,7 @@ export function usePipeline(deps: UsePipelineDeps) {
     daemon.pipelineContinuous,
     daemon.pipelineRunning,
     daemon.pendingResume,
+    quotaAlreadyMet,
     startPipeline,
   ]);
 
