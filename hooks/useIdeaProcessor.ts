@@ -30,8 +30,7 @@ import {
 import { awaitImagesOrSkip } from '@/lib/image-readiness';
 import { generateNegativePrompt } from '@/lib/negative-prompts';
 import { extractTrademarkNames } from '@/lib/extract-trademark-names';
-import { getAllBlocked, setOutcome } from '@/lib/trademark-outcomes';
-import { MASHUPFORGE_AI_PERSONA } from '@/lib/agent-prompt';
+import { setOutcome } from '@/lib/trademark-outcomes';
 import type { WriteCheckpointBase } from './usePipelineDaemon';
 import { useDesktopConfig } from './useDesktopConfig';
 
@@ -116,39 +115,32 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
   const { isDesktop, credentials: desktopCreds } = useDesktopConfig();
 
   const expandIdeaToPrompt = useCallback(
-    async (idea: Idea, trendingContext?: string): Promise<string> => {
-      const s = getSettings();
-      // TRADEMARK-LEARNING (2026-05-21): inject the learned blocklist into
-      // the system prompt so the upstream prompt-enhance step generalizes
-      // known-bad IP into descriptors instead of writing them out. This
-      // is the "feedback" loop side of the store — pre-flight rewrite
-      // still catches it post-hoc, but front-loading the AI saves a
-      // pipeline step. List grows as the outcome store learns from
-      // future failures.
-      const blockedNames = getAllBlocked();
-      const blockedBlock = blockedNames.length > 0
-        ? `\nTRADEMARKED CHARACTERS TO AVOID (based on past pipeline failures): ${blockedNames.join(', ')}.\nUse generic descriptions instead (e.g. "a spider-powered hero" instead of "Spider-Man").\n`
-        : '';
-      // AI-ROLE-REDESIGN (2026-05-22): Content Pillars / Style Tags
-      // labels replace the prior "Active Niches / Active Genres"
-      // vocabulary. The settings keys (agentNiches/agentGenres) are
-      // unchanged for storage back-compat. Persona fallback also
-      // upgraded to the MashupForge AI co-pilot framing.
-      const systemContext = `${s.agentPrompt || MASHUPFORGE_AI_PERSONA}
-Content Pillars: ${s.agentNiches?.join(', ') || 'None — operate on the idea concept alone'}.
-Style Tags: ${s.agentGenres?.join(', ') || 'None — let the idea concept guide style'}.
-
-Mode: prompt expansion. Take this content idea and produce a single, highly detailed image generation prompt (40-60 words). Honor the Content Pillars and Style Tags above as your orientation.
-${trendingContext ? `\nCURRENT TRENDING CONTEXT — weave relevant trends into the prompt to make it timely and shareable:\n${trendingContext}\n` : ''}${blockedBlock}
-Return ONLY the prompt text, nothing else.`;
-
-      const text = await streamAIToString(
-        `${systemContext}\n\nIdea concept: ${idea.concept}\n${idea.context ? `Additional context: ${idea.context}` : ''}\n\nGenerate a single detailed image prompt for this idea.`,
-        { mode: 'enhance', provider: s.activeAiAgent },
-      );
-      return text.trim() || idea.concept;
+    async (idea: Idea, _trendingContext?: string): Promise<string> => {
+      // IMG-INVEST-001 PART 2 (2026-05-23): no our-side prompt
+      // enhancement in Pipeline mode. The idea's concept (and optional
+      // context) goes to Leonardo VERBATIM; Leonardo's API-side
+      // prompt_enhance=ON expands the short concept into a full image
+      // prompt. We deliberately do NOT call streamAIToString here.
+      //
+      // Smart-suggestion (style/quality/aspect ratio) is unaffected:
+      // it lives in suggestParametersAI further down the
+      // triggerImageGeneration path and is a parameter picker, not a
+      // prompt rewriter.
+      //
+      // The trademark blocklist hint that used to be injected into the
+      // LLM system prompt is no longer load-bearing — the post-flight
+      // TRADEMARK-STAGED-PIPELINE retry in useImageGeneration's
+      // submitWithOneRetry still substitutes blocked names if Leonardo
+      // moderation fires, and the per-model blocklist (Issue 2) learns
+      // from each failure to suppress future attempts.
+      const trimmedConcept = idea.concept.trim();
+      const trimmedContext = idea.context?.trim();
+      if (trimmedConcept && trimmedContext) {
+        return `${trimmedConcept}. ${trimmedContext}`;
+      }
+      return trimmedConcept || idea.concept;
     },
-    [getSettings],
+    [],
   );
 
   const processIdea = useCallback(

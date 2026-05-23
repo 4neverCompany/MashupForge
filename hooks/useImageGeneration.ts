@@ -1000,7 +1000,11 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
                 styleIds: sharedStyleIds,
                 quality: sharedQuality,
                 negativePrompt: generatedNegativePrompt,
-                promptEnhance: enhanced.leonardo.promptEnhance,
+                // IMG-INVEST-001 PART 2: force Leonardo's API-side enhancement ON
+              // for Manual + Pipeline regardless of per-model spec default.
+              // Brief: "we do NOT touch/improve prompts ourselves; Leonardo's
+              // prompt_enhance handles all expansion."
+              promptEnhance: 'ON',
               },
               {
                 systemPrompt: settings.agentPrompt,
@@ -1021,7 +1025,11 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
                 styleIds: sharedStyleIds,
                 apiKey: settings.apiKeys.leonardo,
                 quality: sharedQuality,
-                promptEnhance: enhanced.leonardo.promptEnhance,
+                // IMG-INVEST-001 PART 2: force Leonardo's API-side enhancement ON
+              // for Manual + Pipeline regardless of per-model spec default.
+              // Brief: "we do NOT touch/improve prompts ourselves; Leonardo's
+              // prompt_enhance handles all expansion."
+              promptEnhance: 'ON',
               },
               { onRetry: onModerationBlock },
               settings.activeAiAgent,
@@ -1121,21 +1129,17 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
         }
       };
 
-      let enhancedPrompt = prompt;
-      try {
-        enhancedPrompt = await streamAIToString(
-          `Platform Niches: ${settings.agentNiches?.join(', ') || 'None'}.
-Target Genres: ${settings.agentGenres?.join(', ') || 'None'}.
-The user wants to re-roll an image based on this idea: "${prompt}". Enhance this idea into a highly detailed, cinematic image generation prompt. You MUST strictly limit the content to ONLY these franchises: Star Wars, Marvel, DC, and Warhammer 40k. Focus heavily on "what if" scenarios, alternative universes, different timelines, and epic crossovers. Return ONLY the enhanced prompt as a single string.`,
-          { mode: 'enhance', provider: settings.activeAiAgent, model: settings.activeTextModel }
-        );
-      } catch {
-        // enhancement failed — proceed with original prompt
-      }
-
+      // IMG-INVEST-001 PART 2 (2026-05-23): no our-side prompt
+      // enhancement in Manual mode. The user's existing prompt goes to
+      // Leonardo VERBATIM; Leonardo's API-side prompt_enhance=ON does
+      // any necessary expansion. Previously this path ran a
+      // streamAIToString LLM rewrite that constrained re-rolls to
+      // Star Wars / Marvel / DC / Warhammer 40k — that was both an
+      // our-side enhancement (against spec) AND an unwanted franchise
+      // filter for users who had broader content pillars in Settings.
       const finalPrompt = options?.negativePrompt
-        ? `${enhancedPrompt}\nDo not include: ${options.negativePrompt}`
-        : enhancedPrompt;
+        ? `${prompt}\nDo not include: ${options.negativePrompt}`
+        : prompt;
 
       // Apply the per-model prompt + parameter tuning on top of the
       // reroll enhancement so rerolls also pick the best aspect ratio
@@ -1226,7 +1230,11 @@ The user wants to re-roll an image based on this idea: "${prompt}". Enhance this
               styleIds: sharedStyleIds,
               quality: sharedQuality,
               negativePrompt: modelNegPrompt,
-              promptEnhance: enhanced.leonardo.promptEnhance,
+              // IMG-INVEST-001 PART 2: force Leonardo's API-side enhancement ON
+              // for Manual + Pipeline regardless of per-model spec default.
+              // Brief: "we do NOT touch/improve prompts ourselves; Leonardo's
+              // prompt_enhance handles all expansion."
+              promptEnhance: 'ON',
             },
             {
               systemPrompt: settings.agentPrompt,
@@ -1247,7 +1255,11 @@ The user wants to re-roll an image based on this idea: "${prompt}". Enhance this
               styleIds: sharedStyleIds,
               apiKey: settings.apiKeys.leonardo,
               quality: sharedQuality,
-              promptEnhance: enhanced.leonardo.promptEnhance,
+              // IMG-INVEST-001 PART 2: force Leonardo's API-side enhancement ON
+              // for Manual + Pipeline regardless of per-model spec default.
+              // Brief: "we do NOT touch/improve prompts ourselves; Leonardo's
+              // prompt_enhance handles all expansion."
+              promptEnhance: 'ON',
             },
             { onRetry: onModerationBlock },
             settings.activeAiAgent,
