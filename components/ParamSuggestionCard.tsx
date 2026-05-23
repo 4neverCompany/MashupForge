@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Lightbulb, Check, X, Edit3 } from 'lucide-react';
 import type {
   ParamSuggestion,
@@ -46,7 +46,17 @@ export function ParamSuggestionCard({
   const [perModel, setPerModel] = useState<Record<string, PerModelSuggestion>>(
     () => structuredClone(suggestion.perModel),
   );
-  const [modelIds, setModelIds] = useState<string[]>(suggestion.modelIds);
+  const [modelIds, setModelIds] = useState<string[]>(() => [...suggestion.modelIds]);
+
+  // Resync local editable state when a fresh suggestion arrives. Without
+  // this, the card keeps showing the previous suggestion's modelIds /
+  // perModel until the user toggles the card off and on — which is the
+  // "press suggest twice" bug.
+  useEffect(() => {
+    setPerModel(structuredClone(suggestion.perModel));
+    setModelIds([...suggestion.modelIds]);
+    setEditMode(false);
+  }, [suggestion]);
 
   const updateImageField = <K extends keyof PerModelImageSuggestion>(
     modelId: string,
