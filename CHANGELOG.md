@@ -2,6 +2,11 @@
 
 All notable changes to MashupForge are documented in this file.
 
+## [0.9.48] — 2026-05-24
+
+### Docs
+- **qa:** add v0.9.47 review (1089/1089 passing)
+
 ## [0.9.47] — 2026-05-23
 
 ### Fixed
