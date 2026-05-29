@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { get, set } from 'idb-keyval';
+// BUG-DEV-012: persisted through `@/lib/persistence` so the last comparison
+// result survives a folder move on Windows (WebView2 IndexedDB fix).
+import { get, set } from '@/lib/persistence';
 import { enhancePromptForModel } from '@/lib/modelOptimizer';
 import { buildEnhancedPrompt } from '@/lib/image-prompt-builder';
 import { streamAIToString } from '@/lib/aiClient';

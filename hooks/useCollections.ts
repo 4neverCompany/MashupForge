@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { get, set } from 'idb-keyval';
+// BUG-DEV-012: persisted through `@/lib/persistence` so collections survive
+// a folder move on Windows (WebView2 IndexedDB partitioning fix).
+import { get, set } from '@/lib/persistence';
 import { type Collection, type GeneratedImage, type UserSettings } from '../types/mashup';
 import { streamAIToString } from '@/lib/aiClient';
 

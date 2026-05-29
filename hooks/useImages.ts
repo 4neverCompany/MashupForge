@@ -1,7 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { get, set } from 'idb-keyval';
+// BUG-DEV-012: persistence goes through `@/lib/persistence` (tauri-plugin-
+// store in production, idb-keyval fallback in dev/test). The IDB key name
+// stays the same so the migration runner in persistence.ts can detect any
+// pre-fix value and copy it forward on first launch.
+import { get, set } from '@/lib/persistence';
 import { type GeneratedImage } from '../types/mashup';
 
 // Normalize images on load: rewrite legacy tag spelling and reset any

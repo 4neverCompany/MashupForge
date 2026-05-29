@@ -1,7 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { get, set } from 'idb-keyval';
+// BUG-DEV-012: persistence goes through `@/lib/persistence` (tauri-plugin-
+// store in production, idb-keyval fallback in dev/test). The "IDB"
+// references in the comments below stay accurate as a fallback path; on
+// Tauri they really hit `%APPDATA%\com.4nevercompany.mashupforge\
+// mashupforge.json` and survive folder moves.
+import { get, set } from '@/lib/persistence';
 import { type UserSettings, defaultSettings } from '../types/mashup';
 import { applyV040AutoApproveMigration } from '../lib/pipeline-daemon-utils';
 
