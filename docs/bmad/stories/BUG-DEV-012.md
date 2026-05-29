@@ -1,6 +1,7 @@
 # BUG-DEV-012 — WebView2 partition data loss fix
 
 **Status:** Implemented (2026-05-30, awaiting QA)
+**Commit:** `c64115b` — `fix(persistence): route user data through tauri-plugin-store — fixes #12`
 **Classification:** complex (persistence migration)
 **Origin:** GitHub Issue #12 — "Bug: Moving the app folder wipes all saved images and scheduled posts"
 **Brief:** `docs/bmad/briefs/move-folder-data-loss.md`
