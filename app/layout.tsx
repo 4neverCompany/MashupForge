@@ -4,6 +4,7 @@ import './globals.css';
 import { Toast } from '@/components/Toast';
 import { UpdateChecker } from '@/components/UpdateChecker';
 import { FirstRunBanner } from '@/components/FirstRunBanner';
+import { StartupReconciler } from '@/components/post-lifecycle/StartupReconciler';
 
 // AETHER SANS → Space Grotesk: geometric tech sans, distinctive letterforms,
 // futuristic feel that matches the 4neverCompany dark studio aesthetic.
@@ -55,6 +56,7 @@ export default function RootLayout({
         <Toast />
         <UpdateChecker />
         <FirstRunBanner />
+        <StartupReconciler />
       </body>
     </html>
   );
