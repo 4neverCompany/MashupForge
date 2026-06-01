@@ -6,7 +6,8 @@
   "build": {
     "frontendDist": "../src-tauri/frontend-stub",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "npm run dev"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
@@ -27,7 +28,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' https://cdn.leonardo.ai https://picsum.photos data:; connect-src 'self' ipc: https://ipc.localhost https://cdn.leonardo.ai https://api.minimaxi.chat https://generativelanguage.googleapis.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
     }
   },
   "bundle": {
