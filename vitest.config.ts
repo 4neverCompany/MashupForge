@@ -21,7 +21,7 @@ export default defineConfig({
     // per-file `// @vitest-environment jsdom` directive was correct
     // before React 19 / RTL 16, but the upgrade makes jsdom the
     // sensible default.
-    include: ['tests/**/*.test.{ts,tsx}'],
+    include: ['tests/**/*.test.{ts,tsx}', 'lib/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
     setupFiles: ['./tests/setup/react-act.ts', './tests/setup/jest-dom.ts'],
   },
