@@ -82,7 +82,7 @@ describe('buildDefaultAgentPrompt — V080-DES-003', () => {
   it('exports the curated default tag lists for the SettingsModal reset', () => {
     expect(DEFAULT_NICHES.length).toBeGreaterThanOrEqual(10);
     expect(DEFAULT_GENRES.length).toBeGreaterThanOrEqual(10);
-    expect(DEFAULT_NICHES).toContain('Multiverse Mashup');
+    expect(DEFAULT_NICHES).toContain('Multiverse Crossovers');
     expect(DEFAULT_GENRES).toContain('Cinematic Crossovers');
   });
 });

@@ -116,7 +116,7 @@ function MashupApp() {
           </div>
           <div>
             <h2 className="text-xl font-bold text-white mb-1">Access Restricted</h2>
-            <p className="text-zinc-500 text-sm">Please log in to access the Multiverse Mashup Studio.</p>
+            <p className="text-zinc-500 text-sm">Please log in to access MashupForge.</p>
           </div>
         </div>
       </div>

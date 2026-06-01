@@ -1,5 +1,5 @@
 {
-  "name": "ai-studio-applet",
+  "name": "mashupforge",
   "version": "0.9.48",
   "private": true,
   "scripts": {
@@ -10,6 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "precommit": "tsc --noEmit && vitest run",
+    "typecheck": "tsc --noEmit",
+    "test:ci": "vitest run --reporter=verbose",
     "prepare": "simple-git-hooks",
     "clean": "next clean",
     "tauri": "tauri",
@@ -34,10 +36,12 @@
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-process": "^2",
+    "@tauri-apps/plugin-sql": "^2.0.0",
     "@tauri-apps/plugin-store": "^2",
     "@tauri-apps/plugin-updater": "2.10.1",
     "ai": "^6.0.191",
     "autoprefixer": "^10.5.0",
+    "idb": "^8.0.0",
     "idb-keyval": "^6.2.4",
     "lucide-react": "^1.16.0",
     "motion": "^12.40.0",
@@ -50,6 +54,7 @@
     "twitter-api-v2": "^1.29.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.10",
     "@tailwindcss/postcss": "^4.3.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tauri-apps/api": "^2.11.0",
@@ -61,8 +66,10 @@
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19",
+    "better-sqlite3": "^11.3.0",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.6",
+    "fake-indexeddb": "^6.0.0",
     "jsdom": "^29.0.2",
     "simple-git-hooks": "^2.13.1",
     "tailwindcss": "4.3.0",

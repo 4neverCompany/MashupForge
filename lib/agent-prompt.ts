@@ -18,7 +18,7 @@
  */
 
 export const DEFAULT_NICHES: readonly string[] = [
-  'Multiverse Mashup',
+  'Multiverse Crossovers',
   'Fan Fiction & Lore',
   'Merchandise & Collectibles',
   'Cosplay & Fan Art',

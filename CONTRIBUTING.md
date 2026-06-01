@@ -2,6 +2,13 @@
 
 Thanks for your interest in MashupForge. This guide covers what you need to get a dev loop going and what we expect from a contribution.
 
+> **Note:** MashupForge is licensed under AGPL-3.0-or-later. If you
+> are planning a derivative work, a hosted service, or a commercial
+> fork, please read the license terms carefully — AGPL §5 (network use
+> clause) requires source disclosure for modified versions run as a
+> network service. If you have questions, open a discussion thread
+> before sending a PR.
+
 ## Prerequisites
 
 - **Node.js 18+** (20 LTS recommended)
@@ -84,17 +91,11 @@ PRs are reviewed by the team. Expect iteration — review feedback is the point 
 
 ## Brand Kit
 
-UI work must respect the 4neverCompany brand kit. Do not improvise colors.
-
-| Token | Hex | Use for |
-| --- | --- | --- |
-| Agency Black | `#050505` | Backgrounds |
-| Metallic Gold | `#C5A062` | Borders, accents, highlights |
-| Electric Blue | `#00E6FF` | Buttons, active states, links |
-
-- **Fonts:** AETHER SANS (headings/body), NEXUS MONO (technical/code).
-- **Mode:** Dark mode is the default and the only fully supported mode.
-- **Aesthetic:** Premium, tech/circuit-board, restrained.
+UI work must respect the 4neverCompany brand kit. Do not improvise colors
+or fonts — the canonical tokens (Agency Black `#050505`, Metallic Gold
+`#C5A062`, Electric Blue `#00E6FF`; AETHER SANS / NEXUS MONO type
+families) are consolidated in [`BRAND.md`](./BRAND.md) at the repo root.
+Read that file first; treat it as the single source of truth.
 
 For any deeper design questions, tag a Designer reviewer on your PR.
 
@@ -107,4 +108,13 @@ Use the templates in `.github/ISSUE_TEMPLATE/`:
 
 ## License
 
-By contributing you agree that your contributions are licensed under the project's proprietary license (© 4neverCompany).
+MashupForge is open source, licensed under the **GNU Affero General
+Public License v3.0 or later** (AGPL-3.0-or-later). See [`LICENSE`](./LICENSE)
+for the full text, or https://www.gnu.org/licenses/agpl-3.0.html for a
+human-readable summary.
+
+By contributing to this repository, you agree that your contributions
+will be licensed under the same AGPL-3.0-or-later license. You also
+confirm that you have the right to submit the contribution under those
+terms (e.g. it is your original work, or you have explicit permission
+from the original copyright holder).

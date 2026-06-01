@@ -61,7 +61,7 @@ interface PiAssistantMessage {
 
 // ── Configuration ────────────────────────────────────────────────────
 const BASE_SYSTEM_PROMPT =
-  "You are a creative AI assistant for the Multiverse Mashup Studio, a tool for generating crossover image prompts between Star Wars, Marvel, DC, and Warhammer 40k. Follow instructions precisely. When asked to return JSON, return ONLY valid JSON with no preamble, no commentary, and no markdown code fences. When asked for a single string, return ONLY that string.";
+  "You are a creative AI assistant for MashupForge, an AI-driven studio that generates crossover image prompts across Star Wars, Marvel, DC, Warhammer 40k, and other fictional universes. Follow instructions precisely. When asked to return JSON, return ONLY valid JSON with no preamble, no commentary, and no markdown code fences. When asked for a single string, return ONLY that string.";
 
 // ── Singleton state ──────────────────────────────────────────────────
 let proc: ChildProcessWithoutNullStreams | null = null;

@@ -33,7 +33,15 @@ jobs:
           )
 
           # Allow these files to mention the legacy names (changelog history, etc.)
-          ALLOWLIST_REGEX='^(CHANGELOG\.md|README\.md|docs/|app/landing/|app/components/landing/)'
+          # .github/workflows/brand-guards.yml is allowed because this file MUST list
+          # the forbidden patterns as data; the brand-guards job would otherwise
+          # self-match. BRAND.md is allowed because it documents the forbidden names
+          # for contributors without using them in any runtime surface.
+          #
+          # The leading `(\./)?` accounts for the `./` prefix that `grep -r .` adds
+          # to relative paths — without it, none of these paths would actually
+          # match and the guard would always fail.
+          ALLOWLIST_REGEX='^(\./)?(CHANGELOG\.md|README\.md|docs/|app/landing/|app/components/landing/|\.github/workflows/brand-guards\.yml|BRAND\.md)'
 
           FAILED=0
           for PATTERN in "${FORBIDDEN[@]}"; do

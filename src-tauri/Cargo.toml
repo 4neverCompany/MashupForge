@@ -3,7 +3,7 @@ name = "app"
 version = "0.9.48"
 description = "MashupForge — AI-driven multiverse crossover content studio (Tauri desktop shell)"
 authors = ["Maurice (4neverCompany)"]
-license = "Proprietary"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/Code4neverCompany/MashupForge"
 homepage = "https://github.com/Code4neverCompany/MashupForge"
 edition = "2021"
@@ -29,3 +29,4 @@ tauri-plugin-autostart = "2"
 tauri-plugin-updater = "=2.10.1"
 tauri-plugin-store = "2"
 tauri-plugin-process = "2"
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }

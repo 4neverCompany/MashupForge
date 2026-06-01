@@ -24,8 +24,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Multiverse Mashup Studio',
-  description: 'Generate crossover images from famous fantasy universes and animate them with Veo.',
+  title: 'MashupForge',
+  description: 'Generate crossover images across multiple AI providers (Leonardo.ai, MiniMax, GPT Image, Nano Banana) and post to Instagram / Twitter via an autonomous pipeline.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,

@@ -1,6 +1,6 @@
 {
-  "name": "Multiverse Mashup Studio",
-  "short_name": "Mashup Studio",
+  "name": "MashupForge",
+  "short_name": "MashupForge",
   "description": "Generate crossover images from famous fantasy universes — Marvel, DC, Star Wars, Warhammer 40k and more.",
   "start_url": "/",
   "scope": "/",

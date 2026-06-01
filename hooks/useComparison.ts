@@ -450,7 +450,7 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
       ...(settings.watermark || { enabled: false, image: null, position: 'bottom-right', opacity: 0.8, scale: 0.05 }),
       enabled: true,
     };
-    finalUrl = await applyWatermark(finalUrl, watermarkSettings, settings.channelName || 'Multiverse Mashup');
+    finalUrl = await applyWatermark(finalUrl, watermarkSettings, settings.channelName || 'MashupForge');
     finalBase64 = undefined;
 
     const galleryImg: GeneratedImage = {

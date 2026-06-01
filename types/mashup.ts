@@ -369,7 +369,7 @@ export interface PipelineProgress {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 export const RECOMMENDED_NICHES = [
-  'Multiverse Mashup',
+  'Multiverse Crossovers',
   'Fan Fiction & Lore',
   'Merchandise & Collectibles',
   'Cosplay & Fan Art',
@@ -904,7 +904,7 @@ export const defaultSettings: UserSettings = {
     scale: 0.15
   },
   agentNiches: [
-    'Multiverse Mashup',
+    'Multiverse Crossovers',
     'Fan Fiction & Lore',
     'Merchandise & Collectibles',
     'Cosplay & Fan Art',

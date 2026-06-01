@@ -14,7 +14,7 @@
 [![Leonardo.ai](https://img.shields.io/badge/Leonardo.ai-v2-C5A062?style=for-the-badge)](https://leonardo.ai)
 [![pi.dev](https://img.shields.io/badge/pi.dev-RPC-00E6FF?style=for-the-badge)](https://pi.dev)
 
-[![License](https://img.shields.io/badge/License-Proprietary-050505?style=flat-square)](#license)
+[![License](https://img.shields.io/badge/License-AGPL--3.0--or--later-050505?style=flat-square)](./LICENSE)
 [![Version](https://img.shields.io/badge/version-0.9.45-C5A062?style=flat-square)](package.json)
 
 ![MashupForge — AI-Powered Creative Crossover Studio](assets/hero.svg)
@@ -141,7 +141,11 @@ Bug report? Feature idea? Open an issue — templates are under `.github/ISSUE_T
 
 ## License
 
-Proprietary — © 4neverCompany. All rights reserved.
+MashupForge is open source, licensed under the **GNU Affero General
+Public License v3.0 or later** (AGPL-3.0-or-later). See
+[`LICENSE`](./LICENSE) for the full text, or
+https://www.gnu.org/licenses/agpl-3.0.html for a human-readable
+summary. The `NOTICE` file lists third-party attributions.
 
 ---
 

@@ -110,7 +110,7 @@ export function DesktopLoadingScreen() {
         style={{ color: 'rgba(0,230,255,0.45)' }}
         aria-hidden="true"
       >
-        Multiverse Mashup Studio
+        MashupForge
       </div>
 
       {/* ── Gold rule ── */}
