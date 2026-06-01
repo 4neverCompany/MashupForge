@@ -1,0 +1,131 @@
+# Brand / version / lockfile guard checks
+# Runs on every PR to enforce the §2 batch rules:
+#   1. Brand name consistency (no "ai-studio-applet" or "Multiverse Mashup Studio")
+#   2. Version sync (package.json, Cargo.toml, tauri.conf.json)
+#   3. bun.lock is newer than package-lock.json
+#   4. No `as any` in src/
+name: Brand & Version Guards
+
+on:
+  pull_request:
+    branches: [main, 'release/*']
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  brand-name:
+    name: Brand name consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for forbidden legacy brand names
+        run: |
+          # Forbidden patterns from §1.2 of the analysis
+          FORBIDDEN=(
+            "ai-studio-applet"
+            "Multiverse Mashup Studio"
+            "Multiverse Mashup"
+            "Remix: Remix"
+          )
+
+          # Allow these files to mention the legacy names (changelog history, etc.)
+          ALLOWLIST_REGEX='^(CHANGELOG\.md|README\.md|docs/|app/landing/|app/components/landing/)'
+
+          FAILED=0
+          for PATTERN in "${FORBIDDEN[@]}"; do
+            HITS=$(grep -rEn --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=target --exclude-dir=.git "$PATTERN" . 2>/dev/null \
+              | grep -Ev "$ALLOWLIST_REGEX" || true)
+            if [ -n "$HITS" ]; then
+              echo "❌ Found forbidden legacy brand name: $PATTERN"
+              echo "$HITS"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "These files still reference the old product names."
+            echo "Use 'MashupForge' consistently. See §1.2 of the project analysis."
+            exit 1
+          fi
+          echo "✅ Brand name consistency OK"
+
+  version-sync:
+    name: Version sync (package.json / Cargo.toml / tauri.conf.json)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract and compare versions
+        run: |
+          # Read versions from the three sources
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          CARGO_VERSION=$(grep -E '^version\s*=' src-tauri/Cargo.toml | head -1 | sed -E 's/^version\s*=\s*"([^"]+)".*/\1/')
+          TAURI_VERSION=$(node -p "require('./src-tauri/tauri.conf.json').version")
+
+          echo "package.json:     $PKG_VERSION"
+          echo "Cargo.toml:       $CARGO_VERSION"
+          echo "tauri.conf.json:  $TAURI_VERSION"
+
+          if [ "$PKG_VERSION" != "$CARGO_VERSION" ] || [ "$PKG_VERSION" != "$TAURI_VERSION" ]; then
+            echo ""
+            echo "❌ Version mismatch across manifests."
+            echo "All three files must declare the same version. See §1.1 of the project analysis."
+            exit 1
+          fi
+          echo "✅ Version sync OK"
+
+  lockfile-freshness:
+    name: bun.lock freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check bun.lock vs package-lock.json
+        run: |
+          if [ ! -f bun.lock ]; then
+            echo "❌ bun.lock missing. The project is bun-primary; bun.lock must be committed."
+            exit 1
+          fi
+
+          if [ ! -f package-lock.json ]; then
+            echo "⚠️ package-lock.json missing. That's expected if bun has always worked — OK."
+            exit 0
+          fi
+
+          BUN_MTIME=$(stat -c %Y bun.lock)
+          NPM_MTIME=$(stat -c %Y package-lock.json)
+
+          if [ "$BUN_MTIME" -lt "$NPM_MTIME" ]; then
+            echo "❌ package-lock.json is newer than bun.lock."
+            echo "Someone ran 'npm install' without retrying 'bun install'."
+            echo "Run: bun install && git add bun.lock"
+            exit 1
+          fi
+
+          echo "✅ bun.lock is fresh (or newer than package-lock.json)"
+
+  no-any:
+    name: No `as any` in src/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Search for as any casts
+        run: |
+          # Search for "as any" in app/, components/, lib/, hooks/, types/
+          # Exclude node_modules, .next, and the AGPL-3.0-or-later string match
+          HITS=$(grep -rEn '\bas\s+any\b' \
+            --include='*.ts' --include='*.tsx' \
+            --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=target \
+            app/ components/ lib/ hooks/ types/ 2>/dev/null || true)
+
+          if [ -n "$HITS" ]; then
+            echo "❌ Found 'as any' casts in src/. CONTRIBUTING.md says no any — use 'unknown' and narrow."
+            echo "$HITS"
+            echo ""
+            echo "If a cast is genuinely necessary, add an ESLint disable comment with a justification."
+            exit 1
+          fi
+          echo "✅ No 'as any' casts in src/"

@@ -1,0 +1,19 @@
+# CODEOWNERS — MashupForge v1.0
+# Lines are evaluated in order; the LAST matching pattern wins.
+# Replace placeholder team handles with real @org/team slugs before
+# opening the v1.0 PR (see docs/RELEASING.md for the checklist).
+
+# Default: maintainer team owns everything
+*                       @4nevercompany/maintainers
+
+# Tauri shell needs desktop review
+/src-tauri/             @4nevercompany/desktop-reviewer
+
+# API routes need backend review
+/app/api/               @4nevercompany/backend-reviewer
+
+# CI changes need infra review
+/.github/               @4nevercompany/infra-reviewer
+
+# Brand/legal changes need brand review
+/LICENSE /SECURITY.md /NOTICE /BRAND.md /CONTRIBUTING.md   @4nevercompany/brand-reviewer
