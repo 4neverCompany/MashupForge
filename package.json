@@ -1,6 +1,6 @@
 {
   "name": "mashupforge",
-  "version": "0.9.48",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
