@@ -122,7 +122,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           LEONARDO_API_KEY: ${{ secrets.LEONARDO_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: bunx tauri build --target nsis
+        run: bunx tauri build
 
       # MUSTFIX-001: npm fallback. Reinstall with npm so node_modules
       # has the .bin shims `npx` needs, then retry the Tauri build.
@@ -137,7 +137,7 @@ jobs:
         run: |
           echo "::warning::Bun-driven Tauri build failed (tauri_bun=${{ steps.tauri_bun.outcome }}). Reinstalling with npm and retrying."
           npm ci
-          npx tauri build --target nsis
+          npx tauri build
 
       - name: Find installer artifacts
         id: find
