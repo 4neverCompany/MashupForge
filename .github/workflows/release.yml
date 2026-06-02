@@ -96,13 +96,36 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Build Tauri (NSIS, signed)
-        run: npx tauri build --target nsis
+      # MUSTFIX-001: use `bunx` (Bun's bin resolver) because Bun does
+      # not populate node_modules/.bin the way npm does, so `npx tauri`
+      # fails with "could not determine executable to run" when Bun did
+      # the install step above. continue-on-error so a real tauri build
+      # failure (not a CLI resolution issue) drops to the npm fallback.
+      - name: Build Tauri (NSIS, signed, Bun)
+        id: tauri_bun
+        continue-on-error: true
+        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           LEONARDO_API_KEY: ${{ secrets.LEONARDO_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: bunx tauri build --target nsis
+
+      # MUSTFIX-001: npm fallback. Reinstall with npm so node_modules
+      # has the .bin shims `npx` needs, then retry the Tauri build.
+      - name: Build Tauri (NSIS, signed, npm fallback)
+        if: steps.tauri_bun.outcome == 'failure'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          LEONARDO_API_KEY: ${{ secrets.LEONARDO_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          echo "::warning::Bun-driven Tauri build failed (tauri_bun=${{ steps.tauri_bun.outcome }}). Reinstalling with npm and retrying."
+          npm ci
+          npx tauri build --target nsis
 
       - name: Find installer artifacts
         id: find
