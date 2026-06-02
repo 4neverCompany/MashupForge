@@ -827,7 +827,14 @@ pub fn run() {
                         &log_dir_bg,
                         &format!("next server up on 127.0.0.1:{}", port),
                     );
-                    let url_str = format!("http://127.0.0.1:{}", port);
+                    // Navigate to the studio route, not root. The landing
+                    // page (root) is the marketing surface — the desktop app
+                    // should drop the user directly into the studio.
+                    // /studio was renamed from /app in the post-1.0 refactor;
+                    // 0620-fix: failing to update this URL caused the desktop
+                    // to show a 404 (it loaded the landing page root, which
+                    // is not a redirect target).
+                    let url_str = format!("http://127.0.0.1:{}/studio", port);
                     match tauri::Url::parse(&url_str) {
                         Ok(url) => match handle.get_webview_window("main") {
                             Some(window) => {
