@@ -1,155 +1,155 @@
 'use client';
 
-import { Globe } from 'lucide-react';
+import { motion } from 'motion/react';
 
-// Lucide 1.8.0 (this project's version) does not ship brand icons,
-// so GitHub is inlined. Path from simple-icons (CC0).
-function GithubMark(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path d="M12 .5C5.73.5.75 5.48.75 11.75c0 4.95 3.21 9.15 7.66 10.63.56.1.77-.24.77-.54 0-.27-.01-1.16-.02-2.11-3.12.68-3.78-1.32-3.78-1.32-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.68.08-.68 1.13.08 1.73 1.16 1.73 1.16 1 .71 2.63 1.21 3.27.93.1-.72.39-1.21.7-1.49-2.49-.28-5.11-1.24-5.11-5.52 0-1.22.44-2.22 1.15-3-.12-.28-.5-1.42.11-2.95 0 0 .94-.3 3.07 1.15.89-.25 1.84-.37 2.79-.37.95 0 1.9.12 2.79.37 2.13-1.45 3.07-1.15 3.07-1.15.61 1.53.23 2.67.11 2.95.72.78 1.15 1.78 1.15 3 0 4.29-2.62 5.24-5.12 5.51.4.35.76 1.03.76 2.08 0 1.5-.01 2.71-.01 3.08 0 .3.2.65.78.54 4.44-1.48 7.65-5.68 7.65-10.63C23.25 5.48 18.27.5 12 .5z" />
-    </svg>
-  );
-}
-
-interface FooterLink {
-  label: string;
-  href: string;
-  external?: boolean;
-}
-
-const COLUMNS: Array<{ heading: string; links: FooterLink[] }> = [
+const linkGroups: Array<{ title: string; links: Array<{ label: string; href: string }> }> = [
   {
-    heading: 'Product',
+    title: 'Product',
     links: [
       { label: 'Launch Studio', href: '/studio' },
-      { label: 'Features', href: '#features' },
+      { label: 'Latest release', href: 'https://github.com/Code4neverCompany/MashupForge/releases/latest' },
+      { label: 'Roadmap', href: 'https://github.com/Code4neverCompany/MashupForge/issues' },
+      { label: 'Brand kit', href: 'https://github.com/Code4neverCompany/MashupForge/blob/main/BRAND.md' },
     ],
   },
   {
-    heading: 'Resources',
+    title: 'Source',
     links: [
-      {
-        label: 'GitHub',
-        href: 'https://github.com/Code4neverCompany/MashupForge',
-        external: true,
-      },
-      {
-        label: 'Leonardo.ai',
-        href: 'https://leonardo.ai',
-        external: true,
-      },
-      {
-        label: 'pi.dev',
-        href: 'https://pi.dev',
-        external: true,
-      },
+      { label: 'Repository', href: 'https://github.com/Code4neverCompany/MashupForge' },
+      { label: 'Contributing', href: 'https://github.com/Code4neverCompany/MashupForge/blob/main/CONTRIBUTING.md' },
+      { label: 'Security', href: 'https://github.com/Code4neverCompany/MashupForge/blob/main/SECURITY.md' },
+      { label: 'License (AGPL-3.0)', href: 'https://github.com/Code4neverCompany/MashupForge/blob/main/LICENSE' },
     ],
   },
   {
-    heading: 'Company',
+    title: 'Company',
     links: [
-      {
-        label: '4neverCompany',
-        href: 'https://4nevercompany.com',
-        external: true,
-      },
+      { label: '4neverCompany', href: 'https://4nevercompany.com' },
       { label: 'Contact', href: 'mailto:hello@4nevercompany.com' },
+      { label: 'Changelog', href: 'https://github.com/Code4neverCompany/MashupForge/releases' },
+      { label: 'Status', href: 'https://github.com/Code4neverCompany/MashupForge' },
     ],
   },
 ];
 
 export function Footer() {
   return (
-    <footer
-      aria-labelledby="footer-heading"
-      className="relative bg-[#050505] px-6 pt-16 pb-10"
-    >
-      <h2 id="footer-heading" className="sr-only">
-        Footer
-      </h2>
-
+    <footer className="relative overflow-hidden border-t border-white/5 bg-[#050505] pb-12 pt-20 sm:pt-24">
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#c5a062]/25 to-transparent"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px"
+        style={{
+          background:
+            'linear-gradient(to right, transparent, rgba(197,160,98,0.4), rgba(0,230,255,0.4), transparent)',
+        }}
       />
-
-      <div className="mx-auto max-w-6xl">
-        <div className="grid gap-12 lg:grid-cols-5">
-          <div className="lg:col-span-2">
-            <div className="flex items-center gap-3">
-              <div
-                aria-hidden="true"
-                className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#c5a062]/40 bg-[#c5a062]/10"
+      <div className="mx-auto max-w-7xl px-6">
+        <div className="grid grid-cols-1 gap-12 lg:grid-cols-12 lg:gap-8">
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="lg:col-span-5"
+          >
+            <a href="#top" className="inline-flex items-center gap-2.5">
+              <span className="relative inline-flex h-7 w-7 items-center justify-center">
+                <span className="absolute inset-0 rounded-md bg-gradient-to-br from-amber-400 via-amber-500 to-emerald-500 opacity-90 blur-[1px]" />
+                <span className="absolute inset-[2px] rounded-[5px] bg-[#050505]" />
+                <span className="relative font-mono text-[10px] font-bold text-amber-400">M</span>
+              </span>
+              <span className="font-sans text-base font-bold tracking-tight text-white">
+                Mashup<span className="text-amber-400">Forge</span>
+              </span>
+            </a>
+            <p className="mt-4 max-w-md text-sm leading-relaxed text-zinc-400">
+              A desktop content studio for AI-driven crossover art. Open
+              source, AGPL-3.0, built by{' '}
+              <a
+                href="https://4nevercompany.com"
+                className="text-amber-400 hover:underline"
               >
-                <span className="font-mono text-sm font-bold text-[#c5a062]">
-                  4N
-                </span>
-              </div>
-              <div>
-                <div className="font-sans text-sm font-semibold tracking-tight text-white">
-                  MashupForge
-                </div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">
-                  by 4neverCompany
-                </div>
-              </div>
-            </div>
-
-            <p className="mt-5 max-w-sm text-sm leading-relaxed text-zinc-400">
-              An AI creative studio for crossover art. Local-first, brand-safe,
-              and built to ship on a schedule.
+                4neverCompany
+              </a>
+              .
             </p>
-          </div>
-
-          {COLUMNS.map((col) => (
-            <div key={col.heading}>
-              <h3 className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-[#c5a062]">
-                {col.heading}
-              </h3>
-              <ul role="list" className="mt-4 space-y-2.5">
-                {col.links.map((link) => (
-                  <li key={link.label}>
-                    <a
-                      href={link.href}
-                      {...(link.external
-                        ? { target: '_blank', rel: 'noopener noreferrer' }
-                        : {})}
-                      className="text-sm text-zinc-400 transition-colors duration-200 hover:text-[#00e6ff] focus:outline-none focus-visible:text-[#00e6ff] focus-visible:underline"
-                    >
-                      {link.label}
-                    </a>
-                  </li>
-                ))}
-              </ul>
+            <div className="mt-6 flex items-center gap-3">
+              <a
+                href="https://github.com/Code4neverCompany/MashupForge"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-zinc-400 transition-all hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
+                aria-label="GitHub"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+                </svg>
+              </a>
+              <a
+                href="https://leonardo.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-zinc-400 transition-all hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
+                aria-label="Leonardo.ai"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4">
+                  <path d="M12 2l9 16H3l9-16z" strokeLinejoin="round" />
+                  <path d="M12 9l4 7H8l4-7z" strokeLinejoin="round" />
+                </svg>
+              </a>
+              <a
+                href="mailto:hello@4nevercompany.com"
+                className="group flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-zinc-400 transition-all hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
+                aria-label="Email"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4">
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <path d="M3 7l9 7 9-7" />
+                </svg>
+              </a>
             </div>
-          ))}
+          </motion.div>
+
+          <div className="grid grid-cols-2 gap-8 sm:grid-cols-3 lg:col-span-7">
+            {linkGroups.map((g, i) => (
+              <motion.div
+                key={g.title}
+                initial={{ opacity: 0, y: 12 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.5, delay: i * 0.05 }}
+              >
+                <h3 className="font-mono text-[10px] uppercase tracking-[0.22em] text-zinc-500">
+                  {g.title}
+                </h3>
+                <ul className="mt-4 space-y-2.5">
+                  {g.links.map((l) => (
+                    <li key={l.label}>
+                      <a
+                        href={l.href}
+                        target={l.href.startsWith('http') ? '_blank' : undefined}
+                        rel={l.href.startsWith('http') ? 'noopener noreferrer' : undefined}
+                        className="text-sm text-zinc-300 transition-colors hover:text-amber-400"
+                      >
+                        {l.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </motion.div>
+            ))}
+          </div>
         </div>
 
-        <div className="mt-14 flex flex-col items-start justify-between gap-4 border-t border-[#c5a062]/15 pt-6 sm:flex-row sm:items-center">
-          <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-zinc-600">
-            © {new Date().getFullYear()} 4neverCompany · Agency Black · Metallic Gold · Electric Blue
-          </p>
-
-          <div className="flex items-center gap-3">
-            <a
-              href="https://github.com/4nevercompany"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="4neverCompany on GitHub"
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#c5a062]/20 text-zinc-400 transition-colors duration-200 hover:border-[#c5a062]/50 hover:text-[#c5a062] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a062] focus-visible:ring-offset-2 focus-visible:ring-offset-[#050505]"
-            >
-              <GithubMark className="h-4 w-4" aria-hidden="true" />
-            </a>
-            <a
-              href="https://4nevercompany.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="4neverCompany website"
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#c5a062]/20 text-zinc-400 transition-colors duration-200 hover:border-[#c5a062]/50 hover:text-[#c5a062] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c5a062] focus-visible:ring-offset-2 focus-visible:ring-offset-[#050505]"
-            >
-              <Globe className="h-4 w-4" aria-hidden="true" />
-            </a>
+        <div className="mt-16 flex flex-col items-start justify-between gap-4 border-t border-white/5 pt-8 text-xs text-zinc-500 sm:flex-row sm:items-center">
+          <div className="flex flex-wrap items-center gap-3">
+            <span>© 2026 4neverCompany.</span>
+            <span className="hidden h-3 w-px bg-zinc-700 sm:block" />
+            <span>Licensed under AGPL-3.0-or-later.</span>
+          </div>
+          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em]">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]" />
+            all systems operational
           </div>
         </div>
       </div>
