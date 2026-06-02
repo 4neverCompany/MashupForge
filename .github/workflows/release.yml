@@ -42,8 +42,20 @@ jobs:
         run: |
           # Tauri's frontendDist points to ../src-tauri/frontend-stub
           # The Next.js standalone build goes there for the prod bundle.
+          # MUST WIPE any prior contents first — if a previous failed
+          # run left a `node_modules` dir here, Tauri's frontendDist
+          # validator rejects the whole bundle with:
+          #   "The configured frontendDist includes the
+          #    ['node_modules'] folder. Please isolate your web
+          #    assets on a separate folder and update
+          #    tauri.conf.json > build > frontendDist."
+          rm -rf src-tauri/frontend-stub
           mkdir -p src-tauri/frontend-stub
           cp -r .next/standalone/. src-tauri/frontend-stub/
+          # Strip the node_modules that Next.js standalone ships —
+          # Tauri's bundler chokes on it. The standalone server
+          # doesn't need node_modules at runtime (deps are inlined).
+          rm -rf src-tauri/frontend-stub/node_modules
           cp -r .next/static src-tauri/frontend-stub/.next/static
           cp -r public src-tauri/frontend-stub/public 2>/dev/null || true
 
