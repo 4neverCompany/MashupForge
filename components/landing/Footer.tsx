@@ -22,7 +22,7 @@ const COLUMNS: Array<{ heading: string; links: FooterLink[] }> = [
   {
     heading: 'Product',
     links: [
-      { label: 'Launch Studio', href: '/app' },
+      { label: 'Launch Studio', href: '/studio' },
       { label: 'Features', href: '#features' },
     ],
   },

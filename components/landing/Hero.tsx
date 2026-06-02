@@ -10,7 +10,7 @@ export interface HeroProps {
   onCtaClick?: () => void;
 }
 
-export function Hero({ ctaHref = '/app', onCtaClick }: HeroProps) {
+export function Hero({ ctaHref = '/studio', onCtaClick }: HeroProps) {
   return (
     <section
       aria-labelledby="hero-heading"
