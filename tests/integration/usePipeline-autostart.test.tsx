@@ -79,10 +79,17 @@ import { usePipeline } from '@/hooks/usePipeline';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-function makeDeps() {
+function makeDeps(overrides: Record<string, unknown> = {}) {
   return {
     ideas: [],
     settings: {} as Parameters<typeof usePipeline>[0]['settings'],
+    // V082-FIX-SETTINGS-HYDRATE: the auto-start guard waits for
+    // settings to hydrate from IDB before computing the fill
+    // check. Tests default to `isSettingsLoaded: true` so the
+    // existing auto-start behaviour is exercised without the
+    // hydration delay. Tests that want to assert the hydration
+    // gate can pass `isSettingsLoaded: false`.
+    isSettingsLoaded: true,
     updateSettings: vi.fn(),
     updateIdeaStatus: vi.fn(),
     addIdea: vi.fn(),
@@ -92,6 +99,7 @@ function makeDeps() {
     deleteImage: vi.fn(),
     savedImages: [],
     images: [],
+    ...overrides,
   };
 }
 

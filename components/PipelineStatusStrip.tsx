@@ -40,6 +40,7 @@ export const PipelineStatusStrip: React.FC<Props> = ({ setView }) => {
     pipelineProgress,
     pipelineContinuous,
     pipelineLog,
+    weekFillStatus,
   } = useMashup();
 
   const [now, setNow] = useState(() => Date.now());
@@ -74,6 +75,18 @@ export const PipelineStatusStrip: React.FC<Props> = ({ setView }) => {
       : 'bg-zinc-600';
   const label = pipelineRunning ? 'Running' : pipelineEnabled ? 'Armed' : 'Idle';
 
+  // V082-WEEK-FULL-INDICATOR: when continuous mode is armed but the
+  // week's quota is met (no pending_approval needed), show a
+  // "Paused — week full" pill in the timer slot. Replaces the vague
+  // "Ready" state that was previously shown in this condition, which
+  // was indistinguishable from "armed and about to start a cycle".
+  // Tells the user at a glance that nothing is happening and why.
+  const weekFull =
+    weekFillStatus &&
+    weekFillStatus.scheduledTotal + weekFillStatus.pendingApprovalTotal >=
+      weekFillStatus.targetTotal &&
+    weekFillStatus.pendingApprovalTotal === 0;
+
   let timerText: string | null = null;
   if (deadlineRef.current && pipelineRunning && pipelineContinuous) {
     timerText = `Next in ${formatCountdown(deadlineRef.current - now)}`;
@@ -81,6 +94,13 @@ export const PipelineStatusStrip: React.FC<Props> = ({ setView }) => {
     timerText = pipelineProgress.currentIdea.length > 24
       ? `${pipelineProgress.currentIdea.slice(0, 24)}…`
       : pipelineProgress.currentIdea;
+  } else if (
+    pipelineEnabled &&
+    pipelineContinuous &&
+    !pipelineRunning &&
+    weekFull
+  ) {
+    timerText = 'Paused — week full';
   } else if (pipelineEnabled && pipelineContinuous && !pipelineRunning) {
     timerText = 'Ready';
   }

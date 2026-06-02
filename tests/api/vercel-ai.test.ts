@@ -347,7 +347,11 @@ describe('GET /api/ai/status — chain shape (0513-CONSOLIDATION)', () => {
       available?: boolean;
     };
     expect(json.provider).toBe('minimax');
-    expect(json.model).toBe('MiniMax-M2.5');
+    // V082-CATALOG: default is now M3 (the latest generation), not
+    // the legacy M2.5. The picker UI + /api/ai/models both surface
+    // M3 as the current default; status reports whatever the route
+    // would use.
+    expect(json.model).toBe('MiniMax-M3');
     expect(json.available).toBe(true);
   });
 

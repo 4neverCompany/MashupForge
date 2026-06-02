@@ -120,6 +120,20 @@ export interface UsePipelineDaemonDeps {
   settings: UserSettings;
   images: GeneratedImage[];
   savedImages: GeneratedImage[];
+  /**
+   * V082-FIX-SETTINGS-HYDRATE: settings are loaded from IDB on mount
+   * via useSettings. Until isSettingsLoaded flips true, `settings` is
+   * the default (empty scheduledPosts), and any pre-cycle fill check
+   * would see "0/7 posts, not full" — generating a fresh cycle on a
+   * week that's already been published. The daemon tracks this so
+   * the pre-cycle block in runOuterLoop can wait for hydration
+   * before making the start/no-start decision.
+   *
+   * Optional with a default of `true` so existing tests + callers
+   * that don't yet thread isSettingsLoaded through keep working
+   * (the new auto-start gate is opt-in via the dep).
+   */
+  isSettingsLoaded?: boolean;
   addIdea: (concept: string, context?: string) => void;
   updateIdeaStatus: (id: string, status: 'idea' | 'in-work' | 'done') => void;
 }
@@ -135,6 +149,9 @@ export interface UsePipelineDaemonDeps {
  */
 export function usePipelineDaemon(deps: UsePipelineDaemonDeps) {
   const { addIdea, updateIdeaStatus } = deps;
+  // Default true so existing tests/callers that haven't yet threaded
+  // isSettingsLoaded through don't see a behavioural change.
+  const isSettingsLoaded = deps.isSettingsLoaded ?? true;
 
   const [pipelineEnabled, setPipelineEnabled] = useState(
     () => loadPersistedConfig().enabled,
@@ -189,6 +206,19 @@ export function usePipelineDaemon(deps: UsePipelineDaemonDeps) {
   const getIdeas = useCallback(() => latestPropsRef.current.ideas, []);
   const getSettings = useCallback(() => latestPropsRef.current.settings, []);
   const getImages = useCallback(() => latestPropsRef.current.images, []);
+
+  // V082-FIX-SETTINGS-HYDRATE: live ref so the runOuterLoop async
+  // loop (which captures `deps` once on entry) can re-evaluate the
+  // settings-hydration gate every cycle. On a cold mount, settings
+  // start as defaultSettings (empty scheduledPosts); the pre-cycle
+  // check in runOuterLoop sees "0/7 not full" and tries to generate.
+  // Blocking the first pre-cycle check until isSettingsLoaded flips
+  // true is the last line of defense — usePipeline's auto-start
+  // effect is the first.
+  const settingsLoadedRef = useRef(isSettingsLoaded);
+  useEffect(() => {
+    settingsLoadedRef.current = isSettingsLoaded;
+  }, [isSettingsLoaded]);
 
   // Publish busy flag so UpdateChecker (outside MashupProvider) can postpone
   // auto-install while a run is in flight.
@@ -552,6 +582,48 @@ Return ONLY a JSON array of objects with "concept" and "context" fields. Example
           // path instead of generating. Same `interval`-minute sleep
           // shape as the post-processing branch — just hoisted earlier
           // so we don't waste a cycle on a week that's already done.
+          //
+          // V082-FIX-SETTINGS-HYDRATE: also wait for the IDB-loaded
+          // settings to land before reading scheduledPosts. On a cold
+          // mount, scheduledPosts starts as [] (defaultSettings), and
+          // a pre-cycle check against [] would say "0/7 not full" and
+          // generate even though the user actually has 7 posts. We
+          // sleep in 250ms slices until settingsLoadedRef flips true,
+          // bounded by a 5s ceiling so a hung IDB read can't pin the
+          // run forever.
+          if (!settingsLoadedRef.current) {
+            addLog(
+              'pipeline-preflight',
+              '',
+              'success',
+              'Pre-cycle check: waiting for settings to hydrate from IDB before computing weekly fill…',
+            );
+            const preflightStart = Date.now();
+            const preflightCeiling = 5000;
+            const preflightSlice = 250;
+            while (
+              !settingsLoadedRef.current &&
+              !runAbort.signal.aborted &&
+              Date.now() - preflightStart < preflightCeiling
+            ) {
+              await wait(preflightSlice);
+            }
+            if (!settingsLoadedRef.current) {
+              addLog(
+                'pipeline-preflight',
+                '',
+                'error',
+                'Settings still not loaded after 5s — proceeding with whatever is in memory (pre-cycle check may be inaccurate on a cold IDB read).',
+              );
+            } else {
+              addLog(
+                'pipeline-preflight',
+                '',
+                'success',
+                `Settings hydrated in ${Date.now() - preflightStart}ms — running pre-cycle check.`,
+              );
+            }
+          }
           {
             const settingsTargetDaysAtStart = readTargetDays();
             const targetPerDayAtStart =

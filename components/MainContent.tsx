@@ -331,6 +331,13 @@ export function MainContent() {
   const [heatmapEnabled, setHeatmapEnabled] = useState<boolean>(
     () => settings.heatmapEnabled ?? false,
   );
+  // V082-CAL-HISTORY: when ON, successfully published posts stay
+  // visible on the calendar as emerald chips with a ✓ prefix. Default
+  // ON (so users can see what was shipped when), but togglable for
+  // users who want the older "vanish after publish" behaviour.
+  // Not persisted — this is a per-session visual preference, not a
+  // workflow change.
+  const [calendarShowPosted, setCalendarShowPosted] = useState<boolean>(true);
   const [heatmapHover, setHeatmapHover] = useState<{
     cellKey: string;
     rect: DOMRect;
@@ -3535,13 +3542,19 @@ export function MainContent() {
                     {/* Calendar view */}
                     {postReadyView === 'calendar' && (() => {
                       // Fix 2 (mmx brief): the calendar grid is for
-                      // upcoming + actionable work only. 'posted' entries
-                      // are done (history view owns those) and 'rejected'
-                      // entries are user-cancelled and shouldn't ghost the
-                      // grid. 'failed' stays visible so the user can spot
-                      // retry-able slots without leaving the calendar.
+                      // Show everything actionable + already-published (when
+                      // the Show Posted toggle is on):
+                      //   - 'scheduled'   → amber (default)
+                      //   - 'pending_approval' → indigo
+                      //   - 'posted'      → emerald with ✓ prefix (when
+                      //     the user has "Show posted" on)
+                      //   - 'failed'      → red, retryable
+                      //   - 'rejected'    → user-cancelled, hidden so it
+                      //     doesn't ghost the grid
                       const scheduled = (settings.scheduledPosts || []).filter(
-                        (p) => p.status !== 'posted' && p.status !== 'rejected',
+                        (p) =>
+                          p.status !== 'rejected' &&
+                          (calendarShowPosted || p.status !== 'posted'),
                       );
                       const imgById = new Map(savedImages.map((i) => [i.id, i]));
                       const today = startOfDay(new Date());
@@ -3611,6 +3624,18 @@ export function MainContent() {
                                   heatmapEnabled={heatmapEnabled}
                                   onToggle={toggleHeatmap}
                                 />
+                                <button
+                                  onClick={() => setCalendarShowPosted((p) => !p)}
+                                  className={`px-3 py-1.5 text-[11px] font-medium rounded-full border transition-colors flex items-center gap-1.5 ${
+                                    calendarShowPosted
+                                      ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/30'
+                                      : 'text-zinc-500 hover:text-zinc-300 border-zinc-800/60'
+                                  }`}
+                                  title="When ON, successfully published posts stay visible on the calendar (green) — useful for seeing what was shipped when. Turn OFF to hide history."
+                                >
+                                  <span aria-hidden="true">{calendarShowPosted ? '✓' : '○'}</span>
+                                  Show posted
+                                </button>
                                 <div className="flex bg-zinc-900 border border-zinc-800/60 rounded-full p-0.5">
                                   {(['week', 'month'] as const).map((m) => (
                                     <button
@@ -3893,12 +3918,21 @@ export function MainContent() {
                                           // edit popover. Falls back to a
                                           // muted square when the source
                                           // image has been pruned/expired.
+                                          // V082: posted posts are no longer
+                                          // draggable — they're history. Click
+                                          // opens a read-only popover (see
+                                          // editingPostId branch below).
                                           const chipImg = imgById.get(p.imageId);
+                                          const isPosted = p.status === 'posted';
                                           return (
                                             <button
                                               key={p.id}
-                                              draggable
+                                              draggable={!isPosted}
                                               onDragStart={(e) => {
+                                                if (isPosted) {
+                                                  e.preventDefault();
+                                                  return;
+                                                }
                                                 e.dataTransfer.setData('postId', p.id);
                                                 e.dataTransfer.effectAllowed = 'move';
                                                 setDragPostId(p.id);
@@ -3908,7 +3942,9 @@ export function MainContent() {
                                                 e.stopPropagation();
                                                 setEditingPostId((current) => (current === p.id ? null : p.id));
                                               }}
-                                              className={`relative z-20 w-full text-left px-1.5 py-1 rounded-xl border text-[10px] cursor-grab active:cursor-grabbing flex items-center gap-1.5 ${calendarColorFor(p.status)} ${
+                                              className={`relative z-20 w-full text-left px-1.5 py-1 rounded-xl border text-[10px] flex items-center gap-1.5 ${calendarColorFor(p.status)} ${
+                                                isPosted ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+                                              } ${
                                                 dragPostId === p.id ? 'opacity-50' : ''
                                               }`}
                                               title={`${p.time} · ${p.platforms.join(', ')}\n${p.caption}`}
@@ -3918,13 +3954,18 @@ export function MainContent() {
                                                 <img
                                                   src={chipImg.url}
                                                   alt=""
-                                                  className="w-4 h-4 rounded object-cover shrink-0 border border-black/40"
+                                                  className={`w-4 h-4 rounded object-cover shrink-0 border border-black/40 ${
+                                                    isPosted ? 'opacity-70' : ''
+                                                  }`}
                                                   loading="lazy"
                                                 />
                                               ) : (
                                                 <span className="w-4 h-4 rounded bg-zinc-800/80 border border-black/40 shrink-0" />
                                               )}
                                               <span className="truncate tabular-nums">
+                                                {isPosted && (
+                                                  <span aria-hidden="true" className="mr-0.5">✓</span>
+                                                )}
                                                 {p.time} · {p.platforms.map((pl) => pl[0].toUpperCase()).join('')}
                                               </span>
                                             </button>

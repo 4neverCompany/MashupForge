@@ -45,7 +45,12 @@ import { streamText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModel } from 'ai';
 import { getErrorMessage } from '@/lib/errors';
-import { getTextModelParams, type TextGenParams } from '@/lib/text-model-specs';
+import {
+  getTextModelParams,
+  resolveTextModel,
+  getDefaultTextModelForProvider,
+  type TextGenParams,
+} from '@/lib/text-model-catalog';
 
 // Both the AI SDK provider clients and any future Node-only deps demand
 // the Node runtime — edge stripped fetch agents the SDK relies on.
@@ -239,16 +244,29 @@ async function streamMinimaxChat(
 
 function resolveProvider(modelOverride?: string): ResolvedProvider | null {
   const envModel = process.env.VERCEL_AI_MODEL?.trim() || undefined;
-  const requestedModel = modelOverride?.trim() || envModel;
+  // V082-CATALOG: pass the override + env-var through
+  // `resolveTextModel` for alias normalisation (e.g. legacy
+  // `M2.7-highspeed` → canonical `MiniMax-M2.7-highspeed`). Unknown
+  // IDs (typos, future models not in the catalog yet) pass through
+  // verbatim so the upstream provider gets the call — better than
+  // silently 503'ing the user for picking an id we haven't cataloged
+  // yet. The catalog's role is the picker UI and alias resolution;
+  // the route is the final arbiter of "what string do we send to
+  // the provider".
+  const resolvedOverride = modelOverride ? resolveTextModel(modelOverride) : undefined;
+  const resolvedEnv = envModel ? resolveTextModel(envModel) : undefined;
+  const requestedModel =
+    resolvedOverride?.modelId || modelOverride?.trim() ||
+    resolvedEnv?.modelId || envModel ||
+    undefined;
 
   if (process.env.MINIMAX_API_KEY) {
-    // MiniMax-M2.5 matches the nca-client default so users switching
-    // between the two backends get comparable output. Override per call
-    // for M2.7 / M2.7-highspeed via the `model` body field.
-    const modelId = requestedModel || 'MiniMax-M2.5';
-    // MiniMax serves an OpenAI-compatible Chat Completions endpoint at
-    // the international (.chat) host; the createOpenAI adapter handles
-    // the auth + request shape with a custom baseURL.
+    // V082-CATALOG: default for MiniMax is now M3 (the latest
+    // generation), not the legacy M2.5. The Settings → AI Engine
+    // picker surfaces M3 first and writes the selection to
+    // VERCEL_AI_MODEL or the per-call `model` body field.
+    const modelId =
+      requestedModel || getDefaultTextModelForProvider('minimax') || 'MiniMax-M3';
     const minimax = createOpenAI({
       apiKey: process.env.MINIMAX_API_KEY,
       baseURL: 'https://api.minimaxi.chat/v1',
@@ -256,7 +274,8 @@ function resolveProvider(modelOverride?: string): ResolvedProvider | null {
     return { name: 'minimax', model: minimax(modelId), modelId };
   }
   if (process.env.OPENAI_API_KEY) {
-    const modelId = requestedModel || 'gpt-4o-mini';
+    const modelId =
+      requestedModel || getDefaultTextModelForProvider('openai') || 'gpt-4o-mini';
     const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
     return { name: 'openai', model: openai(modelId), modelId };
   }

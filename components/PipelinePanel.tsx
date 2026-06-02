@@ -421,6 +421,37 @@ export function PipelinePanel() {
         {/* V030-004: week-ahead progress meter */}
         <WeekProgressMeter />
 
+        {/* V082-WEEK-FULL-BANNER: when continuous mode is armed but the
+            weekly quota is met (no pending approvals), show an
+            emerald "Week full" callout so the user understands why
+            nothing is happening. Distinct from the pending-approval
+            indicator below (which surfaces a backlog, not a done
+            state). Tells the user: "your week is full, the daemon
+            is sleeping until the next horizon roll-over." */}
+        {pipelineContinuous &&
+          pipelineEnabled &&
+          weekFillStatus.scheduledTotal + weekFillStatus.pendingApprovalTotal >=
+            weekFillStatus.targetTotal &&
+          weekFillStatus.pendingApprovalTotal === 0 && (
+            <div
+              data-testid="pipeline-week-full-banner"
+              className="flex items-start gap-3 px-4 py-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0 mt-0.5" aria-hidden="true" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-emerald-200">
+                  Week full — pipeline is paused
+                </p>
+                <p className="text-[11px] text-emerald-200/80 mt-0.5 leading-relaxed">
+                  {weekFillStatus.scheduledTotal}/{weekFillStatus.targetTotal} posts scheduled
+                  across the next {weekFillStatus.targetDays} days. The daemon will resume
+                  generating once the next slot opens up — no new ideas are being created
+                  in the meantime.
+                </p>
+              </div>
+            </div>
+          )}
+
         {/* PIPELINE-CONT-V2: pending-approval indicator. Surfaces the
             backlog that the daemon will keep generating against until
             it's cleared (approved → scheduled, or rejected). */}

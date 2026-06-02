@@ -218,6 +218,11 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
                   streamAIToString(message, {
                     provider: s.activeAiAgent,
                     mode: 'chat',
+                    // V082: thread the user's selected model through
+                    // to the AI route so the picker choice actually
+                    // takes effect. `aiClient.streamAI` passes `model`
+                    // verbatim to the body of /api/ai/prompt.
+                    model: s.activeTextModel,
                     signal,
                   }),
               },

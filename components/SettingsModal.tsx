@@ -22,6 +22,8 @@ import {
   Loader2,
   KeyRound,
   Cpu,
+  Stamp as WatermarkIcon,
+  Video as VideoIcon,
   Monitor,
   Sliders,
   Bot,
@@ -37,6 +39,29 @@ import {
 import type { UserSettings, WatermarkSettings } from '@/types/mashup';
 import { getAllTextModelSpecs } from '@/lib/text-model-specs';
 import { DesktopSettingsPanel } from './DesktopSettingsPanel';
+import { VercelAiModelPicker, defaultVercelAiModel } from './Settings/VercelAiModelPicker';
+
+/**
+ * V082: runtime type guard for the `modelInfo` field returned by
+ * /api/ai/status. The route shape is a structural type; the setter
+ * needs to verify the response actually conforms before binding it
+ * to the strongly-typed state. Untyped responses (e.g. an older
+ * server build, a 200 with an error wrapper) get coerced to null
+ * rather than throwing during render.
+ */
+function isTextModelInfo(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const r = raw as Record<string, unknown>;
+  return (
+    typeof r.modelId === 'string' &&
+    typeof r.family === 'string' &&
+    typeof r.generation === 'string' &&
+    typeof r.description === 'string' &&
+    typeof r.contextWindow === 'number' &&
+    typeof r.defaultMaxTokens === 'number' &&
+    typeof r.isDefault === 'boolean'
+  );
+}
 import type { SettingsSaveState } from '@/hooks/useSettings';
 import { APP_VERSION, getAppVersion } from '@/lib/app-version';
 
@@ -45,6 +70,58 @@ import { APP_VERSION, getAppVersion } from '@/lib/app-version';
 // AI Engine (pi.dev + system prompt + niches/genres + personalities), and
 // Desktop (auto-update + Tauri-native config panel).
 type TabId = 'general' | 'apiKeys' | 'aiAgent' | 'aiEngine' | 'desktop';
+
+/**
+ * V082: SettingsSection — single source of truth for the section
+ * divider + heading + icon + sub-text pattern used throughout this
+ * modal. Each tab renders a stack of these; using a helper keeps the
+ * spacing, gold accent, and icon-row consistent across Watermark,
+ * Default Video Settings, AI System Prompt, and the new AI Engine
+ * active-model card. Replaces the ad-hoc `<div className="mt-8 pt-6
+ * border-t border-zinc-800"><h4 className="text-lg font-medium
+ * text-white mb-4">…</h4></div>` pattern that had drifted across
+ * four places with different paddings / icon usage.
+ */
+function SettingsSection({
+  icon: Icon,
+  title,
+  subtitle,
+  children,
+  tone = 'gold',
+}: {
+  icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  tone?: 'gold' | 'cyan' | 'emerald';
+}) {
+  const toneText = {
+    gold: 'text-[#c5a062]',
+    cyan: 'text-[#00e6ff]',
+    emerald: 'text-emerald-400',
+  }[tone];
+  const toneBorder = {
+    gold: 'border-[#c5a062]/20',
+    cyan: 'border-[#00e6ff]/20',
+    emerald: 'border-emerald-500/20',
+  }[tone];
+  return (
+    <section className={`mt-8 pt-6 border-t ${toneBorder} first:mt-0 first:pt-0 first:border-t-0`}>
+      <header className="mb-4 flex items-start gap-3">
+        <div className={`mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${toneBorder} bg-black/40 ${toneText}`}>
+          <Icon className="h-4 w-4" aria-hidden={true} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h4 className="text-base font-semibold text-white leading-tight">{title}</h4>
+          {subtitle && (
+            <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">{subtitle}</p>
+          )}
+        </div>
+      </header>
+      {children}
+    </section>
+  );
+}
 
 const TABS: ReadonlyArray<{ id: TabId; label: string; icon: typeof SettingsIcon }> = [
   { id: 'general', label: 'General', icon: Sliders },
@@ -301,11 +378,24 @@ export function SettingsModal({
   // Same shape as NcaStatus but `provider` is the resolved upstream
   // (openai / anthropic / openrouter) so the card can render which API
   // key is wired up. `available` ↔ at least one key is set on the server.
+  // V082: `modelInfo` carries the catalog entry for the resolved
+  // model so the AI Engine tab can render the active-model card
+  // (family / generation / context window / description) without a
+  // second round-trip to /api/ai/models.
   const [aiStatus, setAiStatus] = useState<{
     available: boolean;
     authenticated: boolean;
     provider: string | null;
     model: string | null;
+    modelInfo: {
+      modelId: string;
+      family: string;
+      generation: string;
+      description: string;
+      contextWindow: number;
+      defaultMaxTokens: number;
+      isDefault: boolean;
+    } | null;
   } | null>(null);
   // Model list from /api/nca/models. Populated lazily once nca is
   // authenticated — there's no point fetching it before then since the
@@ -352,6 +442,10 @@ export function SettingsModal({
           authenticated: !!data.authenticated,
           provider: typeof data.provider === 'string' ? data.provider : null,
           model: typeof data.model === 'string' ? data.model : null,
+          // V082: include the catalog entry so the active-model card
+          // in the AI Engine tab can render family / generation /
+          // context window without a second round-trip.
+          modelInfo: isTextModelInfo(data.modelInfo) ? data.modelInfo : null,
         });
       })
       .catch(() => { /* leave null — card renders "Checking…" until probe lands */ });
@@ -1403,11 +1497,43 @@ export function SettingsModal({
               {activeAiAgent === 'vercel-ai' ? 'Vercel.ai AI Engine' : 'Pi.dev AI Engine'}
             </h4>
             {activeAiAgent === 'vercel-ai' ? (
-              <p className="text-[11px] text-zinc-500 -mt-2">
-                Text AI runs through Vercel&apos;s AI gateway — no local subprocess. Model:{' '}
-                <code className="text-[#00e6ff]">MiniMax-M2.7</code>.
-                Provider keys are stored in <code>.env.local</code>.
-              </p>
+              <div className="space-y-2 -mt-2">
+                <p className="text-[11px] text-zinc-500">
+                  Text AI runs through Vercel&apos;s AI gateway — no local subprocess.
+                  Pick a model below; provider keys are stored in <code>.env.local</code>.
+                </p>
+                {aiStatus?.modelInfo && (
+                  <div
+                    data-testid="active-model-card"
+                    className="rounded-xl border border-[#c5a062]/30 bg-gradient-to-br from-[#c5a062]/10 to-transparent p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div>
+                        <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-[#c5a062] mb-0.5">
+                          Active model
+                        </div>
+                        <div className="font-mono text-sm text-white">
+                          {aiStatus.modelInfo.modelId}
+                        </div>
+                        <div className="text-[10.5px] text-zinc-400 mt-0.5">
+                          {aiStatus.modelInfo.family} · {aiStatus.modelInfo.generation}
+                        </div>
+                      </div>
+                      <div className="text-right text-[9.5px] font-mono text-zinc-500 leading-tight">
+                        <div>{aiStatus.modelInfo.contextWindow.toLocaleString()} ctx</div>
+                        <div>{aiStatus.modelInfo.defaultMaxTokens.toLocaleString()} out</div>
+                      </div>
+                    </div>
+                    <p className="text-[10.5px] text-zinc-400 leading-relaxed">
+                      {aiStatus.modelInfo.description}
+                    </p>
+                  </div>
+                )}
+                <VercelAiModelPicker
+                  selected={settings.activeTextModel ?? null}
+                  onSelect={(modelId) => updateSettings({ activeTextModel: modelId })}
+                />
+              </div>
             ) : (
               <p className="text-[11px] text-zinc-500 -mt-2">
                 All text AI runs through <code>pi</code> as a subprocess.
@@ -1525,10 +1651,13 @@ export function SettingsModal({
 
           {activeTab === 'general' && (
           <>
-          {/* Watermark Settings */}
-          <div className="mt-8 pt-6 border-t border-zinc-800">
-            <h4 className="text-lg font-medium text-white mb-4">Watermark (Wasserzeichen)</h4>
-
+          {/* V082: Watermark Settings — wrapped in SettingsSection
+              for the unified icon-row + gold-accent divider. */}
+          <SettingsSection
+            icon={WatermarkIcon}
+            title="Watermark"
+            subtitle="Brand every generated image with a small overlay so it's recognisable in feeds."
+          >
             <div className="flex items-center justify-between mb-4">
               <span className="text-sm text-zinc-300">Enable Watermark</span>
               <button
@@ -1664,11 +1793,14 @@ export function SettingsModal({
                 </div>
               </div>
             )}
-          </div>
+          </SettingsSection>
 
           {/* Video Generation Settings */}
-          <div className="mt-8 pt-6 border-t border-zinc-800">
-            <h4 className="text-lg font-medium text-white mb-4">Default Video Settings</h4>
+          <SettingsSection
+            icon={VideoIcon}
+            title="Default Video Settings"
+            subtitle="Frame count, animation style, and resolution applied to every new video idea."
+          >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
               <div className="space-y-2">
                 <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Default Duration</label>
@@ -1707,15 +1839,19 @@ export function SettingsModal({
                 </select>
               </div>
             </div>
-          </div>
+          </SettingsSection>
           </>
           )}
 
           {activeTab === 'aiEngine' && (
           <>
-          {/* AI System Prompt + Personality */}
-          <div className="mt-8 pt-6 border-t border-zinc-800">
-            <h4 className="text-lg font-medium text-white mb-4">AI System Prompt</h4>
+          {/* V082: AI System Prompt + Personality — SettingsSection'd */}
+          <SettingsSection
+            icon={Cpu}
+            title="AI System Prompt"
+            subtitle="Shapes every AI interaction: idea generation, prompt enhancement, captions, and parameter selection."
+            tone="cyan"
+          >
             <div className="space-y-6 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">System Prompt</label>
@@ -2037,7 +2173,7 @@ export function SettingsModal({
                 Reset to Default Agent Personality
               </button>
             </div>
-          </div>
+          </SettingsSection>
           </>
           )}
 

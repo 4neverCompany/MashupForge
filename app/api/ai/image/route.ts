@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getErrorMessage } from '@/lib/errors';
 import { MODEL_PROMPT_GUIDES, LEONARDO_MODELS } from '@/types/mashup';
-import { getTextModelParams } from '@/lib/text-model-specs';
+import {
+  getTextModelParams,
+  resolveTextModel,
+  getDefaultTextModelForProvider,
+} from '@/lib/text-model-catalog';
 
 /**
  * vercel-ai image-generation orchestrator (Option B, hybrid).
@@ -136,7 +140,21 @@ async function enhanceViaMinimax(args: {
   const baseURL =
     process.env.MINIMAX_API_BASE_URL?.trim() || 'https://api.minimaxi.chat/v1';
   const url = `${baseURL.replace(/\/$/, '')}/chat/completions`;
-  const modelId = args.modelOverride || process.env.VERCEL_AI_MODEL?.trim() || 'MiniMax-M2.5';
+  // V082-CATALOG: pass the override + env-var through
+  // `resolveTextModel` for alias normalisation. Unknown IDs (typos,
+  // future models not in the catalog yet) pass through verbatim so
+  // the upstream provider gets the call. Default falls back to the
+  // catalog's provider default (M3) instead of the legacy M2.5 hardcode.
+  const resolvedOverride = args.modelOverride
+    ? resolveTextModel(args.modelOverride)
+    : undefined;
+  const envRaw = process.env.VERCEL_AI_MODEL?.trim();
+  const resolvedEnv = envRaw ? resolveTextModel(envRaw) : undefined;
+  const modelId =
+    resolvedOverride?.modelId || args.modelOverride?.trim() ||
+    resolvedEnv?.modelId || envRaw ||
+    getDefaultTextModelForProvider('minimax') ||
+    'MiniMax-M3';
   const messages = [
     { role: 'system' as const, content: args.system },
     { role: 'user' as const, content: args.userMessage },

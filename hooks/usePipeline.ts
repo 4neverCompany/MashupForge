@@ -9,6 +9,19 @@ import type { Idea, UserSettings, GeneratedImage, GenerateOptions } from '../typ
 interface UsePipelineDeps {
   ideas: Idea[];
   settings: UserSettings;
+  /**
+   * V082-FIX-SETTINGS-HYDRATE: settings are loaded from IDB on mount
+   * (useSettings). The default state has an empty scheduledPosts
+   * array, so any auto-start logic that reads scheduledPosts before
+   * hydration finishes will think the week's quota is unmet and fire
+   * a generation cycle. Callers should pass `isSettingsLoaded` from
+   * useSettings so the auto-start can wait for hydration.
+   *
+   * Optional with a default of `true` so existing tests + callers
+   * keep working without the prop (the new auto-start gate is
+   * opt-in via the dep).
+   */
+  isSettingsLoaded?: boolean;
   updateSettings: (
     newSettings: Partial<UserSettings> | ((prev: UserSettings) => Partial<UserSettings>),
   ) => void;
@@ -37,6 +50,7 @@ export function usePipeline(deps: UsePipelineDeps) {
   const {
     ideas,
     settings,
+    isSettingsLoaded,
     updateSettings,
     updateIdeaStatus,
     addIdea,
@@ -150,6 +164,17 @@ export function usePipeline(deps: UsePipelineDeps) {
   // The daemon's pre-cycle check at the start of every cycle uses the
   // same fill measure, but it only fires AFTER runOuterLoop has spun
   // up; gating here avoids the start-up cost entirely.
+  //
+  // V082-FIX-SETTINGS-HYDRATE: also wait for `isSettingsLoaded` to
+  // flip true before computing the fill check. On a cold mount,
+  // settings start as defaultSettings (scheduledPosts = []), so the
+  // pre-cycle check would evaluate to "0/7 posts, not full" and
+  // auto-start a generation cycle — even if the IDB-loaded reality is
+  // "7/7 already scheduled". The 2s setTimeout below isn't enough
+  // when IDB takes a beat, and the daemon's own pre-cycle check only
+  // runs AFTER runOuterLoop starts up (wasting the first cycle).
+  // Gating on isSettingsLoaded here means we wait for the real
+  // scheduledPosts to land before we make the start/no-start call.
   const quotaAlreadyMet = (() => {
     const fill = daemon.weekFillStatus;
     if (!fill) return false;
@@ -157,6 +182,7 @@ export function usePipeline(deps: UsePipelineDeps) {
   })();
   useEffect(() => {
     if (autoStartFiredRef.current) return;
+    if (!isSettingsLoaded) return;
     if (!daemon.pipelineEnabled || !daemon.pipelineContinuous) return;
     if (daemon.pipelineRunning) return;
     if (userStoppedRef.current) return;
@@ -167,6 +193,7 @@ export function usePipeline(deps: UsePipelineDeps) {
     // those mount-time effects in usePipelineDaemon.
     const timer = setTimeout(() => {
       if (autoStartFiredRef.current) return;
+      if (!isSettingsLoaded) return;
       if (!daemon.pipelineEnabled || !daemon.pipelineContinuous) return;
       if (daemon.pipelineRunning) return;
       if (userStoppedRef.current) return;
@@ -177,6 +204,7 @@ export function usePipeline(deps: UsePipelineDeps) {
     }, 2000);
     return () => clearTimeout(timer);
   }, [
+    isSettingsLoaded,
     daemon.pipelineEnabled,
     daemon.pipelineContinuous,
     daemon.pipelineRunning,

@@ -147,6 +147,14 @@ export function MashupProvider({ children }: { children: ReactNode }) {
   const pipelineHook = usePipeline({
     ideas,
     settings,
+    // V082-FIX-SETTINGS-HYDRATE: thread isSettingsLoaded through to
+    // both the auto-start guard in usePipeline AND the runOuterLoop
+    // pre-cycle check in usePipelineDaemon. Without this, a cold
+    // mount with persisted settings could auto-start a generation
+    // cycle on a week that's already been published — because
+    // settings.scheduledPosts starts as the default ([]) until the
+    // IDB load lands.
+    isSettingsLoaded,
     updateSettings,
     updateIdeaStatus,
     addIdea,
