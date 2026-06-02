@@ -22,7 +22,7 @@ export default defineConfig({
     // before React 19 / RTL 16, but the upgrade makes jsdom the
     // sensible default.
     include: ['tests/**/*.test.{ts,tsx}', 'lib/**/*.test.{ts,tsx}'],
-    environment: 'jsdom',
+    environment: 'happy-dom',
     setupFiles: ['./tests/setup/react-act.ts', './tests/setup/jest-dom.ts'],
   },
   resolve: {
