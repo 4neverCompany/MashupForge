@@ -177,7 +177,7 @@ jobs:
           path: release-assets/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true  # Release as draft first; you promote manually after sanity-checking
           generate_release_notes: true
