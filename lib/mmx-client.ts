@@ -1,6 +1,17 @@
 /**
  * MMX CLI client — typed wrapper around MiniMax's `mmx` binary.
  *
+ * @deprecated 2026-06-02. Multimodal (image/music/video/speech/describe)
+ * still flows through this module and the matching /api/mmx/* routes, so
+ * the file is kept. The text-generation half of mmx was replaced by
+ * 'nca' on 2026-05-02 (NCA-INTEGRATION-DEV) and then by the vercel-ai
+ * route on 2026-06-02 (LLM-INTEGRATION-0513 + 0513-CONSOLIDATION).
+ * New code should reach for the vercel-ai /api/ai/prompt path
+ * instead of spawning mmx for text. Multimodal mmx usage is unchanged
+ * — the MmxImageOptions type is still consumed by
+ * `lib/image-prompt-builder.ts` (Leonardo path reads `.leonardo`, the
+ * mmx image route reads `.mmx`).
+ *
  * Runs each command as a one-shot child process with `--output json`, parses
  * the result, and surfaces structured errors. We always use spawn() with an
  * argument array (never a shell string) so user-supplied prompts and queries

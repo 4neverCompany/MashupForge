@@ -11,12 +11,18 @@
  * Consumers:
  *   - `/api/ai/prompt` reads the spec for the resolved provider's
  *     `modelId` and threads params into the MiniMax chat/completions
- *     body AND the ai-sdk `streamText` call so all four vercel-ai
- *     providers (MiniMax / OpenAI / Anthropic / OpenRouter) see the
- *     same parameter discipline.
+ *     body AND the ai-sdk `streamText` call so the two vercel-ai
+ *     providers (MiniMax / OpenAI) see the same parameter discipline.
  *   - `/api/ai/image`'s `enhanceViaMinimax` helper applies the
  *     `enhance` mode override (low temp) so prompt rewrites stay
  *     focused before Leonardo sees them.
+ *
+ * 0513-CONSOLIDATION: the v1.0 chain was MiniMax / OpenAI / Anthropic /
+ * OpenRouter. Post-v1.0 cleanup cuts the secondary providers; this
+ * module only carries MiniMax and OpenAI specs. To re-add a provider,
+ * add the model entry below AND update `resolveProvider` in
+ * `app/api/ai/prompt/route.ts` AND extend the `ResolvedProvider.name`
+ * union there.
  *
  * Adding a new text model: drop a new entry in TEXT_MODEL_SPECS.
  * Most callers just want `getTextModelParams(modelId, mode)` and
@@ -121,23 +127,10 @@ const TEXT_MODEL_SPECS: Record<string, TextModelSpec> = {
     defaults: { temperature: 0.7, maxTokens: 4096 },
     modeOverrides: SHARED_MODE_OVERRIDES,
   },
-  // ── Anthropic ────────────────────────────────────────────────────
-  'claude-3-haiku-20240307': {
-    modelId: 'claude-3-haiku-20240307',
-    provider: 'anthropic',
-    defaults: { temperature: 0.7, maxTokens: 4096 },
-    modeOverrides: SHARED_MODE_OVERRIDES,
-  },
-  // ── OpenRouter ───────────────────────────────────────────────────
-  // OpenRouter exposes the same gpt-4o-mini under a provider-prefixed
-  // id; the routing layer doesn't know they're "the same" model, so
-  // both entries coexist with identical defaults.
-  'openai/gpt-4o-mini': {
-    modelId: 'openai/gpt-4o-mini',
-    provider: 'openrouter',
-    defaults: { temperature: 0.7, maxTokens: 4096 },
-    modeOverrides: SHARED_MODE_OVERRIDES,
-  },
+  // 0513-CONSOLIDATION: Anthropic and OpenRouter text specs removed.
+  // The chain in `app/api/ai/prompt/route.ts` is now MiniMax → OpenAI
+  // only. Add the spec back if a future iteration re-enables the
+  // provider.
 };
 
 /** Lookup a spec by raw modelId. Returns undefined for unknown models. */

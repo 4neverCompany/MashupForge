@@ -208,9 +208,7 @@ export async function isAvailable(): Promise<boolean> {
 export function isAuthenticated(): boolean {
   if (
     (process.env.MINIMAX_API_KEY && process.env.MINIMAX_API_KEY.trim()) ||
-    (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim()) ||
-    (process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim()) ||
-    (process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim())
+    (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim())
   ) {
     return true;
   }

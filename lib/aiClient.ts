@@ -13,17 +13,30 @@
  *
  * Provider history:
  *   - 'pi'  — legacy default. Long-lived RPC subprocess via lib/pi-client.
- *   - 'mmx' — replaced by 'nca' on 2026-05-02 (NCA-INTEGRATION-DEV).
- *             The mmx chat path had structural bugs (wrong stdin shape,
- *             SSE/JSON mixing); nca exposes a clean ndjson contract.
- *             The 'mmx' alias is kept as a back-compat redirect to nca
- *             so existing settings.activeAiAgent values keep working
- *             without a one-shot migration. Multimodal mmx routes
+ *   - 'mmx' — @deprecated 2026-06-02. Replaced by 'nca' on 2026-05-02
+ *             (NCA-INTEGRATION-DEV). The mmx chat path had structural
+ *             bugs (wrong stdin shape, SSE/JSON mixing); nca exposes
+ *             a clean ndjson contract. The 'mmx' alias is kept as a
+ *             back-compat redirect to nca so existing
+ *             settings.activeAiAgent values keep working without a
+ *             one-shot migration. Multimodal mmx routes
  *             (image/music/video/speech/describe) are NOT replaced —
  *             nca is text-only.
- *   - 'nca' — current default second provider. ndjson stream, MiniMax
- *             by default (M2.5; M2.7 / M2.7-highspeed available via
- *             NCA_MODEL env or per-call `model` param).
+ *   - 'nca' — @deprecated 2026-06-02. Replaced by 'vercel-ai' as the
+ *             second / fallback provider (0513-CONSOLIDATION). The
+ *             nca subprocess path is still wired for installs that
+ *             pinned `activeAiAgent: 'nca'` before v1.0.1 — the value
+ *             keeps working and routes to /api/nca/prompt. New code
+ *             should pick 'vercel-ai' for the default AI Agent. ndjson
+ *             stream, MiniMax by default (M2.5; M2.7 / M2.7-highspeed
+ *             available via NCA_MODEL env or per-call `model` param).
+ *   - 'vercel-ai' — current default. Vercel AI SDK provider (no
+ *             subprocess), served by /api/ai/prompt. LLM-INTEGRATION-
+ *             0513. 0513-CONSOLIDATION trimmed the backend chain from
+ *             {MiniMax, OpenAI, Anthropic, OpenRouter} to {MiniMax,
+ *             OpenAI}; MiniMax is the default and OpenAI is the
+ *             fallback. The 'vercel-ai' route is the only one
+ *             recommended for new code.
  */
 
 export type PiMode =
@@ -74,6 +87,12 @@ export interface StreamAIOptions {
    * LLM-INTEGRATION-0513 added 'vercel-ai' — direct Vercel AI SDK
    * provider, no subprocess. Same SSE wire contract as pi/nca, served
    * by /api/ai/prompt.
+   *
+   * 0513-CONSOLIDATION: the vercel-ai backend chain was trimmed from
+   * {MiniMax, OpenAI, Anthropic, OpenRouter} to {MiniMax, OpenAI}.
+   * MiniMax stays the default; OpenAI is the only fallback. 'nca'
+   * and 'mmx' are kept as deprecated aliases for back-compat with
+   * installs that selected them before v1.0.1.
    */
   provider?: 'pi' | 'nca' | 'mmx' | 'vercel-ai';
   /**
@@ -117,7 +136,10 @@ export async function* streamAI(
   // streaming/parsing loop is provider-agnostic.
   //
   // LLM-INTEGRATION-0513: 'vercel-ai' routes to /api/ai/prompt (direct
-  // Vercel AI SDK call, no subprocess).
+  // Vercel AI SDK call, no subprocess). 0513-CONSOLIDATION trimmed the
+  // underlying provider chain in that route from
+  // {MiniMax, OpenAI, Anthropic, OpenRouter} to {MiniMax, OpenAI}; the
+  // client-side provider enum is unchanged.
   const provider = options?.provider ?? 'pi';
   let url: string;
   if (provider === 'vercel-ai') {

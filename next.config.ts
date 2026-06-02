@@ -48,7 +48,13 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  transpilePackages: ['motion'],
+  // DEP-CLEANUP-2026-06-02: removed `transpilePackages: ['motion']`.
+  // motion 12.x ships proper CJS + ESM exports (verified via
+  // node_modules/motion/package.json `exports` map — `motion/react`
+  // resolves to dist/es/react.mjs) so Next 16's automatic CJS/ESM
+  // interop is sufficient. The directive was historically needed for
+  // motion 11.x pre-exports, but the bump to ^12.40.0 makes it
+  // redundant.
 };
 
 export default nextConfig;

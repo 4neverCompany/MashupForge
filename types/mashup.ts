@@ -306,12 +306,19 @@ export interface UserSettings {
   /**
    * Which AI agent backend handles text/idea/caption work.
    *   'pi'  — pi.dev sidecar (default)
-   *   'nca' — Aris's nca (native-cli-ai), MiniMax-powered, replaced mmx
-   *           on 2026-05-02 (NCA-INTEGRATION-DEV)
-   *   'mmx' — legacy MiniMax mmx CLI. Kept on the union so persisted
-   *           IDB payloads from before the migration still validate;
-   *           lib/aiClient.ts treats 'mmx' as a back-compat alias for
-   *           'nca' so chat keeps working until users re-select.
+   *   'nca' — @deprecated 2026-06-02. Aris's nca (native-cli-ai),
+   *           MiniMax-powered, replaced mmx on 2026-05-02
+   *           (NCA-INTEGRATION-DEV). Kept on the union as a back-compat
+   *           alias for installs that selected it before the
+   *           0513-CONSOLIDATION move to vercel-ai. lib/aiClient.ts
+   *           still routes 'nca' to /api/nca/prompt.
+   *   'mmx' — @deprecated 2026-06-02. Legacy MiniMax mmx CLI. Kept on
+   *           the union so persisted IDB payloads from before the
+   *           2026-05-02 migration still validate; lib/aiClient.ts
+   *           treats 'mmx' as a back-compat alias for 'nca' so chat
+   *           keeps working until users re-select.
+   *   'vercel-ai' — current default (LLM-INTEGRATION-0513). Direct
+   *           Vercel AI SDK calls, no subprocess.
    * Configured from the Settings → AI Agent tab.
    *
    * @deprecated Use {@link aiAgentProvider} instead — kept on the type
@@ -326,6 +333,13 @@ export interface UserSettings {
    *
    * LLM-INTEGRATION-0513 added 'vercel-ai' — direct Vercel AI SDK
    * calls, no subprocess. Default for fresh installs.
+   *
+   * 0513-CONSOLIDATION: 'nca' and 'mmx' are deprecated as of
+   * 2026-06-02 — vercel-ai is now the only recommended text path.
+   * They are kept on the union for back-compat with persisted
+   * IDB payloads. lib/aiClient.ts still routes 'nca' (and 'mmx'
+   * as its alias) to /api/nca/prompt; vercel-ai routes to
+   * /api/ai/prompt. New code should pick 'vercel-ai'.
    */
   aiAgentProvider?: 'pi' | 'nca' | 'mmx' | 'vercel-ai';
   /**

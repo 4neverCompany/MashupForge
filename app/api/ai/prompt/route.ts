@@ -17,8 +17,13 @@
 // Provider selection priority (first env var wins):
 //   1. MINIMAX_API_KEY     → minimax (default model: MiniMax-M2.5)
 //   2. OPENAI_API_KEY      → openai (default model: gpt-4o-mini)
-//   3. ANTHROPIC_API_KEY   → anthropic (default model: claude-3-haiku-20240307)
-//   4. OPENROUTER_API_KEY  → openrouter (default model: openai/gpt-4o-mini)
+//
+// 0513-CONSOLIDATION: the v1.0 chain was MiniMax → OpenAI → Anthropic →
+// OpenRouter. Post-v1.0 cleanup cut the secondary providers to keep the
+// dependency surface minimal. MiniMax remains the default (project has
+// long-standing MiniMax credentials from the nca subprocess path);
+// OpenAI is the only fallback. The pi route and nca route are unaffected
+// by this trim and remain the AI Agent settings options.
 //
 // MiniMax sits at the top because the project already has long-standing
 // MiniMax credentials (used by the nca subprocess path). The release/
@@ -38,7 +43,6 @@
 
 import { streamText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
-import { createAnthropic } from '@ai-sdk/anthropic';
 import type { LanguageModel } from 'ai';
 import { getErrorMessage } from '@/lib/errors';
 import { getTextModelParams, type TextGenParams } from '@/lib/text-model-specs';
@@ -117,7 +121,9 @@ function buildFocusBlock(niches: string[], genres: string[]): string {
 }
 
 interface ResolvedProvider {
-  name: 'minimax' | 'openai' | 'anthropic' | 'openrouter';
+  // 0513-CONSOLIDATION: chain trimmed from {minimax, openai, anthropic,
+  // openrouter} to {minimax, openai}. See module header for rationale.
+  name: 'minimax' | 'openai';
   model: LanguageModel;
   modelId: string;
 }
@@ -242,7 +248,7 @@ function resolveProvider(modelOverride?: string): ResolvedProvider | null {
     const modelId = requestedModel || 'MiniMax-M2.5';
     // MiniMax serves an OpenAI-compatible Chat Completions endpoint at
     // the international (.chat) host; the createOpenAI adapter handles
-    // the auth + request shape exactly like the OpenRouter path below.
+    // the auth + request shape with a custom baseURL.
     const minimax = createOpenAI({
       apiKey: process.env.MINIMAX_API_KEY,
       baseURL: 'https://api.minimaxi.chat/v1',
@@ -253,21 +259,6 @@ function resolveProvider(modelOverride?: string): ResolvedProvider | null {
     const modelId = requestedModel || 'gpt-4o-mini';
     const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
     return { name: 'openai', model: openai(modelId), modelId };
-  }
-  if (process.env.ANTHROPIC_API_KEY) {
-    const modelId = requestedModel || 'claude-3-haiku-20240307';
-    const anthropic = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    return { name: 'anthropic', model: anthropic(modelId), modelId };
-  }
-  if (process.env.OPENROUTER_API_KEY) {
-    const modelId = requestedModel || 'openai/gpt-4o-mini';
-    // OpenRouter exposes an OpenAI-compatible endpoint; the openai
-    // provider with a custom baseURL is the canonical adapter.
-    const openrouter = createOpenAI({
-      apiKey: process.env.OPENROUTER_API_KEY,
-      baseURL: 'https://openrouter.ai/api/v1',
-    });
-    return { name: 'openrouter', model: openrouter(modelId), modelId };
   }
   return null;
 }
@@ -296,7 +287,7 @@ export async function POST(req: Request): Promise<Response> {
     return new Response(
       JSON.stringify({
         error:
-          'No AI provider configured. Set MINIMAX_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, or OPENROUTER_API_KEY.',
+          'No AI provider configured. Set MINIMAX_API_KEY (preferred) or OPENAI_API_KEY.',
       }),
       { status: 503, headers: { 'Content-Type': 'application/json' } },
     );
@@ -316,12 +307,12 @@ export async function POST(req: Request): Promise<Response> {
       .filter((s): s is string => typeof s === 'string' && s.length > 0)
       .join('\n\n') || undefined;
 
-  // Web-search pre-enrichment. MiniMax / OpenAI / Anthropic / OpenRouter
-  // don't have built-in browsing on the vercel AI SDK adapter (pi.dev
-  // and nca route their own search), so we pre-fetch a short snippet
-  // block and append it to the user's message before the model sees
-  // it. Strictly best-effort: any failure falls through with no
-  // enrichment so a flaky search backend can't break the request.
+  // Web-search pre-enrichment. MiniMax and OpenAI don't have built-in
+  // browsing on the vercel AI SDK adapter (pi.dev and nca route their
+  // own search), so we pre-fetch a short snippet block and append it
+  // to the user's message before the model sees it. Strictly
+  // best-effort: any failure falls through with no enrichment so a
+  // flaky search backend can't break the request.
   //
   // Two modes get enrichment:
   //   - `idea`: query built from niches + genres + trending keywords,

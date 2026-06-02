@@ -60,6 +60,32 @@ interface PersistedState {
 const emptyState: PersistedState = { posts: [] };
 
 /**
+ * Derive a PostRecord `PostId` from a legacy ScheduledPost.id.
+ *
+ * Mirrors the encoding used by `buildPostRecords` so the React approval
+ * handlers can compute the same id and look the record up after
+ * migration. Encoded as `post_<sanitized>` where the sanitized tail is
+ * the ScheduledPost.id with non-alphanumeric chars stripped, padded to
+ * at least 8 chars, then truncated to 16. This is a one-way mapping —
+ * we never need to invert it, and a stable hash of the legacy id is
+ * good enough for join purposes (the PostRecord's own `ideaId` and
+ * `imageBlobId` are the canonical foreign keys, this id is just a
+ * stable lookup key).
+ *
+ * Throws if the resulting id fails the `PostId` brand check (which
+ * means a legacy post id that sanitizes to fewer than 6 alphanum
+ * chars — caller's bug).
+ */
+export function postIdFromScheduledPostId(scheduledPostId: string): PostId {
+  return makePostId(
+    `post_${scheduledPostId
+      .replace(/[^A-Za-z0-9_-]/g, '')
+      .padEnd(8, 'x')
+      .slice(0, 16)}`,
+  );
+}
+
+/**
  * Read the current PostRecord[] from storage. Returns empty array
  * on first run.
  */
@@ -174,14 +200,20 @@ export function buildPostRecords(
     record.imageModelId = image.modelInfo?.modelId ?? null;
 
     // Walk to the right state based on the post's status field.
+    // The state machine enforces the graph: draft can only go to
+    // generating_image (not directly to image_ready), so every
+    // branch must walk through generating_image first.
     if (post.status === 'pending_approval') {
+      record = transition(record, 'generating_image', { note: 'Migrated' });
       record = transition(record, 'image_ready', { note: 'Migrated from pending_approval' });
     } else if (post.status === 'scheduled') {
+      record = transition(record, 'generating_image', { note: 'Migrated' });
       record = transition(record, 'image_ready', { note: 'Migrated' });
       record = transition(record, 'captioning', { note: 'Caption migrated' });
       record = transition(record, 'caption_ready', { note: 'Caption migrated' });
       record = transition(record, 'scheduled', { note: 'Migrated from scheduled' });
     } else if (post.status === 'posted') {
+      record = transition(record, 'generating_image', { note: 'Migrated' });
       record = transition(record, 'image_ready', { note: 'Migrated' });
       record = transition(record, 'captioning', { note: 'Caption migrated' });
       record = transition(record, 'caption_ready', { note: 'Caption migrated' });
@@ -254,16 +286,46 @@ export function syncLegacyScheduledPost(
  *
  * @returns the updated PostRecord
  */
+export interface ApplyTransitionOptions {
+  /**
+   * Skip the legacy mirror-back. Set this when the caller has
+   * already updated the legacy `settings.scheduledPosts` field
+   * synchronously (e.g. MashupContext.approveScheduledPost flips
+   * the legacy status to 'scheduled' before the async
+   * applyTransition call resolves). Without this flag the mirror
+   * would overwrite that synchronous write with whatever the new
+   * state maps to in syncLegacyScheduledPost — 'image_ready' /
+   * 'caption_ready' both map to 'pending_approval', undoing the
+   * approve action.
+   */
+  skipMirror?: boolean;
+}
+
 export async function applyTransition(
   postId: PostId,
   to: PostRecord['state'],
   opts: Parameters<typeof transition>[2] = {},
+  applyOpts: ApplyTransitionOptions = {},
 ): Promise<PostRecord> {
   const posts = await loadPostRecords();
   const idx = posts.findIndex((p) => p.id === postId);
   if (idx < 0) throw new Error(`Post ${postId} not found`);
 
-  const next = transition(posts[idx], to, opts);
+  const current = posts[idx];
+
+  // Idempotent: if the post is already in the target state, the call
+  // is a no-op. Approval actions are idempotent at the approval-action
+  // level (planApproveScheduledPost returns empty toFinalize for posts
+  // that aren't pending_approval), so the new system mirrors that.
+  // Throwing InvalidTransitionError on a double-click would be hostile
+  // UX — a user mashing "Approve" should not crash the app. We return
+  // the current record unchanged and skip the mirror-back (the React
+  // handler has already done the legacy field update synchronously).
+  if (current.state === to) {
+    return current;
+  }
+
+  const next = transition(current, to, opts);
   posts[idx] = next;
   await savePostRecords(posts);
 
@@ -274,7 +336,13 @@ export async function applyTransition(
   // Acceptable for v0.9.41 prevention — the new system is the
   // source of truth; the legacy mirror is a UX courtesy for the
   // not-yet-migrated PipelinePanel.
-  if (next.imageBlobId) {
+  //
+  // skipMirror is set by callers that have already updated the
+  // legacy field synchronously (e.g. MashupContext.approveScheduledPost
+  // runs `updateSettings` to flip the legacy status, then awaits this
+  // call). The mirror would otherwise overwrite the synchronous
+  // write with `syncLegacyScheduledPost`'s naive state→status mapping.
+  if (!applyOpts.skipMirror && next.imageBlobId) {
     try {
       const settings = await get<UserSettings>('mashup_settings');
       if (settings?.scheduledPosts) {

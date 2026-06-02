@@ -47,4 +47,5 @@ export {
   buildPostRecords,
   syncLegacyScheduledPost,
   applyTransition,
+  postIdFromScheduledPostId,
 } from './migration';

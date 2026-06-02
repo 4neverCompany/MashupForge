@@ -6,11 +6,14 @@
 // a "vercel-ai" card with the same dot/label/model conventions. There
 // is no install state — direct HTTPS API calls work as long as the env
 // var is set, so `available` and `authenticated` collapse to the same
-// signal: at least one of OPENAI_API_KEY, ANTHROPIC_API_KEY, or
-// OPENROUTER_API_KEY is present on the server.
+// signal: MINIMAX_API_KEY (preferred) or OPENAI_API_KEY is present on
+// the server.
+//
+// 0513-CONSOLIDATION: v1.0 chain was MiniMax → OpenAI → Anthropic →
+// OpenRouter. The v1.0.1 trim keeps only MiniMax and OpenAI.
 //
 // The picked provider's default model is reported so the UI can show
-// e.g. "openai/gpt-4o-mini" without hitting the underlying API.
+// e.g. "gpt-4o-mini" without hitting the underlying API.
 
 import { NextResponse } from 'next/server';
 
@@ -19,7 +22,9 @@ export const runtime = 'nodejs';
 interface AiStatus {
   available: boolean;
   authenticated: boolean;
-  provider: 'minimax' | 'openai' | 'anthropic' | 'openrouter' | null;
+  // 0513-CONSOLIDATION: chain trimmed to {minimax, openai}. See module
+  // header for rationale.
+  provider: 'minimax' | 'openai' | null;
   model: string | null;
 }
 
@@ -42,22 +47,6 @@ function detect(): AiStatus {
       authenticated: true,
       provider: 'openai',
       model: envModel || 'gpt-4o-mini',
-    };
-  }
-  if (process.env.ANTHROPIC_API_KEY) {
-    return {
-      available: true,
-      authenticated: true,
-      provider: 'anthropic',
-      model: envModel || 'claude-3-haiku-20240307',
-    };
-  }
-  if (process.env.OPENROUTER_API_KEY) {
-    return {
-      available: true,
-      authenticated: true,
-      provider: 'openrouter',
-      model: envModel || 'openai/gpt-4o-mini',
     };
   }
   return { available: false, authenticated: false, provider: null, model: null };

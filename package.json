@@ -25,7 +25,6 @@
     "pre-push": "bash scripts/event-hooks/pre-push.sh"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "3.0.79",
     "@ai-sdk/openai": "^3.0.65",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",

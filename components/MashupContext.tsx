@@ -44,6 +44,10 @@ import { collectFinalizeTargets, finalizePipelineImage } from '../lib/pipeline-f
 import { applyCaptionEdit } from '../lib/caption-edit';
 import { planApproveScheduledPost, planRejectScheduledPost } from '../lib/approval-actions';
 import { recordOutcome } from '../lib/outcome-tracker';
+import {
+  applyTransition,
+  postIdFromScheduledPostId,
+} from '../lib/post-lifecycle/migration';
 
 const MashupContext = createContext<MashupContextType | null>(null);
 
@@ -222,6 +226,18 @@ export function MashupProvider({ children }: { children: ReactNode }) {
   // call in a row. CarouselApprovalCard fans out N approve calls back-
   // to-back, so images 2..N got status='scheduled' but kept
   // pipelinePending=true (hidden from Gallery, no watermark).
+  //
+  // Post-lifecycle: layer the new applyTransition() call on top of
+  // the legacy settings update. The legacy `updateSettings` keeps
+  // the PipelinePanel / approval UI in sync (status flips to
+  // 'scheduled'); the applyTransition call updates the new
+  // PostRecord state machine so the next stage of the pipeline can
+  // move the post forward (captioning → scheduled → posting →
+  // posted). The migration bridge in applyTransition also mirrors
+  // the new state back to settings.scheduledPosts — that's a
+  // safety net for any caller that hasn't run the legacy update.
+  // For callers that DID run the legacy update (this one), the
+  // mirror's write is wasted but harmless.
   const approveScheduledPost = (postId: string) => {
     const { toFinalize, nextPosts } = planApproveScheduledPost(
       settings.scheduledPosts || [],
@@ -232,6 +248,30 @@ export function MashupProvider({ children }: { children: ReactNode }) {
       scheduledPosts: nextPosts(prev.scheduledPosts || []),
     }));
     finalizePipelineImagesForPosts(toFinalize, true);
+    // Fire-and-forget: best-effort transition to the new system. The
+    // applyTransition call is idempotent on same-state, and any
+    // failure (post not in storage yet, etc.) is logged and ignored
+    // — the legacy update is the source of truth for the UI.
+    // skipMirror: true because the synchronous updateSettings above
+    // already set the legacy status to 'scheduled'; the mirror-back
+    // in applyTransition would otherwise overwrite it to
+    // 'pending_approval' (the new 'image_ready' state maps there in
+    // syncLegacyScheduledPost).
+    void (async () => {
+      try {
+        await applyTransition(
+          postIdFromScheduledPostId(postId),
+          'image_ready',
+          { note: 'Approved by user' },
+          { skipMirror: true },
+        );
+      } catch (err) {
+        // Expected for posts that exist only in the legacy field
+        // (no migrated PostRecord yet) — the legacy path still
+        // works. Logged at warn to avoid spamming the console.
+        console.warn('[MashupContext] applyTransition(approve) failed', err);
+      }
+    })();
   };
 
   // V050-009 BUG-DEV-001: status guard mirrors the approve path. Without
@@ -249,6 +289,18 @@ export function MashupProvider({ children }: { children: ReactNode }) {
   // BUG-CRIT-012: same closure-timing fix as approveScheduledPost.
   // Carousel "Reject carousel" fans out N reject calls; without the
   // pre-update lookup, only the first image landed in Gallery.
+  //
+  // Post-lifecycle: layer applyTransition() on top of the legacy
+  // update. The new PostRecord transitions back to 'draft' so the
+  // user can edit and re-approve; the legacy field flips to
+  // 'rejected' so the UI hides the post from the auto-poster. The
+  // mirror-back from applyTransition would write 'pending_approval'
+  // (because 'draft' maps to 'pending_approval' in syncLegacyScheduledPost)
+  // — that's a no-op concern because the synchronous updateSettings
+  // call has already set the legacy status to 'rejected', and the
+  // migration bridge's mirror happens AFTER our synchronous write.
+  // The brief inconsistency is acceptable: the next reconciliation
+  // pass or the next user-initiated state change will settle it.
   const rejectScheduledPost = (postId: string) => {
     const { toFinalize, nextPosts } = planRejectScheduledPost(
       settings.scheduledPosts || [],
@@ -275,10 +327,36 @@ export function MashupProvider({ children }: { children: ReactNode }) {
         });
       }
     }
+    // Fire-and-forget post-lifecycle transition. Rejected posts go
+    // back to 'draft' in the new system so the user can re-edit
+    // and re-approve. Idempotent on same-state; failures (post
+    // not yet migrated) are logged and ignored.
+    // skipMirror: true because the synchronous updateSettings above
+    // already set the legacy status to 'rejected'; the mirror-back
+    // in applyTransition would otherwise overwrite it to
+    // 'pending_approval' (the new 'draft' state maps there in
+    // syncLegacyScheduledPost).
+    void (async () => {
+      try {
+        await applyTransition(
+          postIdFromScheduledPostId(postId),
+          'draft',
+          { note: 'Rejected by user' },
+          { skipMirror: true },
+        );
+      } catch (err) {
+        console.warn('[MashupContext] applyTransition(reject) failed', err);
+      }
+    })();
   };
 
   // Bulk variants — single functional-updater pass so N approvals applied
   // in a single click don't race against each other or the auto-poster.
+  //
+  // Post-lifecycle: layer applyTransition() on top of the legacy
+  // updateSettings, one call per post. Fire-and-forget per post; the
+  // loop is non-blocking and failures are logged. Mirrors the singular
+  // approveScheduledPost path.
   const bulkApproveScheduledPosts = (postIds: string[]) => {
     if (postIds.length === 0) return;
     const idSet = new Set(postIds);
@@ -296,6 +374,27 @@ export function MashupProvider({ children }: { children: ReactNode }) {
       };
     });
     if (approvedPosts.length > 0) finalizePipelineImagesForPosts(approvedPosts, true);
+    // Post-lifecycle transitions. We dispatch them in parallel and
+    // do not await the result — the UI is already updated by the
+    // synchronous updateSettings call, and the post-lifecycle call
+    // is a best-effort annotation of the new system.
+    // skipMirror: true for the same reason as the singular path —
+    // the synchronous updateSettings already wrote the legacy
+    // status, the mirror-back would overwrite it incorrectly.
+    for (const post of approvedPosts) {
+      void (async () => {
+        try {
+          await applyTransition(
+            postIdFromScheduledPostId(post.id),
+            'image_ready',
+            { note: 'Bulk approved by user' },
+            { skipMirror: true },
+          );
+        } catch (err) {
+          console.warn('[MashupContext] applyTransition(bulk approve) failed for', post.id, err);
+        }
+      })();
+    }
   };
 
   // V050-009 BUG-DEV-001: same status guard as the singular reject —
@@ -304,6 +403,10 @@ export function MashupProvider({ children }: { children: ReactNode }) {
   //
   // BUG-DEV-003: same finalize-on-reject as the singular path — releases
   // pipelinePending images to Gallery in a single batch.
+  //
+  // Post-lifecycle: layer applyTransition('draft') on top, one call
+  // per rejected post. See bulkApproveScheduledPosts for the
+  // fire-and-forget rationale.
   const bulkRejectScheduledPosts = (postIds: string[]) => {
     if (postIds.length === 0) return;
     const idSet = new Set(postIds);
@@ -321,6 +424,20 @@ export function MashupProvider({ children }: { children: ReactNode }) {
       };
     });
     if (rejectedPosts.length > 0) finalizePipelineImagesForPosts(rejectedPosts, false);
+    for (const post of rejectedPosts) {
+      void (async () => {
+        try {
+          await applyTransition(
+            postIdFromScheduledPostId(post.id),
+            'draft',
+            { note: 'Bulk rejected by user' },
+            { skipMirror: true },
+          );
+        } catch (err) {
+          console.warn('[MashupContext] applyTransition(bulk reject) failed for', post.id, err);
+        }
+      })();
+    }
   };
 
   // V050-005: inline caption editing from the approval queue. Updates

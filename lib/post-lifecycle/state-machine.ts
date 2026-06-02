@@ -34,9 +34,9 @@ import {
 const VALID_TRANSITIONS: Readonly<Record<PostState, readonly PostState[]>> = {
   draft:             ['generating_image'],
   generating_image:  ['image_ready', 'failed'],
-  image_ready:       ['captioning', 'failed'],
-  captioning:        ['caption_ready', 'failed'],
-  caption_ready:     ['scheduled', 'failed'],
+  image_ready:       ['captioning', 'failed', 'draft'], // user rejected the image
+  captioning:        ['caption_ready', 'failed', 'draft'], // user rejected mid-caption
+  caption_ready:     ['scheduled', 'failed', 'draft'], // user rejected the caption
   scheduled:         ['posting', 'failed'],
   // scheduled → image_ready: the reconciler can re-promote a scheduled
   // post back to image_ready if the image was re-uploaded. Not a normal
@@ -51,8 +51,8 @@ const VALID_TRANSITIONS: Readonly<Record<PostState, readonly PostState[]>> = {
 const RECONCILER_TRANSITIONS: Readonly<Record<PostState, readonly PostState[]>> = {
   ...VALID_TRANSITIONS,
   scheduled: ['posting', 'failed', 'image_ready'], // re-promote allowed
-  image_ready: ['captioning', 'failed', 'captioning'], // no-op, but allowed
-  caption_ready: ['scheduled', 'failed', 'image_ready'], // re-promote to regenerate
+  image_ready: ['captioning', 'failed', 'captioning', 'draft'], // no-op, but allowed
+  caption_ready: ['scheduled', 'failed', 'image_ready', 'draft'], // re-promote to regenerate
 };
 
 export function canTransition(
