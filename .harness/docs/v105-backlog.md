@@ -7,12 +7,12 @@
 
 | ID | Item | Days | Status |
 |---|---|---|---|
-| **C** | Pre-existing CI cleanup | 1 | **Starting next** (v1.0.5.1) |
+| **C** | Pre-existing CI cleanup | 1 | **Starting next** (v1.0.6) |
 | **A** | Higgsfield prompt engineering v2 | 3-5 | Backlog (v1.0.5.x) |
 | **D** | Per-cycle credit budget | 2-3 | Backlog (v1.0.5.x) |
 | — | Long-form video with recurring character | 5-7 | Deferred to v1.0.6 |
 
-## C — CI cleanup (v1.0.5.1, starting now)
+## C — CI cleanup (v1.0.6, starting now)
 
 The 1-day fix to get the baseline green again.
 
@@ -43,13 +43,13 @@ justification comment and a TODO with a target date.
 **Files:** `eslint.config.mjs`, `hooks/useReconciler.ts`,
 `hooks/useSettings.ts`, `lib/persistence/*`
 
-### C.3 — Ship as v1.0.5.1
+### C.3 — Ship as v1.0.6
 
-Use `scripts/release.sh 1.0.5.1` to bump + changelog, push, tag,
+Use `scripts/release.sh 1.0.6` to bump + changelog, push, tag,
 let the workflow build. Maurice pastes the highlights into the
 GitHub Release body.
 
-**Why a patch (1.0.5.1) and not a minor (1.0.5)?** The change
+**Why a patch (1.0.6) and not a minor (1.0.5)?** The change
 is CI-only; no user-facing behavior changes. Patch is the
 correct semver.
 
@@ -148,3 +148,5 @@ highlights:
   still → video
 - All 6 angles in the template
 - The full flow ships end-to-end on a 1-shot character
+
+
