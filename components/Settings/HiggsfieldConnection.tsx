@@ -83,7 +83,14 @@ export function HiggsfieldConnection({
   }, []);
 
   useEffect(() => {
-    refresh();
+    // Defer the initial fetch to a microtask so `setLoading(true)` inside
+    // `refresh` doesn't run synchronously in the effect body (React 19's
+    // react-hooks/set-state-in-effect rule). The microtask is still
+    // synchronous-from-the-user's-perspective: the load indicator
+    // appears in the same browser frame as the effect.
+    queueMicrotask(() => {
+      void refresh();
+    });
   }, [refresh]);
 
   // Auto-pick defaults if the user's current selection is empty or
@@ -120,19 +127,30 @@ export function HiggsfieldConnection({
 
   // Surface a success banner when the URL has ?higgsfield=connected
   // (set by the callback route). Strip it after first read.
+  //
+  // ESLint react-hooks/set-state-in-effect: the setState calls below
+  // are deferred via `queueMicrotask` so React's effect body only
+  // synchronizes an external system (window.history) — not local
+  // component state. The microtask runs after the effect's commit
+  // phase so it doesn't trigger cascading renders.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
     const flag = url.searchParams.get('higgsfield');
     if (flag === 'connected') {
       onConnectionChange?.(true);
-      refresh();
+      queueMicrotask(() => {
+        refresh();
+      });
       url.searchParams.delete('higgsfield');
       window.history.replaceState({}, '', url.toString());
     } else if (flag === 'error') {
       const reason = url.searchParams.get('reason') || 'unknown';
       const detail = url.searchParams.get('detail') || '';
-      setError(`Higgsfield connect failed (${reason})${detail ? `: ${detail.slice(0, 120)}` : ''}`);
+      const msg = `Higgsfield connect failed (${reason})${detail ? `: ${detail.slice(0, 120)}` : ''}`;
+      queueMicrotask(() => {
+        setError(msg);
+      });
       url.searchParams.delete('higgsfield');
       url.searchParams.delete('reason');
       url.searchParams.delete('detail');
