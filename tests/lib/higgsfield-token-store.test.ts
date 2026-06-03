@@ -57,10 +57,16 @@ describe('encryptTokens + decryptTokens (round-trip)', () => {
   });
   it('returns null for tampered ciphertext (AES-GCM auth tag mismatch)', () => {
     const packed = encryptTokens('original');
-    // Flip a character in the ciphertext segment to simulate tampering.
+    // Flip a byte in the MIDDLE of the ciphertext segment — a more
+    // reliable way to force an auth tag mismatch than tweaking the
+    // last base64url char (which is a 6-bit boundary, occasionally
+    // rounds back to a valid bit pattern under GCM's truncated hash).
     const parts = packed.split('.');
-    const lastChar = parts[3].charAt(parts[3].length - 1);
-    parts[3] = parts[3].slice(0, -1) + (lastChar === 'A' ? 'B' : 'A');
+    const mid = Math.floor(parts[3].length / 2);
+    const midChar = parts[3].charAt(mid);
+    // base64url alphabet is A-Z, a-z, 0-9, -, _ — pick a char that's
+    // guaranteed to differ from the current one.
+    parts[3] = parts[3].slice(0, mid) + (midChar === 'A' ? 'B' : 'A') + parts[3].slice(mid + 1);
     expect(decryptTokens(parts.join('.'))).toBeNull();
   });
 });
