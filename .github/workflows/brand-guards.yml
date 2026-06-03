@@ -43,9 +43,15 @@ jobs:
           # match and the guard would always fail.
           ALLOWLIST_REGEX='^(\./)?(CHANGELOG\.md|README\.md|docs/|app/landing/|app/components/landing/|\.github/workflows/brand-guards\.yml|BRAND\.md)'
 
+          # V105.6-BRAND-HARNES: .hermes/ is the previous orchestrator's working
+          # dir (Hermes sub-agent memory files), .harness/ is THIS orchestrator's
+          # working dir (Mavis team memory, reins, docs). Both legitimately
+          # reference the legacy project name in their own context — they
+          # document the brand history, they're not user-facing paths. Exclude
+          # both directories from the brand-name scan.
           FAILED=0
           for PATTERN in "${FORBIDDEN[@]}"; do
-            HITS=$(grep -rEn --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=target --exclude-dir=.git "$PATTERN" . 2>/dev/null \
+            HITS=$(grep -rEn --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=target --exclude-dir=.git --exclude-dir=\.hermes --exclude-dir=\.harness "$PATTERN" . 2>/dev/null \
               | grep -Ev "$ALLOWLIST_REGEX" || true)
             if [ -n "$HITS" ]; then
               echo "❌ Found forbidden legacy brand name: $PATTERN"
@@ -137,3 +143,4 @@ jobs:
             exit 1
           fi
           echo "✅ No 'as any' casts in src/"
+

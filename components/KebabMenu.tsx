@@ -83,9 +83,15 @@ export function KebabMenu({
     return out;
   }, [items]);
 
+  // V105.1-REACT-19: setReduceMotion is the one-time init from the
+  // media-query system, not a render-derived value. The setState here
+  // is what subscribes this component to the system (same pattern as
+  // useSyncExternalStore). Deferring it via queueMicrotask breaks the
+  // tests that assert reduce-motion behavior synchronously after mount.
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return;
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setReduceMotion(mq.matches);
     const onChange = (e: MediaQueryListEvent) => setReduceMotion(e.matches);
     mq.addEventListener?.('change', onChange);
@@ -107,8 +113,18 @@ export function KebabMenu({
     onOpenChange?.(open);
   }, [open, onOpenChange]);
 
+  // V105.1-REACT-19: setMounted is the standard SSR-skip / deferred
+  // mount pattern — when `open` becomes true we mount the popover,
+  // when it becomes false we delay-unmount to allow the close
+  // animation. The setMounted calls are not cascading because they
+  // represent the "I am now in DOM" signal, not a render-derived
+  // value. Tests assert the menu items are visible synchronously
+  // after the kebab click, so deferring via queueMicrotask breaks
+  // them. Keeping the synchronous setState with a documented
+  // justification.
   useEffect(() => {
     if (open) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMounted(true);
       return;
     }

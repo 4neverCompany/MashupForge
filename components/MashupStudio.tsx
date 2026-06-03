@@ -39,26 +39,31 @@ type OnboardingState =
 function useOnboardingState(): [OnboardingState, (s: OnboardingState) => void] {
   const [state, setState] = useState<OnboardingState>({ kind: 'loading' });
 
+  // V105.1-REACT-19: setState calls are deferred via queueMicrotask
+  // (project convention) so the effect body only reads localStorage,
+  // not local state in the body itself.
   useEffect(() => {
-    try {
-      const completed = localStorage.getItem('mashup.onboarded') === '1';
-      if (completed) { setState({ kind: 'hidden' }); return; }
+    queueMicrotask(() => {
+      try {
+        const completed = localStorage.getItem('mashup.onboarded') === '1';
+        if (completed) { setState({ kind: 'hidden' }); return; }
 
-      const dismissed = localStorage.getItem('mashup.onboardingDismissedAt');
-      if (dismissed) { setState({ kind: 'hidden' }); return; }
+        const dismissed = localStorage.getItem('mashup.onboardingDismissedAt');
+        if (dismissed) { setState({ kind: 'hidden' }); return; }
 
-      const skippedAt = localStorage.getItem('mashup.onboardingSkippedAt');
-      const progressRaw = localStorage.getItem('mashup.onboardingProgress');
-      const progress = progressRaw ? JSON.parse(progressRaw) as { step?: 1 | 2 | 3; lastCompleted?: number } : null;
+        const skippedAt = localStorage.getItem('mashup.onboardingSkippedAt');
+        const progressRaw = localStorage.getItem('mashup.onboardingProgress');
+        const progress = progressRaw ? JSON.parse(progressRaw) as { step?: 1 | 2 | 3; lastCompleted?: number } : null;
 
-      if (skippedAt) {
-        setState({ kind: 'show-pill', lastCompletedStep: progress?.lastCompleted ?? 0 });
-      } else {
-        setState({ kind: 'show-wizard', initialStep: progress?.step ?? 1 });
+        if (skippedAt) {
+          setState({ kind: 'show-pill', lastCompletedStep: progress?.lastCompleted ?? 0 });
+        } else {
+          setState({ kind: 'show-wizard', initialStep: progress?.step ?? 1 });
+        }
+      } catch {
+        setState({ kind: 'show-wizard', initialStep: 1 });
       }
-    } catch {
-      setState({ kind: 'show-wizard', initialStep: 1 });
-    }
+    });
   }, []);
 
   return [state, setState];

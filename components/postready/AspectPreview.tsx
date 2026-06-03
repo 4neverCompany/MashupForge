@@ -47,14 +47,19 @@ export function AspectPreview({
     selectedPlatforms[0] ?? null,
   );
 
+  // V105.1-REACT-19: setActivePlatform deferred via queueMicrotask
+  // (project convention) so the effect body only watches the
+  // platform selection, not local state in the body itself.
   useEffect(() => {
-    if (selectedPlatforms.length === 0) {
-      setActivePlatform(null);
-      return;
-    }
-    if (!activePlatform || !selectedPlatforms.includes(activePlatform)) {
-      setActivePlatform(selectedPlatforms[0]);
-    }
+    queueMicrotask(() => {
+      if (selectedPlatforms.length === 0) {
+        setActivePlatform(null);
+        return;
+      }
+      if (!activePlatform || !selectedPlatforms.includes(activePlatform)) {
+        setActivePlatform(selectedPlatforms[0]);
+      }
+    });
   }, [selectedPlatforms, activePlatform]);
 
   const aspect = getAspectFor(activePlatform);

@@ -83,6 +83,31 @@ export function UpdateChecker() {
   const { isDesktop } = useDesktopConfig();
   const [state, setState] = useState<State>({ kind: 'idle' });
   const ranRef = useRef(false);
+  // V105.1-REACT-19: Date.now() during render is impure. Use a state-backed
+  // "now" updated by an effect so the displayed minutesLeft in the
+  // postponed banner is a pure function of (state, now). Tick at 30s —
+  // we only render minutes, so 30s granularity is fine and the interval
+  // cost is negligible.
+  const [now, setNow] = useState<number | null>(null);
+  // V105.1-REACT-19: setNow is deferred via queueMicrotask (project
+  // convention) so the effect body only manages the 30s tick (external
+  // system), not local state in the body itself.
+  // V105.6-REACT-19-REVIEW: `active` flag prevents the microtask
+  // from running setNow on an unmounted component (e.g. UpdateChecker
+  // unmounts when the user navigates away from the studio).
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) setNow(Date.now());
+    });
+    const id = setInterval(() => {
+      if (active) setNow(Date.now());
+    }, 30_000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, []);
   // FEAT-006: when the launch-time check resolves an update under 'auto'
   // mode, this ref is flipped so the auto-trigger effect knows to fire
   // handleUpdate as soon as state becomes 'available'.
@@ -384,20 +409,37 @@ export function UpdateChecker() {
   // while in `restart-pending` and fires relaunch() the instant it
   // reaches 0. Cleanup on unmount / state change prevents a stale timer
   // from firing after the user clicks "Restart now".
+  // V105.1-REACT-19: triggerRelaunch and setState are deferred via
+  // queueMicrotask (project convention) so the effect body only
+  // manages the countdown timer (external system), not local state
+  // in the body itself.
+  // V105.6-REACT-19-REVIEW: `active` flag prevents the timer
+  // callback from running setState / triggerRelaunch after the
+  // effect has been cleaned up (e.g. the user clicks "Restart now"
+  // while the 1-second tick is in flight, cancelling the countdown).
   useEffect(() => {
     if (state.kind !== 'restart-pending') return;
-    if (state.secondsLeft <= 0) {
-      void triggerRelaunch();
-      return;
-    }
-    const handle = window.setTimeout(() => {
-      setState((prev) =>
-        prev.kind === 'restart-pending'
-          ? { ...prev, secondsLeft: Math.max(0, prev.secondsLeft - 1) }
-          : prev,
-      );
-    }, 1000);
-    return () => window.clearTimeout(handle);
+    let active = true;
+    let handle: ReturnType<typeof setTimeout> | undefined;
+    queueMicrotask(() => {
+      if (!active) return;
+      if (state.secondsLeft <= 0) {
+        void triggerRelaunch();
+        return;
+      }
+      handle = setTimeout(() => {
+        if (!active) return;
+        setState((prev) =>
+          prev.kind === 'restart-pending'
+            ? { ...prev, secondsLeft: Math.max(0, prev.secondsLeft - 1) }
+            : prev,
+        );
+      }, 1000);
+    });
+    return () => {
+      active = false;
+      if (handle !== undefined) clearTimeout(handle);
+    };
   }, [state, triggerRelaunch]);
 
   const handleUpdate = useCallback(async () => {
@@ -597,7 +639,7 @@ export function UpdateChecker() {
   // FEAT-006: postponed banner — non-dismissable, lets the user know the
   // update will install as soon as the pipeline finishes (or in 2h).
   if (state.kind === 'postponed') {
-    const minutesLeft = Math.max(0, Math.round((state.deadline - Date.now()) / 60000));
+    const minutesLeft = now === null ? 0 : Math.max(0, Math.round((state.deadline - now) / 60000));
     return (
       <div className="fixed bottom-4 right-4 z-[100] max-w-sm w-[calc(100%-2rem)] sm:w-96">
         <div className="rounded-xl border border-[#c5a062]/30 bg-[#050505]/95 backdrop-blur-md shadow-xl p-4">

@@ -33,8 +33,12 @@ export function InlineCaptionEditor({
 
   // Keep the draft in sync when the parent caption changes externally
   // (e.g. another save lands while we're not editing).
+  //
+  // V105.1-REACT-19: setDraft deferred via queueMicrotask (project
+  // convention) so the effect body only watches caption + editing, not
+  // local state in the body itself.
   useEffect(() => {
-    if (!editing) setDraft(caption ?? '');
+    if (!editing) queueMicrotask(() => setDraft(caption ?? ''));
   }, [caption, editing]);
 
   useEffect(() => {

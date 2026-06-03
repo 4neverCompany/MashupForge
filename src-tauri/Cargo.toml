@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.0.4"
+version = "1.0.6"
 description = "MashupForge — AI-driven multiverse crossover content studio (Tauri desktop shell)"
 authors = ["Maurice (4neverCompany)"]
 license = "AGPL-3.0-or-later"
@@ -30,3 +30,5 @@ tauri-plugin-updater = "=2.10.1"
 tauri-plugin-store = "2"
 tauri-plugin-process = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+
+

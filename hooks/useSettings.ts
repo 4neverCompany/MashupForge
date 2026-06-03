@@ -67,11 +67,13 @@ export function useSettings() {
   const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
   const [saveState, setSaveState] = useState<SettingsSaveState>({ kind: 'idle' });
 
-  // Always-current ref used by the beforeunload flush below. Updated
-  // synchronously on every render so the handler never closes over a
-  // stale value without needing to re-subscribe the listener.
+  // Always-current ref used by the beforeunload flush below. Mirrored
+  // via useEffect so the ref is up-to-date by the time the handler
+  // fires, without mutating it during render (V105.1-REACT-19).
   const settingsRef = useRef(settings);
-  settingsRef.current = settings;
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   // PROP-010: load path. Defensive `typeof === 'object'` guard rejects any
   // corrupted/non-object value left over from the pre-fix race that could

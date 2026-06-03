@@ -137,7 +137,7 @@ export function Features() {
             transition={{ duration: 0.6, delay: 0.1 }}
             className="mt-5 text-base text-zinc-400 sm:text-lg"
           >
-            MashupForge is built around one principle: a post that isn't on the
+            MashupForge is built around one principle: a post that isn&apos;t on the
             feed is a post you lost. Every guardrail below exists to keep your
             content moving.
           </motion.p>

@@ -8,11 +8,16 @@ const STABLE_PORT = '19782';
 export function PortConflictBanner() {
   const [ephemeral, setEphemeral] = useState(false);
 
+  // V105.1-REACT-19: setState deferred via queueMicrotask (project
+  // convention) so the effect body only reads window.location, not
+  // local state.
   useEffect(() => {
-    const port = window.location.port;
-    if (port && port !== STABLE_PORT) {
-      setEphemeral(true);
-    }
+    queueMicrotask(() => {
+      const port = window.location.port;
+      if (port && port !== STABLE_PORT) {
+        setEphemeral(true);
+      }
+    });
   }, []);
 
   if (!ephemeral) return null;

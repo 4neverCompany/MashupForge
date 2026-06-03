@@ -183,7 +183,7 @@ export function Step1Platform({ selected, onSelect, saved, onSaved, onSkip }: St
               onClick={onSkip}
               className="text-xs text-zinc-500 hover:text-zinc-300"
             >
-              I'll do this later — let me explore first
+              I&apos;ll do this later — let me explore first
             </button>
           </div>
         </div>

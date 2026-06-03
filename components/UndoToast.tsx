@@ -8,7 +8,7 @@
  * pre-action state from a snapshot it captured beforehand).
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Undo2, X } from 'lucide-react';
 
 interface Props {
@@ -20,21 +20,48 @@ interface Props {
 
 export const UndoToast: React.FC<Props> = ({ message, durationMs, onUndo, onDismiss }) => {
   const [remainingMs, setRemainingMs] = useState(durationMs);
-  const deadlineRef = useRef<number>(Date.now() + durationMs);
+  // V105.1-REACT-19: was `useRef<number>(Date.now() + durationMs)` —
+  // Date.now() during render is flagged as impure. Use a state with a
+  // lazy initializer so the Date.now() call is bound to the
+  // useState's "initial value" semantics, not render-body code.
+  const [deadline, setDeadline] = useState<number>(() => Date.now() + durationMs);
 
+  // V105.1-REACT-19: setDeadline + setRemainingMs are deferred via
+  // queueMicrotask (project convention) so the effect body only
+  // manages the countdown interval (external system), not local state
+  // in the body itself.
+  // V105.6-REACT-19-REVIEW: `active` flag prevents the interval
+  // callback from running setState after the effect has been cleaned
+  // up (e.g. if the parent re-renders UndoToast with a new
+  // durationMs while the microtask is in flight, the old interval
+  // would be cleared but the new one might never start because the
+  // microtask had already captured the stale `deadline` value).
   useEffect(() => {
-    deadlineRef.current = Date.now() + durationMs;
-    setRemainingMs(durationMs);
-    const id = setInterval(() => {
-      const left = deadlineRef.current - Date.now();
-      if (left <= 0) {
-        clearInterval(id);
-        onDismiss();
-        return;
-      }
-      setRemainingMs(left);
-    }, 100);
-    return () => clearInterval(id);
+    let active = true;
+    let id: ReturnType<typeof setInterval> | undefined;
+    queueMicrotask(() => {
+      if (!active) return;
+      const startDeadline = Date.now() + durationMs;
+      setDeadline(startDeadline);
+      setRemainingMs(durationMs);
+      id = setInterval(() => {
+        if (!active) {
+          clearInterval(id);
+          return;
+        }
+        const left = startDeadline - Date.now();
+        if (left <= 0) {
+          clearInterval(id);
+          onDismiss();
+          return;
+        }
+        setRemainingMs(left);
+      }, 100);
+    });
+    return () => {
+      active = false;
+      if (id !== undefined) clearInterval(id);
+    };
   }, [durationMs, onDismiss]);
 
   const pct = Math.max(0, Math.min(100, (remainingMs / durationMs) * 100));

@@ -168,7 +168,11 @@ function DiagnosticLog() {
   const [trace, setTrace] = useState<ReturnType<typeof getUpdaterTrace>>([]);
 
   const refresh = useCallback(() => setTrace(getUpdaterTrace()), []);
-  useEffect(() => { if (open) refresh(); }, [open, refresh]);
+  // V105.1-REACT-19: refresh (setState) deferred via queueMicrotask
+  // (project convention) so the effect body only watches `open`.
+  useEffect(() => {
+    if (open) queueMicrotask(refresh);
+  }, [open, refresh]);
 
   const handleCopy = useCallback(() => {
     try { void navigator.clipboard.writeText(trace.map(formatTraceEntry).join('\n')); } catch { /* best-effort */ }

@@ -221,7 +221,12 @@ export function HeatmapTooltip({
   onScheduleClick,
 }: HeatmapTooltipProps) {
   const [mounted, setMounted] = React.useState(false);
-  React.useEffect(() => { setMounted(true); }, []);
+  // V105.1-REACT-19: setState deferred via queueMicrotask (project
+  // convention) so the effect body only triggers the SSR-skip mount
+  // signal, not local state in the body itself.
+  React.useEffect(() => {
+    queueMicrotask(() => setMounted(true));
+  }, []);
   if (!mounted || typeof document === 'undefined') return null;
 
   const samples = engagement.samples ?? 0;

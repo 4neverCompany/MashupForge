@@ -115,7 +115,7 @@ Everything below is the long form.
 │   └── tauri-windows.yml          · THE release pipeline (replaces release.yml)
 │
 ├── tests/                     ← Vitest, happy-dom (NOT jsdom — that was v1.0.2)
-│   ├── lib/                        · 1,243 tests
+│   ├── lib/                        · 1,243 tests passing as of v1.0.6 (see §commit v1.0.6 below)
 │   ├── components/                 · a few React component tests
 │   └── ...
 │
@@ -288,9 +288,29 @@ Failing any fails the build. Use `scripts/release.sh` — it bumps all three.
   contains the legacy name "Multiverse Mashup Studio". Add `.hermes/`
   to the brand-guard's `paths-ignore` (it's a sub-agent memory file, not
   a user-facing path) — OR fix the legacy-name grep to be smarter.
-- Also: 37 ESLint `as any` errors in `useReconciler`, `useSettings`,
-  `lib/persistence`. The `as any` regex is too strict — it flags comments
-  and error-path narrows that aren't real type holes. Tighten the regex.
+  **Fixed in v1.0.6** — `.hermes/` added to `paths-ignore`.
+- Also: **NOT** 37 ESLint `as any` errors. The handoff got this wrong.
+  Real count at v1.0.4 HEAD was 35 errors that were actually React 19
+  strict-mode rule violations:
+  - 20 × `react-hooks/set-state-in-effect` (setState in effect body)
+  -  9 × `react-hooks/refs` (ref mutation during render)
+  -  3 × `react-hooks/purity` (`Date.now()` in render)
+  -  3 × `react/no-unescaped-entities` (unescaped `'` in JSX)
+  **All 35 fixed in v1.0.6** via the queueMicrotask project
+  convention (see `HiggsfieldConnection.tsx` for the original) plus
+  moving ref-mirroring-state from render to `useEffect`. 3 documented
+  exceptions in `KebabMenu.tsx` and `CarouselApprovalCard.tsx` keep
+  synchronous setState with `eslint-disable-next-line` because the
+  `queueMicrotask` wrap broke test `act()` blocks.
+- Also: **NOT** "1,243/1,243 tests pass" at v1.0.4 HEAD. Real count
+  was 1,199/1,243 with 44 failures (all `localStorage`-related).
+  Root cause was Node 25's built-in `globalThis.localStorage` (a
+  non-functional stub unless `--localstorage-file=<path>` is
+  passed) shadowing the test env's `localStorage`. **Fixed in
+  v1.0.6** via `tests/setup/node25-localstorage-shim.ts` —
+  installs a working in-memory `localStorage` on globalThis BEFORE
+  the test env initializes, so jsdom/happy-dom both get to
+  overwrite it with their own. Result: 1,243/1,243 pass.
 
 ### 7.2 Higgsfield prompt engineering v2 (3-5 days) — **A**
 
@@ -344,7 +364,7 @@ bunx vitest run --watch             # watch mode
 bunx tsc --noEmit                   # typecheck only
 
 # Lint
-bunx eslint .                       # ~37 errors in useReconciler/useSettings/lib/persistence
+bunx eslint .                       # 0 errors as of v1.0.6 (was 35 React 19 strict-rule errors at v1.0.4 HEAD)
 
 # Bundle size check (runs as part of `bun run build`)
 node scripts/check-bundle-size.mjs  # fails if any route > 300 KB gzipped
@@ -465,3 +485,4 @@ v1.0.5 candidates.
 ---
 
 *— end of handoff. You have the full picture. Build something good. —*
+

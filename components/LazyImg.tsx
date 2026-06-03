@@ -25,8 +25,13 @@ export function LazyImg({ src, rootMargin = '200px', ...rest }: LazyImgProps) {
 
   useEffect(() => {
     if (shouldLoad) return;
+    // V105.1-REACT-19: setState deferred via queueMicrotask (project
+    // convention) so the effect body only attaches the IntersectionObserver,
+    // not local state. Return early before constructing the IO when the
+    // host doesn't expose one (happy-dom test env) so the microtask
+    // actually fires and the fallback path is taken.
     if (typeof IntersectionObserver === 'undefined') {
-      setShouldLoad(true);
+      queueMicrotask(() => setShouldLoad(true));
       return;
     }
     const el = ref.current;

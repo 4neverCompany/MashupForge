@@ -52,10 +52,16 @@ export function ParamSuggestionCard({
   // this, the card keeps showing the previous suggestion's modelIds /
   // perModel until the user toggles the card off and on — which is the
   // "press suggest twice" bug.
+  //
+  // V105.1-REACT-19: setState deferred via queueMicrotask (project
+  // convention) so the effect body only triggers a re-sync, not local
+  // state updates in the effect body itself.
   useEffect(() => {
-    setPerModel(structuredClone(suggestion.perModel));
-    setModelIds([...suggestion.modelIds]);
-    setEditMode(false);
+    queueMicrotask(() => {
+      setPerModel(structuredClone(suggestion.perModel));
+      setModelIds([...suggestion.modelIds]);
+      setEditMode(false);
+    });
   }, [suggestion]);
 
   const updateImageField = <K extends keyof PerModelImageSuggestion>(
