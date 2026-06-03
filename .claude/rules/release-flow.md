@@ -102,6 +102,18 @@ The motivation: conventional-commit subjects like `feat(higgsfield): MCP-server 
 
 Keep it under 200 lines. The auto-gen sections below will pick up the mechanical details.
 
+## After the release workflow finishes
+
+The `.github/workflows/release.yml` uses GitHub's `generate_release_notes: true` to auto-populate the draft release body from PR + commit history. This misses the highlights file — the user-facing "what does this release mean for me" prose. After the workflow completes:
+
+1. Go to `https://github.com/Code4neverCompany/MashupForge/releases/tag/v<ver>` (draft, not yet published)
+2. Click "Edit"
+3. Replace the auto-generated body with the content of `docs/changelog-highlights/<ver>.md` (copy-paste)
+4. The full Highlights block (🎬 Highlights, 🔧 Breaking changes, 📋 Migration notes, 🧪 Test summary, 📚 Research artifacts, 🙏 Credits) is the canonical release story
+5. Promote the draft to public
+
+Why we do this manually: the auto-generated notes are useful for archeology (commit-by-commit diff) but read like a robot. The highlights file is the hand-curated user-facing story. Both are valuable; the operator's job is to make the highlights the primary content.
+
 ## What the workflow checks
 
 `tauri-windows.yml` enforces three invariants at "Check version parity with tag":
