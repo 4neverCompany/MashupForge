@@ -60,6 +60,14 @@ Carousel-aware cards, inline caption edits, undo for the 3am brain.
 Hit approve, ship it. The reconciler catches drift on next launch.
 
 </td>
+<td width="50%">
+
+### 🎬 Higgsfield MCP (v1.0.4+)
+OAuth-linked access to **30+ image and video models** — Nano Banana Pro,
+FLUX.2, Seedance 2.0, Veo 3.1, Kling 3.0, MiniMax Hailuo 02. **Peer** to
+Leonardo, not a replacement: pick per idea which engine runs.
+
+</td>
 </tr>
 </table>
 

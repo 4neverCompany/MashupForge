@@ -48,7 +48,12 @@ export interface GeneratedImage {
   postedTo?: string[];
   postError?: string;
   modelInfo?: {
-    provider: 'leonardo' | 'minimax';
+    // HIGGSFIELD-INTEGRATION: widened to include `'higgsfield'` for
+    // the new MCP-backed image provider. Each branch in
+    // useImageGeneration's provider switch writes one of the three
+    // values here so post-lifecycle / state-machine code can route
+    // error messages correctly.
+    provider: 'leonardo' | 'minimax' | 'higgsfield';
     modelId: string;
     modelName: string;
   };
@@ -113,8 +118,13 @@ export interface GenerateOptions {
    * models, `'minimax'` for MiniMax-native models like image-01). Set
    * explicitly when the caller needs to force a route; otherwise the
    * model entry decides.
+   *
+   * HIGGSFIELD-INTEGRATION: `'higgsfield'` is the third image
+   * provider. The /api/higgsfield/{image,video} routes forward to
+   * the MCP `higgsfield_generate` tool with the model's `apiName`
+   * (Higgsfield job_set_type slug) as the `model` arg.
    */
-  imageProvider?: 'leonardo' | 'minimax';
+  imageProvider?: 'leonardo' | 'minimax' | 'higgsfield';
   leonardoModel?: string;
   skipEnhance?: boolean;
   style?: string;
@@ -229,6 +239,19 @@ export interface UserSettings {
   };
   defaultLeonardoModel: string;
   defaultVideoModel?: string;
+  /**
+   * HIGGSFIELD-INTEGRATION: per-user default models for the
+   * Higgsfield MCP-backed image + video generation. Populated by
+   * the Settings → AI Engine → Higgsfield panel; consumed by
+   * useImageGeneration when the user picks a higgsfield-* spec
+   * (and by the pipeline when `imageSource === 'higgsfield'`).
+   * Slugs are `job_set_type` strings (e.g. 'nano_banana_2',
+   * 'seedance_2_0') from lib/higgsfield/models.ts.
+   */
+  defaultHiggsfieldImageModel?: string;
+  defaultHiggsfieldVideoModel?: string;
+  /** Cached connection state for the Settings panel. */
+  higgsfieldConnected?: boolean;
   defaultAnimationDuration?: 3 | 5 | 10;
   defaultAnimationStyle?: string;
   watermark?: WatermarkSettings;

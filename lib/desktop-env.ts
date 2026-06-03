@@ -19,11 +19,16 @@
  * This module is imported from the Tauri server wrapper (`scripts/tauri-
  * server-wrapper.js`), not from Next itself. The wrapper calls
  * `hydrateDesktopEnv()` at process start, then requires `server.js`.
+ *
+ * HIGGSFIELD-OAUTH-KEY-CRUD: OAuth client_id + AES salt are written
+ * to config.json by /api/higgsfield/oauth/authorize. `readDesktopConfigValue`
+ * and `writeDesktopConfigValue` give routes a single-key read / atomic
+ * write without re-parsing the whole file.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 export interface HydrateResult {
   loaded: boolean;
@@ -46,6 +51,69 @@ export function getDesktopConfigPath(): string {
   }
   const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
   return join(xdg, 'MashupForge', 'config.json');
+}
+
+/**
+ * Read a single key from config.json. Returns undefined if the file
+ * doesn't exist or the key is missing/empty. On the web build the
+ * function is harmless — config.json is not present so the early
+ * return fires.
+ */
+export function readDesktopConfigValue(key: string): string | undefined {
+  const path = getDesktopConfigPath();
+  if (!existsSync(path)) return undefined;
+  try {
+    const raw = readFileSync(path, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const v = (parsed as Record<string, unknown>)[key];
+    return typeof v === 'string' && v.length > 0 ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Write a single key to config.json. Creates the parent dir + file
+ * if missing. Loads the existing JSON, merges the new value, writes
+ * back atomically (write to a temp file in the same dir, then
+ * rename) so a partial write can't corrupt the file.
+ *
+ * Empty string is treated as "delete" — matches the convention from
+ * the FieldRouter PATCH endpoint that empties secrets to remove them.
+ */
+export function writeDesktopConfigValue(key: string, value: string): void {
+  const path = getDesktopConfigPath();
+  let current: Record<string, unknown> = {};
+  if (existsSync(path)) {
+    try {
+      const raw = readFileSync(path, 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        current = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Corrupt config — back it up and start fresh so we don't
+      // overwrite the user's other keys silently.
+      try {
+        writeFileSync(`${path}.broken-${Date.now()}`, readFileSync(path));
+      } catch { /* ignore */ }
+      current = {};
+    }
+  }
+  if (value.length === 0) {
+    delete current[key];
+  } else {
+    current[key] = value;
+  }
+  // Ensure dir exists, then atomic-ish write (write to temp + rename).
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(current, null, 2), 'utf8');
+  // POSIX rename is atomic; on Windows renameSync overwrites if dest
+  // exists, which is the behaviour we want here.
+  const { renameSync } = require('node:fs') as typeof import('node:fs');
+  renameSync(tmp, path);
 }
 
 export function hydrateDesktopEnv(): HydrateResult {

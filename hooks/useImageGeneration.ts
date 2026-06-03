@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { streamAIToString, extractJsonArrayFromLLM } from '@/lib/aiClient';
 import { enhancePromptForModel } from '@/lib/modelOptimizer';
 import { buildEnhancedPrompt } from '@/lib/image-prompt-builder';
+import { getModelSpec } from '@/lib/model-specs';
 import { MASTERPROMPT_INSTRUCTIONS } from '@/lib/masterpromptTemplate';
 import { getErrorMessage } from '@/lib/errors';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
@@ -352,6 +353,96 @@ interface MinimaxImageParams {
   quantity?: number;
   promptOptimizer?: boolean;
   seed?: number;
+}
+
+/**
+ * HIGGSFIELD-INTEGRATION: submit a generation through the Higgsfield
+ * MCP server (via the /api/higgsfield/image route). Same
+ * `LeonardoSuccess` return shape as the other providers. The route
+ * may return a `completed: false` + `requestId` when the job is
+ * long-running; we poll the status route in that case (capped at
+ * 5 minutes, matching the Leonardo polling shape).
+ *
+ * Errors propagate as plain `Error` with the route's `error` field
+ * as the message. 401 means the user needs to OAuth their Higgsfield
+ * account in Settings (we don't try to re-auth from the client).
+ */
+interface HiggsfieldImageParams {
+  prompt: string;
+  modelId: string;            // e.g. 'higgsfield-nano-banana-pro'
+  apiName: string;            // e.g. 'nano_banana_2'
+  aspectRatio?: string;
+  resolution?: '1k' | '2k' | '4k';
+  quality?: 'low' | 'medium' | 'high';
+  submodel?: 'pro' | 'flex' | 'max';
+  referenceImageUrl?: string;
+  seed?: number;
+}
+
+interface HiggsfieldImageResult extends LeonardoSuccess {
+  enhancedPrompt: string;
+}
+
+async function submitHiggsfieldImage(params: HiggsfieldImageParams): Promise<HiggsfieldImageResult> {
+  const res = await fetchWithRetry('/api/higgsfield/image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt: params.prompt,
+      model: params.apiName,
+      aspectRatio: params.aspectRatio,
+      resolution: params.resolution,
+      quality: params.quality,
+      // FLUX.2 sub-model: we forward as part of the prompt args; the
+      // route includes it only when the model is flux_2.
+      referenceImageUrl: params.referenceImageUrl,
+      seed: params.seed,
+    }),
+  });
+  if (!res.ok) {
+    let errMessage = 'Higgsfield image generation failed';
+    try {
+      const errData = await res.json();
+      errMessage = errData.error || errMessage;
+    } catch {
+      const text = await res.text();
+      errMessage = `Server error (${res.status}): ${text.slice(0, 100)}…`;
+    }
+    throw new Error(errMessage);
+  }
+  const data = (await res.json()) as {
+    completed?: boolean;
+    imageUrl?: string;
+    requestId?: string;
+    model?: string;
+  };
+  if (data.completed && typeof data.imageUrl === 'string' && data.imageUrl) {
+    return { url: data.imageUrl, enhancedPrompt: params.prompt };
+  }
+  if (data.requestId) {
+    // Async path: poll /api/higgsfield/status/{requestId}. Same 2s
+    // interval + 5min cap as the Leonardo path.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    for (let i = 0; i < 150; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const statusRes = await fetch(`/api/higgsfield/status/${data.requestId}`);
+      if (!statusRes.ok) continue;
+      const status = (await statusRes.json()) as {
+        status?: string;
+        imageUrl?: string;
+        videoUrl?: string;
+        error?: string;
+      };
+      if (status.status === 'completed' && typeof status.imageUrl === 'string') {
+        return { url: status.imageUrl, enhancedPrompt: params.prompt };
+      }
+      if (status.status === 'failed' || status.status === 'nsfw') {
+        throw new Error(status.error || `Higgsfield job ${status.status}`);
+      }
+    }
+    throw new Error('Timeout waiting for Higgsfield image');
+  }
+  throw new Error('Higgsfield returned no image URL or request id');
 }
 
 async function submitMinimaxImage(params: MinimaxImageParams): Promise<LeonardoSuccess> {
@@ -995,6 +1086,34 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             });
             activePrompt = enhanced.prompt;
             retried = false;
+          } else if (imageProvider === 'higgsfield') {
+            // HIGGSFIELD-INTEGRATION: forward to /api/higgsfield/image.
+            // The route resolves the MCP `higgsfield_generate` tool
+            // and returns either a ready URL or a requestId we then
+            // poll via /api/higgsfield/status. No moderation retry
+            // here — Higgsfield returns 422 with a structured error
+            // for blocked prompts and we surface it as-is. The
+            // user's "Connect Higgsfield" decision in Settings
+            // gates this path; an unconnected account returns 401
+            // which we surface verbatim.
+            // `apiName` comes from the model-spec JSON (lib/model-specs)
+            // for the higgsfield-* entries we just added — those specs
+            // carry the Higgsfield job_set_type slug (`nano_banana_2`,
+            // `seedance_2_0`, etc.). LEONARDO_MODELS does not have
+            // these models so we don't fall through to modelConfig.apiName.
+            const hfSpec = getModelSpec(selectedModel);
+            const hf = await submitHiggsfieldImage({
+              prompt: enhanced.prompt,
+              modelId: selectedModel,
+              apiName: enhanced.higgsfield.model || hfSpec?.apiName || 'nano_banana_2',
+              aspectRatio: currentAspectRatio,
+              resolution: enhanced.higgsfield.resolution,
+              quality: enhanced.higgsfield.quality,
+              seed: enhanced.higgsfield.seed,
+            });
+            success = { url: hf.url };
+            activePrompt = enhanced.prompt;
+            retried = false;
           } else if (settings.activeAiAgent === 'vercel-ai') {
             // Hybrid orchestrator path: server-side MiniMax-enhance +
             // Leonardo-submit via /api/ai/image, then poll via the
@@ -1226,6 +1345,23 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             quantity: 1,
             promptOptimizer: enhanced.prompt.length < 180,
           });
+          activePrompt = enhanced.prompt;
+          retried = false;
+        } else if (imageProvider === 'higgsfield') {
+          // HIGGSFIELD-INTEGRATION: reroll path. Same submit helper
+          // as the main loop — the model + aspect ratio come from
+          // the reroll inputs and the spec.
+          const hfSpecR = getModelSpec(selectedModel);
+          const hf = await submitHiggsfieldImage({
+            prompt: enhanced.prompt,
+            modelId: selectedModel,
+            apiName: enhanced.higgsfield.model || hfSpecR?.apiName || 'nano_banana_2',
+            aspectRatio: currentAspectRatio,
+            resolution: enhanced.higgsfield.resolution,
+            quality: enhanced.higgsfield.quality,
+            seed: enhanced.higgsfield.seed,
+          });
+          success = { url: hf.url };
           activePrompt = enhanced.prompt;
           retried = false;
         } else if (settings.activeAiAgent === 'vercel-ai') {
