@@ -7,6 +7,7 @@ paths:
   - "scripts/release.sh"
   - ".github/workflows/tauri-windows.yml"
   - "CHANGELOG.md"
+  - "docs/changelog-highlights/**"
 ---
 
 # MashupForge release flow
@@ -18,19 +19,88 @@ Before v0.9.40 the script didn't touch `Cargo.lock`, which caused two separate r
 ## The canonical release sequence
 
 ```bash
-# 1. Bump everything + commit.
-bash scripts/release.sh 0.9.X
+# 0. (Optional but recommended) Write the hand-curated highlights.
+#    This is the "what does this release mean for the user" prose that
+#    mechanical commit subjects can't capture — migration notes, breaking
+#    changes, the 2-4 most-important user-facing changes, credit / pricing
+#    notes, etc. If skipped, the CHANGELOG entry will be auto-gen only and
+#    the script will print a warning.
+cat > docs/changelog-highlights/<ver>.md <<'EOF'
+# <ver> — <one-line title>
+
+## 🎬 Highlights
+
+### <one user-facing change>
+<why it matters, what to do, link to docs>
+
+### <another change>
+<...>
+
+## 🔧 Breaking changes
+<none, or "X was removed / changed. See migration.md for the path.">
+
+## 📋 Migration notes
+<step-by-step if needed, otherwise "no action required">
+
+## 🙏 Credits
+<optional, shout-outs to contributors / inspirations>
+EOF
+git add docs/changelog-highlights/<ver>.md
+git commit -m "docs(changelog): add v<ver> highlights"
+
+# 1. Bump everything + commit. The script splices the highlights file in
+#    above the auto-gen sections.
+bash scripts/release.sh <ver>
 
 # 2. Push + tag. The tag-push triggers tauri-windows.yml.
 git push origin main
-git tag -a v0.9.X -m "Release v0.9.X"
-git push origin v0.9.X
+git tag -a v<ver> -m "Release v<ver>"
+git push origin v<ver>
 
 # 3. Watch the build (~25-30 min on Windows-latest).
 gh -R Code4neverCompany/MashupForge run watch <run-id> --exit-status
 ```
 
-If you find yourself making a "refresh Cargo.lock for v0.9.X" companion commit after `release.sh`, something regressed in the script — that step should be automatic now.
+If you find yourself making a "refresh Cargo.lock for v<ver>" companion commit after `release.sh`, something regressed in the script — that step should be automatic now.
+
+## Highlights-file workflow
+
+`docs/changelog-highlights/<ver>.md` is the **single source of truth for user-facing release notes**. It is:
+
+- **Hand-curated**, not auto-generated. The author picks the 2-4 most important user-facing changes, writes migration notes, calls out breaking changes, and credits contributors.
+- **Pre-release**, committed BEFORE running `release.sh`. The script splices it into the CHANGELOG entry above the auto-gen sections. If the file is missing, the script emits a warning and proceeds with auto-gen only.
+- **Idempotent**. Re-running `release.sh` re-emits the auto-gen sections in place and re-splices the highlights. Backfilling the highlights file later + re-running produces the correct final entry.
+- **Visible in git log** — the highlights content is included as the body of the `chore(release): v<ver>` commit, so `git show <tag>` and `git log v<ver>` both display the full release notes.
+- **Reviewed in PR**. Because the highlights file is committed BEFORE the release script runs, the highlight prose goes through normal PR review alongside the code change.
+
+The motivation: conventional-commit subjects like `feat(higgsfield): MCP-server integration` are useful for archeology but useless for end-users trying to decide whether to update. The highlights file is where the user-facing story gets told.
+
+### Skeleton template
+
+```markdown
+# <ver> — <one-line title>
+
+## 🎬 Highlights
+
+### <the 1-3 most important user-facing changes>
+<why it matters, what to do, link to docs>
+
+## 🔧 Breaking changes
+<none, or "X was removed / changed. See migration.md for the path.">
+
+## 📋 Migration notes
+<step-by-step if needed, otherwise "no action required">
+
+## 🧪 Test summary
+- N/N tests pass
+- bundle size
+- any pre-release manual QA results
+
+## 🙏 Credits
+<optional, shout-outs to contributors / inspirations>
+```
+
+Keep it under 200 lines. The auto-gen sections below will pick up the mechanical details.
 
 ## What the workflow checks
 

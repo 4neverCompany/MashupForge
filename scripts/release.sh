@@ -123,6 +123,45 @@ if [ "$(wc -l < "${block}")" -le 1 ]; then
   printf '\n_Internal-only release; no user-facing changes since %s._\n' "${prev_tag}" >> "${block}"
 fi
 
+# ── Hand-curated highlights (pre-release, opt-in) ──────────────────────
+# If the release operator wrote `docs/changelog-highlights/<version>.md`
+# (without the v prefix) before running this script, splice it into the
+# new block ABOVE the auto-generated conventional-commit sections. This is
+# the place for the "what does this release mean for the user" prose
+# that mechanical commit subjects can't capture — migration notes,
+# breaking-change callouts, the 2-4 most-important user-facing changes,
+# credit / pricing notes, etc.
+#
+# Fallback: if the highlights file doesn't exist (forgotten / skipped),
+# the block is just the auto-gen sections. Add a warning so the operator
+# notices and can backfill before pushing.
+highlights_file="docs/changelog-highlights/${VERSION}.md"
+if [ -f "${highlights_file}" ]; then
+  echo "Splicing hand-curated highlights from ${highlights_file}..."
+  highlights_block="$(mktemp)"
+  trap 'rm -f "${block}" "${new_changelog}" "${highlights_block}"' EXIT
+  {
+    printf '## 🎬 Highlights\n\n'
+    # Strip a single leading '# ' if present (operator may have written a
+    # standalone H1). Skip blank lines at the very top of the file.
+    sed -E '/./,$!d' "${highlights_file}" \
+      | sed -E '1s/^# //' \
+      | sed -E '1{/^$/d}'
+    printf '\n---\n'
+  } > "${highlights_block}"
+  cat "${highlights_block}" "${block}" > "${block}.new"
+  mv "${block}.new" "${block}"
+else
+  echo
+  echo "⚠️  No highlights file at ${highlights_file}"
+  echo "   CHANGELOG entry will be auto-gen only. To backfill later:"
+  echo "     1. Write ${highlights_file} (Markdown, hand-curated)"
+  echo "     2. Re-run:  ./scripts/release.sh ${VERSION}"
+  echo "   The auto-gen sections will be re-emitted in place; the highlights"
+  echo "   block will be spliced in above them on the second pass."
+  echo
+fi
+
 # Insert the new block above the first existing version block. The intro
 # header (everything from line 1 up to the first version heading) is
 # preserved verbatim. If no prior version block exists, append after the
