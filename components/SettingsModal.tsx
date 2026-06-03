@@ -535,17 +535,27 @@ export function SettingsModal({
   // V105.1-REACT-19: setState deferred via queueMicrotask (project
   // convention) so the effect body only manages the fade-out timer
   // (external system), not local state in the body.
+  // V105.6-REACT-19-REVIEW: `active` flag prevents the microtask
+  // body and the timer callback from running setState after the
+  // effect has been cleaned up (avoid "setState on unmounted"
+  // and a leaked timer if saveState changes during the microtask
+  // scheduling window).
   useEffect(() => {
+    let active = true;
     let fadeTimer: ReturnType<typeof setTimeout> | undefined;
     queueMicrotask(() => {
+      if (!active) return;
       if (saveState.kind !== 'saved') {
         setShowSavedPill(false);
         return;
       }
       setShowSavedPill(true);
-      fadeTimer = setTimeout(() => setShowSavedPill(false), 1500);
+      fadeTimer = setTimeout(() => {
+        if (active) setShowSavedPill(false);
+      }, 1500);
     });
     return () => {
+      active = false;
       if (fadeTimer !== undefined) clearTimeout(fadeTimer);
     };
   }, [saveState]);

@@ -92,10 +92,21 @@ export function UpdateChecker() {
   // V105.1-REACT-19: setNow is deferred via queueMicrotask (project
   // convention) so the effect body only manages the 30s tick (external
   // system), not local state in the body itself.
+  // V105.6-REACT-19-REVIEW: `active` flag prevents the microtask
+  // from running setNow on an unmounted component (e.g. UpdateChecker
+  // unmounts when the user navigates away from the studio).
   useEffect(() => {
-    queueMicrotask(() => setNow(Date.now()));
-    const id = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(id);
+    let active = true;
+    queueMicrotask(() => {
+      if (active) setNow(Date.now());
+    });
+    const id = setInterval(() => {
+      if (active) setNow(Date.now());
+    }, 30_000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
   }, []);
   // FEAT-006: when the launch-time check resolves an update under 'auto'
   // mode, this ref is flipped so the auto-trigger effect knows to fire
@@ -402,15 +413,22 @@ export function UpdateChecker() {
   // queueMicrotask (project convention) so the effect body only
   // manages the countdown timer (external system), not local state
   // in the body itself.
+  // V105.6-REACT-19-REVIEW: `active` flag prevents the timer
+  // callback from running setState / triggerRelaunch after the
+  // effect has been cleaned up (e.g. the user clicks "Restart now"
+  // while the 1-second tick is in flight, cancelling the countdown).
   useEffect(() => {
     if (state.kind !== 'restart-pending') return;
+    let active = true;
     let handle: ReturnType<typeof setTimeout> | undefined;
     queueMicrotask(() => {
+      if (!active) return;
       if (state.secondsLeft <= 0) {
         void triggerRelaunch();
         return;
       }
       handle = setTimeout(() => {
+        if (!active) return;
         setState((prev) =>
           prev.kind === 'restart-pending'
             ? { ...prev, secondsLeft: Math.max(0, prev.secondsLeft - 1) }
@@ -419,6 +437,7 @@ export function UpdateChecker() {
       }, 1000);
     });
     return () => {
+      active = false;
       if (handle !== undefined) clearTimeout(handle);
     };
   }, [state, triggerRelaunch]);

@@ -12,19 +12,30 @@ export function FirstRunBanner() {
   // V105.1-REACT-19: setVisible is deferred via queueMicrotask (project
   // convention) so the effect body only reads localStorage + sets a
   // timeout (external system), not local state.
+  // V105.6-REACT-19-REVIEW: the microtask body and the timer callback
+  // both read the cleanup-active flag, so if React cleans up the effect
+  // before the microtask runs (or before the AUTO_DISMISS timeout
+  // fires), we skip the setState + skip the timer (no "setState on
+  // unmounted" warning, no leaked timer).
   useEffect(() => {
+    let active = true;
     let dismissTimer: number | undefined;
     queueMicrotask(() => {
+      if (!active) return;
       try {
         if (localStorage.getItem(SEEN_KEY) === '1') return;
         localStorage.setItem(SEEN_KEY, '1');
       } catch {
         return;
       }
+      if (!active) return;
       setVisible(true);
-      dismissTimer = window.setTimeout(() => setVisible(false), AUTO_DISMISS_MS);
+      dismissTimer = window.setTimeout(() => {
+        if (active) setVisible(false);
+      }, AUTO_DISMISS_MS);
     });
     return () => {
+      active = false;
       if (dismissTimer !== undefined) window.clearTimeout(dismissTimer);
     };
   }, []);

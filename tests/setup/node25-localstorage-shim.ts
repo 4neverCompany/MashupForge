@@ -6,13 +6,18 @@
 // the Node 25 stub wins because it was registered first.
 //
 // This setup file runs BEFORE the test environment, so it can't just
-// delete globalThis.localStorage (the property is non-configurable
-// on Node 25). The fix: install a working in-memory localStorage on
-// globalThis that the env's localStorage will overwrite when it
-// initializes. If it doesn't (some env configs), at least the tests
-// have a functional localStorage to fall back to.
+// delete globalThis.localStorage. The fix: install a working in-memory
+// localStorage on globalThis that the env's localStorage will overwrite
+// when it initializes. If it doesn't (some env configs), at least the
+// tests have a functional localStorage to fall back to.
 //
-// Reference: HANDOFF.md v1.0.5.1 — the 44-test regression that
+// Implementation note (v1.0.6 review fix): on Node 25 the existing
+// property descriptor is non-configurable, so `defineProperty` with
+// `configurable: true` would throw. Try `defineProperty` first; on
+// failure, fall back to a direct assignment, then to a no-op
+// (test env is expected to overwrite the global before tests run).
+//
+// Reference: HANDOFF.md v1.0.6 — the 44-test regression that
 // turned out to be Node 25's built-in localStorage, not jsdom/happy-dom
 // or any test code.
 
@@ -55,9 +60,24 @@ if (!current || typeof current.clear !== 'function') {
   // Install a working one — the env will overwrite this when it
   // initializes, but if it doesn't, tests still have something
   // functional to call.
-  Object.defineProperty(globalThis, 'localStorage', {
-    value: makeMemoryStorage(),
-    writable: true,
-    configurable: true,
-  });
+  const shim = makeMemoryStorage();
+  try {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: shim,
+      writable: true,
+      configurable: true,
+    });
+  } catch {
+    // Node 25 marks the built-in localStorage as non-configurable,
+    // so defineProperty throws. Fall back to a direct assignment;
+    // if that also throws (frozen), the test env is expected to
+    // overwrite globalThis.localStorage before any test runs, so
+    // we can no-op safely.
+    try {
+      (globalThis as { localStorage: MinimalStorage }).localStorage = shim;
+    } catch {
+      // Last resort: leave globalThis.localStorage alone and hope
+      // the test env replaces it.
+    }
+  }
 }

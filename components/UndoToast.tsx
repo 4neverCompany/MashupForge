@@ -30,13 +30,26 @@ export const UndoToast: React.FC<Props> = ({ message, durationMs, onUndo, onDism
   // queueMicrotask (project convention) so the effect body only
   // manages the countdown interval (external system), not local state
   // in the body itself.
+  // V105.6-REACT-19-REVIEW: `active` flag prevents the interval
+  // callback from running setState after the effect has been cleaned
+  // up (e.g. if the parent re-renders UndoToast with a new
+  // durationMs while the microtask is in flight, the old interval
+  // would be cleared but the new one might never start because the
+  // microtask had already captured the stale `deadline` value).
   useEffect(() => {
+    let active = true;
     let id: ReturnType<typeof setInterval> | undefined;
     queueMicrotask(() => {
-      setDeadline(Date.now() + durationMs);
+      if (!active) return;
+      const startDeadline = Date.now() + durationMs;
+      setDeadline(startDeadline);
       setRemainingMs(durationMs);
       id = setInterval(() => {
-        const left = deadline - Date.now();
+        if (!active) {
+          clearInterval(id);
+          return;
+        }
+        const left = startDeadline - Date.now();
         if (left <= 0) {
           clearInterval(id);
           onDismiss();
@@ -46,9 +59,10 @@ export const UndoToast: React.FC<Props> = ({ message, durationMs, onUndo, onDism
       }, 100);
     });
     return () => {
+      active = false;
       if (id !== undefined) clearInterval(id);
     };
-  }, [durationMs, onDismiss, deadline]);
+  }, [durationMs, onDismiss]);
 
   const pct = Math.max(0, Math.min(100, (remainingMs / durationMs) * 100));
   const secondsLeft = Math.ceil(remainingMs / 1000);
