@@ -40,6 +40,13 @@ import type { UserSettings, WatermarkSettings } from '@/types/mashup';
 import { getAllTextModelSpecs } from '@/lib/text-model-specs';
 import { DesktopSettingsPanel } from './DesktopSettingsPanel';
 import { VercelAiModelPicker, defaultVercelAiModel } from './Settings/VercelAiModelPicker';
+import { HiggsfieldConnection } from './Settings/HiggsfieldConnection';
+import {
+  HIGGSFIELD_DEFAULT_IMAGE_MODEL,
+  HIGGSFIELD_DEFAULT_VIDEO_MODEL,
+  type HiggsfieldImageModelSlug,
+  type HiggsfieldVideoModelSlug,
+} from '@/lib/higgsfield/models';
 
 /**
  * V082: runtime type guard for the `modelInfo` field returned by
@@ -1533,6 +1540,31 @@ export function SettingsModal({
                   selected={settings.activeTextModel ?? null}
                   onSelect={(modelId) => updateSettings({ activeTextModel: modelId })}
                 />
+
+                {/* HIGGSFIELD-INTEGRATION: image generation provider
+                    alongside Leonardo. OAuth-based — each user connects
+                    their own Higgsfield account. Peer, not replacement. */}
+                <div className="pt-4 mt-4 border-t border-zinc-800">
+                  <HiggsfieldConnection
+                    selectedImageModel={
+                      (settings.defaultHiggsfieldImageModel as never) ||
+                      HIGGSFIELD_DEFAULT_IMAGE_MODEL
+                    }
+                    selectedVideoModel={
+                      (settings.defaultHiggsfieldVideoModel as never) ||
+                      HIGGSFIELD_DEFAULT_VIDEO_MODEL
+                    }
+                    onSelectImageModel={(slug) =>
+                      updateSettings({ defaultHiggsfieldImageModel: slug })
+                    }
+                    onSelectVideoModel={(slug) =>
+                      updateSettings({ defaultHiggsfieldVideoModel: slug })
+                    }
+                    onConnectionChange={(connected) =>
+                      updateSettings({ higgsfieldConnected: connected })
+                    }
+                  />
+                </div>
               </div>
             ) : (
               <p className="text-[11px] text-zinc-500 -mt-2">

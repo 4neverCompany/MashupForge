@@ -58,6 +58,13 @@ export const DESKTOP_CONFIG_KEYS: readonly DesktopConfigFieldMeta[] = [
   { key: 'TWITTER_ENABLED',        label: 'Twitter enabled',        hint: 'Internal toggle — managed by the Platforms section.' },
   { key: 'PINTEREST_ENABLED',      label: 'Pinterest enabled',      hint: 'Internal toggle — managed by the Platforms section.' },
   { key: 'DISCORD_ENABLED',        label: 'Discord enabled',        hint: 'Internal toggle — managed by the Platforms section.' },
+  // HIGGSFIELD-INTEGRATION: OAuth client_id (registered once at first
+  // /api/higgsfield/oauth/authorize call, persisted for reuse). The
+  // AES salt for the token-encryption key is written to config.json
+  // by the same flow — both are non-secrets (the client_id is public
+  // in OAuth 2.0; the salt's paired with origin/machineId in IDB).
+  { key: 'HIGGSFIELD_OAUTH_CLIENT_ID', label: 'Higgsfield OAuth client id', hint: 'Internal — auto-generated on first Higgsfield connect. Safe to share.', kind: 'text' },
+  { key: 'HIGGSFIELD_OAUTH_SALT',     label: 'Higgsfield OAuth salt',     hint: 'Internal — random per-install salt for token encryption. Regenerating disconnects Higgsfield.', kind: 'text' },
   // FEAT-006: tri-state gate for UpdateChecker's launch-time behavior.
   // Kept for backwards compat; AutoUpdateSettings renders the granular
   // toggles below instead. Both sets live in UPDATER_KEYS so the generic

@@ -7,9 +7,9 @@
  * prompt, and emit provider-specific structured options (mmx flags or
  * Leonardo style UUIDs + dimensions) alongside.
  *
- * One function, one set of inputs, two output shapes — guarantees that
- * MMX and Leonardo are receiving the same intent and produce comparable
- * output for the same user setting.
+ * One function, one set of inputs, three output shapes (mmx, leonardo,
+ * higgsfield) — guarantees that MMX, Leonardo, and Higgsfield all see
+ * the same intent and produce comparable output for the same user setting.
  *
  * Pure module: no I/O, no spawn — string assembly + structured-flag
  * extraction.
@@ -38,6 +38,13 @@ export interface PromptInjectionInputs {
   /** Optional free-text quality hint appended to the prompt last
    * (e.g. "ultra-detailed, cinematic lighting"). */
   qualityHint?: string;
+  /** HIGGSFIELD-INTEGRATION: pre-resolved Higgsfield options to merge
+   * into the output. Typically populated by the Studio / Pipeline
+   * after the user has picked a model from the Higgsfield picker.
+   * Only the fields relevant to the selected model are forwarded to
+   * the route — the API layer re-validates against the model's
+   * allow-list. */
+  higgsfieldOptions?: Partial<HiggsfieldBuilderOptions>;
 }
 
 export interface LeonardoBuilderOptions {
@@ -60,6 +67,48 @@ export interface LeonardoBuilderOptions {
   promptEnhance?: 'ON' | 'OFF';
 }
 
+/**
+ * HIGGSFIELD-INTEGRATION: structured options for the
+ * /api/higgsfield/image + /api/higgsfield/video routes. The shape
+ * matches the MCP `higgsfield_generate` tool's argument schema. Only
+ * the fields supported by the selected model (per its JSON spec) are
+ * populated — the API route validates against the model allow-list
+ * before forwarding to the MCP server.
+ */
+export interface HiggsfieldBuilderOptions {
+  /** The Higgsfield `job_set_type` slug, e.g. `nano_banana_2`. */
+  model: string;
+  /** Aspect ratio string, e.g. `9:16`. Validated server-side against
+   * the model's allow-list. */
+  aspectRatio?: string;
+  /** Image resolution tier, e.g. `2k`. Only set for image models. */
+  resolution?: '1k' | '2k' | '4k';
+  /** Quality enum for models that support it (gpt_image_2, etc.). */
+  quality?: 'low' | 'medium' | 'high';
+  /** FLUX.2 sub-model: pro/flex/max. Only for higgsfield-flux-2. */
+  submodel?: 'pro' | 'flex' | 'max';
+  /** Video duration in seconds. Only for video models. */
+  duration?: number;
+  /** Video generation mode: std/fast/pro. */
+  mode?: 'std' | 'fast' | 'pro';
+  /** Cinematic genre. */
+  genre?: 'auto' | 'action' | 'horror' | 'comedy' | 'noir' | 'drama' | 'epic';
+  /** Video resolution. */
+  videoResolution?: '480p' | '720p' | '1080p';
+  /** Audio toggle (Kling v3 et al). */
+  sound?: 'on' | 'off';
+  /** Soul character id, for higgsfield-soul-v2 model. */
+  soulId?: string;
+  /** Reproducibility seed (only on models that accept it). */
+  seed?: number;
+  /** Publicly-accessible image URL for img2img / i2v. */
+  referenceImageUrl?: string;
+  /** Publicly-accessible image URL for i2v last frame. */
+  endImageUrl?: string;
+  /** Image count for batched generation. */
+  quantity?: number;
+}
+
 export interface EnhancedPrompt {
   /** Prompt with spec/style/quality hints appended. Use as-is for either
    * provider — keywords are natural language and not provider-specific. */
@@ -70,6 +119,10 @@ export interface EnhancedPrompt {
   mmx: MmxImageOptions;
   /** Structured options for the Leonardo /api/leonardo route body. */
   leonardo: LeonardoBuilderOptions;
+  /** Structured options for the Higgsfield /api/higgsfield/{image,video}
+   * route body. Populated only when the caller passes a
+   * `higgsfieldOptions` input; otherwise empty. */
+  higgsfield: HiggsfieldBuilderOptions;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +212,16 @@ export function buildEnhancedPrompt(
   const hintParts: string[] = [];
   const mmx: MmxImageOptions = {};
   const leonardo: LeonardoBuilderOptions = {};
+  // HIGGSFIELD-INTEGRATION: start from the spec's `apiName` so the
+  // caller doesn't need to know the underlying job_set_type. If no
+  // spec is found (ad-hoc Higgsfield call), the caller is expected
+  // to pass `higgsfieldOptions.model` explicitly.
+  const higgsfield: HiggsfieldBuilderOptions = {
+    model:
+      (spec?.apiName as string | undefined) ||
+      inputs.higgsfieldOptions?.model ||
+      '',
+  };
 
   // Style: spec-validated → keyword in prompt + UUID for Leonardo.
   // Bare strings (no spec) still go in as keywords for both providers.
@@ -215,15 +278,43 @@ export function buildEnhancedPrompt(
     hintParts.push(inputs.qualityHint.trim());
   }
 
-  // Image count — both providers.
+  // Image count — all three providers.
   if (inputs.count && inputs.count > 0) {
     mmx.n = inputs.count;
     leonardo.quantity = inputs.count;
+    higgsfield.quantity = inputs.count;
+  }
+
+  // HIGGSFIELD-INTEGRATION: forward caller-supplied Higgsfield
+  // options verbatim. The API layer validates each field against
+  // the model allow-list before sending to the MCP server, so this
+  // step is pure pass-through.
+  if (inputs.higgsfieldOptions) {
+    const o = inputs.higgsfieldOptions;
+    if (o.aspectRatio) higgsfield.aspectRatio = o.aspectRatio;
+    if (o.resolution) higgsfield.resolution = o.resolution;
+    if (o.quality) higgsfield.quality = o.quality;
+    if (o.submodel) higgsfield.submodel = o.submodel;
+    if (typeof o.duration === 'number') higgsfield.duration = o.duration;
+    if (o.mode) higgsfield.mode = o.mode;
+    if (o.genre) higgsfield.genre = o.genre;
+    if (o.videoResolution) higgsfield.videoResolution = o.videoResolution;
+    if (o.sound) higgsfield.sound = o.sound;
+    if (o.soulId) higgsfield.soulId = o.soulId;
+    if (typeof o.seed === 'number') higgsfield.seed = o.seed;
+    if (o.referenceImageUrl) higgsfield.referenceImageUrl = o.referenceImageUrl;
+    if (o.endImageUrl) higgsfield.endImageUrl = o.endImageUrl;
+  }
+  // Fill in the aspect ratio from the prompt inputs when the caller
+  // didn't pass a higgsfieldOptions aspectRatio — keeps the three
+  // providers in sync (mmx + leonardo are also filled above).
+  if (!higgsfield.aspectRatio && aspect) {
+    higgsfield.aspectRatio = aspect;
   }
 
   const prompt = hintParts.length > 0
     ? `${basePrompt.trim()}. ${hintParts.join(', ')}`
     : basePrompt.trim();
 
-  return { prompt, appliedHints: hintParts, mmx, leonardo };
+  return { prompt, appliedHints: hintParts, mmx, leonardo, higgsfield };
 }
