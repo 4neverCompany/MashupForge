@@ -39,7 +39,7 @@
     "@tauri-apps/plugin-sql": "^2.0.0",
     "@tauri-apps/plugin-store": "^2",
     "@tauri-apps/plugin-updater": "2.10.1",
-    "ai": "^6.0.191",
+    "ai": "^6.0.196",
     "autoprefixer": "^10.5.0",
     "idb": "^8.0.0",
     "idb-keyval": "^6.2.4",
