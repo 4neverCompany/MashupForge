@@ -20,8 +20,13 @@ function normalizeOnLoad(img: GeneratedImage): GeneratedImage {
 export function useImages() {
   const [savedImages, setSavedImages] = useState<GeneratedImage[]>([]);
   const [isImagesLoaded, setIsImagesLoaded] = useState(false);
+  // V105.1-REACT-19: was `savedImagesRef.current = savedImages` during
+  // render (refs). Moved into a useEffect so the ref mirrors state
+  // after the commit phase instead of mid-render.
   const savedImagesRef = useRef(savedImages);
-  savedImagesRef.current = savedImages;
+  useEffect(() => {
+    savedImagesRef.current = savedImages;
+  }, [savedImages]);
 
   useEffect(() => {
     const loadImages = async () => {

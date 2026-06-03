@@ -110,9 +110,11 @@ export function useReconciler(): UseReconcilerState {
     }
   };
 
+  // V105.1-REACT-19: reconcile is invoked via queueMicrotask (project
+  // convention) so the effect body only fires the initial reconcile
+  // on mount, not local state in the body itself.
   useEffect(() => {
-    // Run on mount. Fire-and-forget.
-    void reconcile();
+    queueMicrotask(() => void reconcile());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

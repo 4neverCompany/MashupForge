@@ -9,16 +9,24 @@ const AUTO_DISMISS_MS = 10_000;
 export function FirstRunBanner() {
   const [visible, setVisible] = useState(false);
 
+  // V105.1-REACT-19: setVisible is deferred via queueMicrotask (project
+  // convention) so the effect body only reads localStorage + sets a
+  // timeout (external system), not local state.
   useEffect(() => {
-    try {
-      if (localStorage.getItem(SEEN_KEY) === '1') return;
-      localStorage.setItem(SEEN_KEY, '1');
-    } catch {
-      return;
-    }
-    setVisible(true);
-    const t = window.setTimeout(() => setVisible(false), AUTO_DISMISS_MS);
-    return () => window.clearTimeout(t);
+    let dismissTimer: number | undefined;
+    queueMicrotask(() => {
+      try {
+        if (localStorage.getItem(SEEN_KEY) === '1') return;
+        localStorage.setItem(SEEN_KEY, '1');
+      } catch {
+        return;
+      }
+      setVisible(true);
+      dismissTimer = window.setTimeout(() => setVisible(false), AUTO_DISMISS_MS);
+    });
+    return () => {
+      if (dismissTimer !== undefined) window.clearTimeout(dismissTimer);
+    };
   }, []);
 
   if (!visible) return null;

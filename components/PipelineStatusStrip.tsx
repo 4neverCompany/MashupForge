@@ -13,7 +13,7 @@
  * tick 1s until progress flips to something else or the pipeline stops.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Zap, CheckCircle2 } from 'lucide-react';
 import { useMashup, type ViewType } from './MashupContext';
 
@@ -43,29 +43,55 @@ export const PipelineStatusStrip: React.FC<Props> = ({ setView }) => {
     weekFillStatus,
   } = useMashup();
 
-  const [now, setNow] = useState(() => Date.now());
-  const deadlineRef = useRef<number | null>(null);
-  const lastSleepMsgRef = useRef<string | null>(null);
+  const [now, setNow] = useState<number | null>(null);
+  // V105.1-REACT-19: was deadlineRef + lastSleepMsgRef with mutation during
+  // render, which React 19's react-hooks/refs and react-hooks/purity rules
+  // flag. Moved both to state so the component re-renders when the deadline
+  // changes (the old code relied on the interval tick to re-render, which
+  // worked but was a hidden coupling).
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [lastSleepMsg, setLastSleepMsg] = useState<string | null>(null);
 
   const sleepMsg = pipelineProgress?.currentStep ?? '';
   const sleepMatch = sleepMsg.match(SLEEP_MSG_RE);
 
-  if (sleepMatch) {
-    if (lastSleepMsgRef.current !== sleepMsg) {
-      const minutes = Number(sleepMatch[1]);
-      deadlineRef.current = Date.now() + minutes * 60 * 1000;
-      lastSleepMsgRef.current = sleepMsg;
-    }
-  } else {
-    deadlineRef.current = null;
-    lastSleepMsgRef.current = null;
-  }
-
+  // Sync deadline with the daemon's progress string. The daemon emits
+  // "Next cycle in N min" right before its sleep-slice loop; we parse
+  // it once per new message and lock in a deadline.
+  //
+  // V105.1-REACT-19: setState calls are deferred via queueMicrotask (project
+  // convention from HiggsfieldConnection.tsx) so the effect body only
+  // synchronizes against the external "daemon progress" source — not local
+  // component state. The microtask runs after the effect's commit phase so
+  // it doesn't trigger cascading renders.
   useEffect(() => {
-    if (!deadlineRef.current) return;
+    queueMicrotask(() => {
+      if (sleepMatch) {
+        if (lastSleepMsg !== sleepMsg) {
+          const minutes = Number(sleepMatch[1]);
+          setDeadline(Date.now() + minutes * 60 * 1000);
+          setLastSleepMsg(sleepMsg);
+        }
+      } else {
+        setDeadline(null);
+        setLastSleepMsg(null);
+      }
+    });
+  }, [sleepMsg, sleepMatch, lastSleepMsg]);
+
+  // Tick once a second while a deadline is set. Re-runs whenever the
+  // deadline changes (including the null transitions), so the interval
+  // is torn down cleanly when the daemon stops sleeping.
+  //
+  // V105.1-REACT-19: setState is deferred via queueMicrotask (project
+  // convention) so the effect body only manages the interval (the
+  // "external system"), not local state.
+  useEffect(() => {
+    if (!deadline) return;
+    queueMicrotask(() => setNow(Date.now()));
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [sleepMsg]);
+  }, [deadline]);
 
   const queueCount = pipelineQueue.length;
   const dotClass = pipelineRunning
@@ -88,8 +114,8 @@ export const PipelineStatusStrip: React.FC<Props> = ({ setView }) => {
     weekFillStatus.pendingApprovalTotal === 0;
 
   let timerText: string | null = null;
-  if (deadlineRef.current && pipelineRunning && pipelineContinuous) {
-    timerText = `Next in ${formatCountdown(deadlineRef.current - now)}`;
+  if (deadline && now !== null && pipelineRunning && pipelineContinuous) {
+    timerText = `Next in ${formatCountdown(deadline - now)}`;
   } else if (pipelineRunning && pipelineProgress?.currentIdea) {
     timerText = pipelineProgress.currentIdea.length > 24
       ? `${pipelineProgress.currentIdea.slice(0, 24)}…`

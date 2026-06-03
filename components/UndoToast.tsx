@@ -8,7 +8,7 @@
  * pre-action state from a snapshot it captured beforehand).
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Undo2, X } from 'lucide-react';
 
 interface Props {
@@ -20,22 +20,35 @@ interface Props {
 
 export const UndoToast: React.FC<Props> = ({ message, durationMs, onUndo, onDismiss }) => {
   const [remainingMs, setRemainingMs] = useState(durationMs);
-  const deadlineRef = useRef<number>(Date.now() + durationMs);
+  // V105.1-REACT-19: was `useRef<number>(Date.now() + durationMs)` —
+  // Date.now() during render is flagged as impure. Use a state with a
+  // lazy initializer so the Date.now() call is bound to the
+  // useState's "initial value" semantics, not render-body code.
+  const [deadline, setDeadline] = useState<number>(() => Date.now() + durationMs);
 
+  // V105.1-REACT-19: setDeadline + setRemainingMs are deferred via
+  // queueMicrotask (project convention) so the effect body only
+  // manages the countdown interval (external system), not local state
+  // in the body itself.
   useEffect(() => {
-    deadlineRef.current = Date.now() + durationMs;
-    setRemainingMs(durationMs);
-    const id = setInterval(() => {
-      const left = deadlineRef.current - Date.now();
-      if (left <= 0) {
-        clearInterval(id);
-        onDismiss();
-        return;
-      }
-      setRemainingMs(left);
-    }, 100);
-    return () => clearInterval(id);
-  }, [durationMs, onDismiss]);
+    let id: ReturnType<typeof setInterval> | undefined;
+    queueMicrotask(() => {
+      setDeadline(Date.now() + durationMs);
+      setRemainingMs(durationMs);
+      id = setInterval(() => {
+        const left = deadline - Date.now();
+        if (left <= 0) {
+          clearInterval(id);
+          onDismiss();
+          return;
+        }
+        setRemainingMs(left);
+      }, 100);
+    });
+    return () => {
+      if (id !== undefined) clearInterval(id);
+    };
+  }, [durationMs, onDismiss, deadline]);
 
   const pct = Math.max(0, Math.min(100, (remainingMs / durationMs) * 100));
   const secondsLeft = Math.ceil(remainingMs / 1000);

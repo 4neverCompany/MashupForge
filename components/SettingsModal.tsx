@@ -532,14 +532,22 @@ export function SettingsModal({
   // doesn't permanently advertise "Saved" the entire session — once the
   // window elapses we hide it via the local fade flag below.
   const [showSavedPill, setShowSavedPill] = useState(false);
+  // V105.1-REACT-19: setState deferred via queueMicrotask (project
+  // convention) so the effect body only manages the fade-out timer
+  // (external system), not local state in the body.
   useEffect(() => {
-    if (saveState.kind !== 'saved') {
-      setShowSavedPill(false);
-      return;
-    }
-    setShowSavedPill(true);
-    const t = setTimeout(() => setShowSavedPill(false), 1500);
-    return () => clearTimeout(t);
+    let fadeTimer: ReturnType<typeof setTimeout> | undefined;
+    queueMicrotask(() => {
+      if (saveState.kind !== 'saved') {
+        setShowSavedPill(false);
+        return;
+      }
+      setShowSavedPill(true);
+      fadeTimer = setTimeout(() => setShowSavedPill(false), 1500);
+    });
+    return () => {
+      if (fadeTimer !== undefined) clearTimeout(fadeTimer);
+    };
   }, [saveState]);
 
   // ── MMX setup form (shared between hoisted CTA and active-agent panel) ───

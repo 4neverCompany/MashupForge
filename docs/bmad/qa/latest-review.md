@@ -1,87 +1,138 @@
-# QA Review — Latest Changes (2026-04-14)
+# LATEST-REVIEW: 741efea + 20d23e9
 
-**Status:** CONCERNS
-**Agent:** QA (Quinn)
-**Date:** 2026-04-14
-**Range:** e63983b → 1e70c9a (4 commits)
+**Date:** 2026-04-18  
+**Reviewer:** Developer  
+**Commits:**
 
----
-
-## Commits reviewed
-
-| Hash | Message | Files changed |
-|---|---|---|
-| `1e70c9a` | fix(ui): DESIGN-002 — sync overlay exit timing to border (300ms) | MainContent.tsx +1, DESIGN-002.md |
-| `8b25874` | feat(ui): DESIGN-002 — gallery grid hover scale/glow effects | MainContent.tsx +4/-1 |
-| `204f1b5` | feat(ui): DESIGN-001 — per-phase colored progress dots | stages.ts, PipelinePanel.tsx |
-| `e63983b` | feat(tauri): pi.dev runtime auto-install on first launch | lib/pi-setup.ts, app/api/pi/*, MainContent.tsx, lib.rs |
+| Hash | Description |
+|---|---|
+| 741efea | fix(ci): directory path for artifact upload + upload job guards |
+| 20d23e9 | fix(updater): surface download failures with retry instead of silent dismiss |
 
 ---
 
-## 1. `204f1b5` — DESIGN-001: Colored pipeline dots
+## 741efea — CI artifact upload fix
 
-**Gate: PASS** (see full report `docs/bmad/qa/DESIGN-001.md`)
+**Verdict: PASS**
 
-- className-only, 2 files, zero logic changes
-- All 4 spec colors (search=blue, prompt=purple, generate=green, post=gold) confirmed
-- TypeScript clean, no re-render implications
+### Directory path change
 
----
+```yaml
+# Before (multi-glob):
+path: |
+  src-tauri/target/release/bundle/nsis/*.exe
+  src-tauri/target/release/bundle/nsis/*.exe.sig
+  src-tauri/target/release/bundle/nsis/latest.json
 
-## 2. `8b25874` + `1e70c9a` — DESIGN-002: Gallery hover effects
-
-**Gate: PASS**
-
-### Code quality
-- `8b25874`: 5 lines changed in `MainContent.tsx`. Card shadow string replaced inline (1 line), gradient overlay div added (3 lines + comment). Scope is tight.
-- `1e70c9a`: Single className change (`duration-500` → `duration-300`) to fix timing inconsistency flagged by UX review. Correct and minimal.
-- No logic changes. `pointer-events-none` on overlay preserves all click/keyboard targets. ✓
-
-### Z-index audit (from UX review, confirmed)
+# After (directory):
+path: src-tauri/target/release/bundle/nsis
 ```
-z-40  state overlays        above overlay ✓
-z-20  action buttons        above overlay ✓
-z-10  approved badge        above overlay ✓
-z-[6] gradient overlay      correct position ✓
+
+`upload-artifact@v4` stores a **directory** path relative to that directory — filenames land flat in the artifact root. After `download-artifact@v4 path: bundle`, files are at `bundle/MashupForge_*.exe` etc., exactly where `ls bundle/*.exe` expects them. ✅
+
+The fix is correct. The previous multi-glob form would have stored files relative to the workspace root, placing them at `bundle/src-tauri/target/release/bundle/nsis/*` and silently breaking the upload job on first run.
+
+### Existence checks
+
+```bash
+if [ -z "$EXE" ] || [ ! -f "$EXE" ]; then
+  echo "::error::NSIS .exe not found in downloaded artifact"
+  echo "Artifact contents:"; ls -la bundle/ || true
+  exit 1
+fi
 ```
-No stacking regressions.
 
-### Brand tokens
-- `rgba(197,160,98,...)` — Metallic Gold `#c5a062` ✓
-- `#00e6ff` — Electric Blue ✓
-- Gradient opacities (12%, 6%) are subtle; approved badge and action buttons remain legible ✓
+The `[ -z "$EXE" ] || [ ! -f "$EXE" ]` pattern correctly handles both the empty-glob case and the file-not-found case. `ls -la bundle/` on failure gives an immediate diagnostic. Same pattern for `SIG` and `LATEST`. ✅
 
-### Issues
-- [INFO] `prefers-reduced-motion` is not respected for `whileHover` spring or CSS transitions. Pre-existing project-wide pattern, not a DESIGN-002 regression. Tracked as DESIGN-004 candidate.
+### Minor notes (non-blocking)
+
+- The directory upload includes all files in `nsis/` — Tauri may add temp files. In practice the NSIS output directory contains only `.exe`, `.exe.sig`, and `latest.json`, so this is fine. The `ls bundle/*.exe | head -n1` picks the right one regardless of extras.
+- `if-no-files-found: error` would trigger if the directory is empty. But EXE and SIG were already verified before the artifact upload step, so the directory is guaranteed non-empty. ✅
 
 ---
 
-## 3. `e63983b` — pi.dev runtime auto-install
+## 20d23e9 — updater download error handling
 
-**Gate: CONCERNS** (see full report `docs/bmad/qa/pi-autosetup-review.md`)
+**Verdict: PASS**
 
-High-severity issues remain unresolved in HEAD `1e70c9a`:
+### Problem solved
 
-| ID | Severity | Description | Blocks |
-|---|---|---|---|
-| WIN-1 | **HIGH** | `localPrefix` with spaces breaks `npm install` (`shell: true` + no quoting). Affects majority of Windows users (spaces in username). | STORY-004 manual pass |
-| RACE-1 | **HIGH** | No install lock — concurrent `POST /api/pi/install` calls corrupt the pi prefix. | STORY-004 manual pass |
-| SEC-1 | Medium | `piPath` interpolated raw into shell strings. Mitigated by MASHUPFORGE_PI_DIR in Tauri but pattern is wrong. | — |
-| SEC-2 | Low | Dead `PI_BIN` candidate in `piCandidates()` — bake-era holdover. | — |
-| RACE-2 | Medium | `getPiModels()` blocks event loop up to 10s on every status poll. | — |
+`downloadAndInstall()` throwing previously transitioned to `{ kind: 'error' }`, which the render guard `if (state.kind === 'idle' || state.kind === 'error') return null` silently hid. Users clicking "Update Now" would see the spinner disappear with no explanation.
+
+### New `download-error` state
+
+```ts
+| { kind: 'download-error'; update: UpdateLike; message: string }
+```
+
+The key design decision: carrying `update` in the error state so `handleRetry` can transition directly back to `available` without a fresh manifest fetch:
+
+```ts
+const handleRetry = useCallback(() => {
+  if (state.kind !== 'download-error') return;
+  setState({ kind: 'available', update: state.update });
+}, [state]);
+```
+
+This is correct — the update object is still valid; only the download failed. ✅
+
+### `update` scope in catch — verified
+
+```ts
+const handleUpdate = useCallback(async () => {
+  if (state.kind !== 'available') return;
+  const update = state.update;           // ← captured before try
+  setState({ kind: 'downloading', ... });
+  try {
+    await update.downloadAndInstall(...);
+  } catch (e: unknown) {
+    setState({ kind: 'download-error', update, message: detail }); // ← in scope ✅
+  }
+}, [state]);
+```
+
+`update` is declared before the `try` block and is in scope in the `catch`. Even if the component re-renders during the download (state changes to `downloading`), the closure-captured `update` remains the correct value. ✅
+
+### Render guard order — correct
+
+```ts
+if (state.kind === 'idle' || state.kind === 'error') return null;  // (1)
+
+if (state.kind === 'download-error') { return <ErrorPanel />; }    // (2)
+```
+
+`download-error` is not caught by guard (1), so it reaches (2) correctly. The offline/check failures (`kind: 'error'`) continue to render null — this is intentional and documented in the commit message. ✅
+
+### Dismiss semantics — correct
+
+`handleDismissError` → `setState({ kind: 'idle' })` — no localStorage write. The update notification will reappear on next app start, which is the right behavior after a transient download failure.
+
+If the user retries and lands back on `available`, clicking the existing Dismiss button there DOES write to localStorage, suppressing the version permanently. Correct escalation. ✅
+
+### Error message rendering — safe
+
+```tsx
+<p className="text-[10px] text-zinc-400 mt-1 font-mono line-clamp-3 break-words">
+  {state.message}
+```
+
+`line-clamp-3` caps overflow. `break-words` handles long URL-like error strings from the Tauri plugin. React renders `{state.message}` as text, not HTML — no XSS risk. ✅
+
+### Known gap documented
+
+The commit message correctly identifies and scopes the concurrent-install race: "two concurrent app instances will both call downloadAndInstall and race on Tauri's temp installer path. Belongs in tauri-plugin-single-instance, not the frontend." Out of scope here. ✅
+
+### Minor note
+
+`post-update` panel still uses `emerald-500/30` and `emerald-400` tokens (existing code, not introduced by this commit). These are semantic ("success/installed") and already in the AUTO-D004 backlog.
 
 ---
 
 ## Summary
 
-| Commit | Story | Gate |
+| Commit | Verdict | Notes |
 |---|---|---|
-| `204f1b5` | DESIGN-001 colored dots | PASS |
-| `8b25874` + `1e70c9a` | DESIGN-002 gallery hover | PASS |
-| `e63983b` | pi runtime auto-install | CONCERNS — WIN-1 + RACE-1 unresolved |
+| 741efea | ✅ PASS | Directory path fix is correct; existence checks are well-formed |
+| 20d23e9 | ✅ PASS | State machine correct; `update` in scope; dismiss semantics right |
 
-**Required before STORY-004 close:**
-1. Fix WIN-1: remove `shell: true` from `spawnSync` in `lib/pi-setup.ts` (or quote `localPrefix` arg)
-2. Fix RACE-1: add install lock file in `app/api/pi/install/route.ts`
-
-DESIGN-001 and DESIGN-002 are clear to ship. The pi install path is not.
+No issues found. No follow-up commits needed.

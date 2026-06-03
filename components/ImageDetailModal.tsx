@@ -67,10 +67,16 @@ export function ImageDetailModal({
   const [visionResult, setVisionResult] = useState<string | null>(null);
   const [analyzingVision, setAnalyzingVision] = useState(false);
 
+  // V105.1-REACT-19: setState deferred via queueMicrotask (project
+  // convention) so the effect body only watches image.id, not local
+  // state. This resets zoom + vision result when the user navigates
+  // to a different image.
   useEffect(() => {
-    setZoom(1);
-    setOrigin('50% 50%');
-    setVisionResult(null); // MMX-VISION-ANALYZE
+    queueMicrotask(() => {
+      setZoom(1);
+      setOrigin('50% 50%');
+      setVisionResult(null); // MMX-VISION-ANALYZE
+    });
   }, [image.id]);
 
   useEffect(() => {

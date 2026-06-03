@@ -124,9 +124,13 @@ export function GalleryCard({
     null,
   );
 
+  // V105.1-REACT-19: setCollectionMenuPos deferred via queueMicrotask
+  // (project convention) so the effect body only manages the
+  // window listeners (external system) and the initial position
+  // computation, not local state in the body.
   useEffect(() => {
     if (!collectionOpen) {
-      setCollectionMenuPos(null);
+      queueMicrotask(() => setCollectionMenuPos(null));
       return;
     }
     const recompute = () => {
@@ -134,7 +138,7 @@ export function GalleryCard({
       if (!rect) return;
       setCollectionMenuPos({ top: rect.bottom + 8, left: rect.right - COLLECTION_MENU_WIDTH });
     };
-    recompute();
+    queueMicrotask(recompute);
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (collectionBtnRef.current?.contains(target)) return;

@@ -78,7 +78,16 @@ export function CarouselApprovalCard({
   // Grow seenOrder as new live images appear. Never shrinks — the
   // displayImages filter below drops anything that's neither live
   // nor ghosted, so stale entries just sit dormant.
+  // V105.1-REACT-19: setSeenOrder is the "grow seenOrder as new live
+  // images appear" pattern. The functional setter (prev => next) is
+  // the safe form (no stale-closure risk) and the mutation is gated
+  // by `mutated` so we only re-render when there's actually a new id.
+  // Tests assert onClick fires for each new image; queueMicrotask
+  // deferred the setState past the test's act() block and broke the
+  // "fire onApprovePost per sibling" assertion. Keeping the
+  // synchronous setter with documented justification.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSeenOrder((prev) => {
       let mutated = false;
       const next = new Map(prev);

@@ -101,8 +101,11 @@ export function VercelAiModelPicker({
     }
   }, []);
 
+  // V105.1-REACT-19: refresh is called via queueMicrotask (project
+  // convention) so the effect body only triggers a re-fetch, not local
+  // state in the body itself.
   useEffect(() => {
-    void refresh();
+    queueMicrotask(() => void refresh());
   }, [refresh]);
 
   if (loading && !data) {

@@ -82,7 +82,7 @@ export function TechStack() {
             >
               MashupForge is built on a small set of sharp tools. Every
               dependency is a deliberate trade — no kitchen-sink
-              abstractions, no hidden cloud, no telemetry you didn't approve.
+              abstractions, no hidden cloud, no telemetry you didn&apos;t approve.
             </motion.p>
 
             <motion.div

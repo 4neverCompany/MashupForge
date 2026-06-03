@@ -23,7 +23,16 @@ export default defineConfig({
     // sensible default.
     include: ['tests/**/*.test.{ts,tsx}', 'lib/**/*.test.{ts,tsx}'],
     environment: 'happy-dom',
-    setupFiles: ['./tests/setup/react-act.ts', './tests/setup/jest-dom.ts'],
+    // V105.1-NODE25-LS: Node 25 ships a non-functional localStorage global
+    // (it's a stub unless --localstorage-file=<path> is passed). The shim
+    // installs a working in-memory localStorage on globalThis BEFORE the
+    // test env initializes, so jsdom and happy-dom both get to overwrite
+    // it with their own. If they don't, at least tests have a fallback.
+    setupFiles: [
+      './tests/setup/react-act.ts',
+      './tests/setup/node25-localstorage-shim.ts',
+      './tests/setup/jest-dom.ts',
+    ],
   },
   resolve: {
     alias: {

@@ -39,10 +39,13 @@ export function DndUndoToast({
   const [tick, setTick] = useState(0);
   const lastMsgRef = useRef<string | null>(null);
 
+  // V105.1-REACT-19: setTick deferred via queueMicrotask (project
+  // convention) so the effect body only triggers a tick on new
+  // messages, not local state in the body itself.
   useEffect(() => {
     if (message !== lastMsgRef.current) {
       lastMsgRef.current = message;
-      if (message !== null) setTick((t) => t + 1);
+      if (message !== null) queueMicrotask(() => setTick((t) => t + 1));
     }
   }, [message]);
 

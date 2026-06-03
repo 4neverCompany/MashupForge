@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "MashupForge",
-  "version": "1.0.4",
+  "version": "1.0.5.1",
   "identifier": "com.4nevercompany.mashupforge",
   "build": {
     "frontendDist": "../src-tauri/frontend-stub",
@@ -76,3 +76,4 @@
     }
   }
 }
+
