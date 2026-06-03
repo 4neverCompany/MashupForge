@@ -88,12 +88,20 @@ trap 'rm -f "${block}"' EXIT
 # Subjects of the form `type(scope): summary` become `- **scope:** summary`,
 # matching the existing CHANGELOG.md style. Bare `type: summary` becomes
 # `- summary`. Returns 0 (and emits nothing) if no commits matched.
+#
+# The `type(release):` / `type(changelog):` commits are SKIPPED — those
+# are the "I wrote the highlights file" / "I bumped the version"
+# commits, which would otherwise show up in the auto-gen as noise
+# entries. The highlights file and the version files are the
+# user-facing artifacts; the commits that added them aren't.
 emit_section() {
   local label="$1"
   local pattern="$2"
   local lines
   lines="$(git log "${prev_tag}..HEAD" --no-merges --pretty='%s' \
-            | grep -E "^${pattern}" || true)"
+            | grep -E "^${pattern}" \
+            | grep -Ev '^[a-z]+\((release|changelog)\)' \
+            || true)"
   [ -z "${lines}" ] && return 0
 
   printf '\n### %s\n' "${label}" >> "${block}"
@@ -141,12 +149,14 @@ if [ -f "${highlights_file}" ]; then
   highlights_block="$(mktemp)"
   trap 'rm -f "${block}" "${new_changelog}" "${highlights_block}"' EXIT
   {
-    printf '## 🎬 Highlights\n\n'
-    # Strip a single leading '# ' if present (operator may have written a
-    # standalone H1). Skip blank lines at the very top of the file.
-    sed -E '/./,$!d' "${highlights_file}" \
-      | sed -E '1s/^# //' \
-      | sed -E '1{/^$/d}'
+    printf '\n### 🎬 Highlights\n\n'
+    # Markdown heading demotion. The file's H1 (the title line, e.g.
+    # "# v1.0.4 — title") is stripped — the ## [1.0.4] … heading the
+    # script already wrote carries that info. All remaining H2s become
+    # H4s (natural nesting under our prepended ### 🎬 Highlights).
+    # H3s in the file stay H3s.
+    sed -E '1{/^# /d; /^$/d}' "${highlights_file}" \
+      | sed -E 's/^## /#### /'
     printf '\n---\n'
   } > "${highlights_block}"
   cat "${highlights_block}" "${block}" > "${block}.new"

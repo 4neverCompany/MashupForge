@@ -10,6 +10,11 @@ on:
         required: false
         default: 'auto'
 
+# Don't cancel a release build if it gets a new tag mid-run
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
