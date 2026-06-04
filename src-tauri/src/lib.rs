@@ -955,9 +955,15 @@ pub fn run() {
                     .map(|u| u.to_string())
                     .collect();
                 log::info!("[tauri] deep-link received: {:?}", urls);
-                if let Some(window) = app_handle_for_dl.get_webview_window("main") {
-                    let _ = window.emit("deep-link", urls);
-                }
+                // V107.1-OAUTH: emit the event on the AppHandle, not
+                // the WebviewWindow. `WebviewWindow` has no `emit`
+                // method; that's on `Manager` / `Emitter` (which the
+                // AppHandle implements). The frontend listener in
+                // components/Settings/HiggsfieldConnection.tsx
+                // subscribes to "deep-link" and we want it to fire
+                // regardless of which window the event originated
+                // from, so AppHandle is the right scope.
+                let _ = app_handle_for_dl.emit("deep-link", urls);
             });
 
             Ok(())
