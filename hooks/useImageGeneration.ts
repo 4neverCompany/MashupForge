@@ -151,6 +151,11 @@ export async function applyWatermark(baseImageSrc: string, settings: WatermarkSe
 interface LeonardoSubmitParams {
   prompt: string;
   negativePrompt?: string;
+  /** V1.0.7-PROMPT-ENG-A4: anti-AI-look curated negative prompts from
+   *  buildEnhancedPrompt. Joined with `negativePrompt` inside
+   *  submitLeonardoAndPoll before sending to the API. Empty array
+   *  means "no anti-AI-look" — equivalent to the prior behavior. */
+  antiAiLookNegatives?: string[];
   modelId: string;
   width: number;
   height: number;
@@ -227,12 +232,21 @@ async function pollLeonardoGeneration(
 }
 
 async function submitLeonardoAndPoll(params: LeonardoSubmitParams): Promise<LeonardoSuccess> {
+  // V1.0.7-PROMPT-ENG-A4: join the user-supplied negative prompt
+  // with the anti-AI-look curated list. Leonardo takes a single
+  // `negative_prompt` string — comma-separated is the conventional
+  // concat. We keep undefined as the empty case so the route layer's
+  // "if defined, send" logic still treats no-negatives as "no field".
+  const joinedNegatives = [params.negativePrompt, ...(params.antiAiLookNegatives ?? [])]
+    .filter((s): s is string => Boolean(s && s.trim()))
+    .join(', ') || undefined;
+
   const res = await fetchWithRetry('/api/leonardo', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       prompt: params.prompt,
-      negative_prompt: params.negativePrompt,
+      negative_prompt: joinedNegatives,
       modelId: params.modelId,
       width: params.width,
       height: params.height,
@@ -276,6 +290,10 @@ interface AiImageSubmitParams {
   styleIds?: string[];
   quality?: 'LOW' | 'MEDIUM' | 'HIGH';
   negativePrompt?: string;
+  /** V1.0.7-PROMPT-ENG-A4: same as LeonardoSubmitParams.antiAiLookNegatives
+   *  — joined with `negativePrompt` in submitViaAiImage before the
+   *  /api/ai/image request body. */
+  antiAiLookNegatives?: string[];
   systemPrompt?: string;
   niches?: string[];
   genres?: string[];
@@ -294,6 +312,11 @@ interface AiImageSubmitResult extends LeonardoSuccess {
 }
 
 async function submitViaAiImage(params: AiImageSubmitParams): Promise<AiImageSubmitResult> {
+  // V1.0.7-PROMPT-ENG-A4: same join pattern as submitLeonardoAndPoll.
+  const joinedNegatives = [params.negativePrompt, ...(params.antiAiLookNegatives ?? [])]
+    .filter((s): s is string => Boolean(s && s.trim()))
+    .join(', ') || undefined;
+
   const res = await fetchWithRetry('/api/ai/image', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -304,7 +327,7 @@ async function submitViaAiImage(params: AiImageSubmitParams): Promise<AiImageSub
       height: params.height,
       styleIds: params.styleIds,
       quality: params.quality,
-      negativePrompt: params.negativePrompt,
+      negativePrompt: joinedNegatives,
       systemPrompt: params.systemPrompt,
       niches: params.niches,
       genres: params.genres,
@@ -1026,6 +1049,12 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             styleName: modelStyle,
             aspectRatio: currentAspectRatio,
             count: 1,
+            // V1.0.7-PROMPT-ENG-A4: when the user opted into anti-AI-look
+            // in Settings, the curated negative-prompt list is appended
+            // to enhanced.negativePrompts. We join it with the existing
+            // user-supplied negativePrompt below (Leonardo takes a single
+            // `negative_prompt` string).
+            antiAiLook: settings.antiAiLook === true,
           });
 
           const fallbackStyleUuids = (() => {
@@ -1127,11 +1156,12 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
                 styleIds: sharedStyleIds,
                 quality: sharedQuality,
                 negativePrompt: generatedNegativePrompt,
-                // IMG-INVEST-001 PART 2: force Leonardo's API-side enhancement ON
-              // for Manual + Pipeline regardless of per-model spec default.
-              // Brief: "we do NOT touch/improve prompts ourselves; Leonardo's
-              // prompt_enhance handles all expansion."
-              promptEnhance: 'ON',
+                // V1.0.7-PROMPT-ENG-A4: forward anti-AI-look curated
+                // negatives to /api/ai/image. The route layer will
+                // forward them into the provider's negative_prompt
+                // channel (Leonardo / Higgsfield MCP).
+                antiAiLookNegatives: enhanced.negativePrompts,
+                promptEnhance: 'ON',
               },
               {
                 systemPrompt: settings.agentPrompt,
@@ -1146,6 +1176,10 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
               enhanced.prompt,
               {
                 negativePrompt: generatedNegativePrompt,
+                // V1.0.7-PROMPT-ENG-A4: forward anti-AI-look curated
+                // negatives to /api/leonardo. Joined with the
+                // user-supplied negative inside submitLeonardoAndPoll.
+                antiAiLookNegatives: enhanced.negativePrompts,
                 modelId: selectedModel,
                 width: sharedWidth,
                 height: sharedHeight,
@@ -1374,6 +1408,9 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
               styleIds: sharedStyleIds,
               quality: sharedQuality,
               negativePrompt: modelNegPrompt,
+              // V1.0.7-PROMPT-ENG-A4: forward anti-AI-look curated
+              // negatives to /api/ai/image in the reroll path too.
+              antiAiLookNegatives: enhanced.negativePrompts,
               // IMG-INVEST-001 PART 2: force Leonardo's API-side enhancement ON
               // for Manual + Pipeline regardless of per-model spec default.
               // Brief: "we do NOT touch/improve prompts ourselves; Leonardo's
@@ -1393,6 +1430,9 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             enhanced.prompt,
             {
               negativePrompt: modelNegPrompt,
+              // V1.0.7-PROMPT-ENG-A4: forward anti-AI-look curated
+              // negatives to /api/leonardo in the reroll path too.
+              antiAiLookNegatives: enhanced.negativePrompts,
               modelId: selectedModel,
               width: sharedWidth,
               height: sharedHeight,
