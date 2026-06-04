@@ -329,7 +329,23 @@ Failing any fails the build. Use `scripts/release.sh` — it bumps all three.
   `docs/research/higgsfield-skills/cinema-world-builder/`.
 - Add 14 camera angles as a Settings picker. Source:
   `docs/research/higgsfield-skills/.../camera-angles.md`.
-- Apply anti-AI-look negative prompts by default.
+- Apply anti-AI-look negative prompts (now opt-in via the
+  `antiAiLook` UserSettings flag — PR #35 merged; still needs
+  the Settings UI toggle to make it user-discoverable).
+- A.4 Settings UI toggle → **DONE (PR #36)** — Settings → AI
+  Engine → Anti-AI-look negatives switch.
+- A.2 MCSLA video formula → **DONE (PR #37)** — Model · Camera ·
+  Subject · Look · Action five-layer protocol; resolves camera
+  slugs through `lib/camera-angles.ts`.
+- A.3 14-angle picker → **DONE (PR #37)** — picker UI in Settings;
+  14 angles, 5 emotional registers (eye-level / low / high /
+  dutch / intent).
+- D credit budget → **DONE (PR #38)** — `higgsfieldMonthlyCreditCap`
+  + per-cycle counter + hard-fail gate at the two Higgsfield
+  submit sites + low-credit banner + "Override for this cycle"
+  escape hatch. v1 uses manual-reset cycles and a flat 1-credit-
+  per-call charge; v2 should add calendar/30-day rolling cycles
+  and model-aware credit costs.
 
 ### 7.3 Per-cycle credit budget (2-3 days) — **D**
 
