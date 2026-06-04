@@ -29,6 +29,7 @@ import {
   Bot,
   Terminal,
   Sparkles,
+  Coins,
 } from 'lucide-react';
 import { useNcaAvailability } from '@/lib/useNcaAvailability';
 import { showToast } from '@/components/Toast';
@@ -43,6 +44,7 @@ import { DesktopSettingsPanel } from './DesktopSettingsPanel';
 import { VercelAiModelPicker, defaultVercelAiModel } from './Settings/VercelAiModelPicker';
 import { HiggsfieldConnection } from './Settings/HiggsfieldConnection';
 import { CameraAnglePicker } from './Settings/CameraAnglePicker';
+import { CreditBudgetSettings } from './Settings/CreditBudgetSettings';
 import {
   HIGGSFIELD_DEFAULT_IMAGE_MODEL,
   HIGGSFIELD_DEFAULT_VIDEO_MODEL,
@@ -1852,6 +1854,22 @@ export function SettingsModal({
               (PR #35). Hidden behind a default-OFF switch so the
               curated negative list only kicks in when the user
               explicitly opts in. */}
+          {/* V1.0.7-PROMPT-ENG-D: per-cycle credit budget. Sits next to
+              the Image Generation section because the gate only
+              affects the Higgsfield provider; users who don't enable
+              a cap see nothing here. */}
+          <SettingsSection
+            icon={Coins}
+            title="Credit Budget"
+            subtitle="Optional cap on monthly Higgsfield credits. Leave the field blank to disable."
+            tone="cyan"
+          >
+            <CreditBudgetSettings
+              cap={settings.higgsfieldMonthlyCreditCap}
+              onChange={(next) => updateSettings({ higgsfieldMonthlyCreditCap: next })}
+            />
+          </SettingsSection>
+
           <SettingsSection
             icon={Sparkles}
             title="Image Generation"

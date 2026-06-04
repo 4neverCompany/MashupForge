@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { streamAIToString, extractJsonArrayFromLLM } from '@/lib/aiClient';
 import { enhancePromptForModel } from '@/lib/modelOptimizer';
 import { buildEnhancedPrompt } from '@/lib/image-prompt-builder';
+import { checkBudget, incrementCredits, loadCreditUsage } from '@/lib/credit-budget';
 import { getModelSpec } from '@/lib/model-specs';
 import { MASTERPROMPT_INSTRUCTIONS } from '@/lib/masterpromptTemplate';
 import { getErrorMessage } from '@/lib/errors';
@@ -1138,6 +1139,19 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             // carry the Higgsfield job_set_type slug (`nano_banana_2`,
             // `seedance_2_0`, etc.). LEONARDO_MODELS does not have
             // these models so we don't fall through to modelConfig.apiName.
+            // V1.0.7-PROMPT-ENG-D: per-cycle credit budget gate. When
+            // the user has set a cap and the cycle is over, we throw
+            // a typed error that the outer catch surfaces verbatim;
+            // the user can then either reset the cycle or flip the
+            // override from Settings.
+            const usage = await loadCreditUsage();
+            const budget = checkBudget(settings.higgsfieldMonthlyCreditCap, usage);
+            if (!budget.allowed) {
+              throw new Error(
+                `Higgsfield credit cap reached (${usage.used}/${settings.higgsfieldMonthlyCreditCap}). ` +
+                `Open Settings → Credit Budget to reset the cycle or override for this cycle.`,
+              );
+            }
             const hfSpec = getModelSpec(selectedModel);
             const hf = await submitHiggsfieldImage({
               prompt: enhanced.prompt,
@@ -1151,6 +1165,11 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             success = { url: hf.url };
             activePrompt = enhanced.prompt;
             retried = false;
+            // V1.0.7-PROMPT-ENG-D: charge 1 credit per successful
+            // submission. v1 uses a flat rate; v2 should look up the
+            // model's actual cost from lib/model-specs and pass it
+            // here. Failed submissions don't count.
+            void incrementCredits(1);
           } else if (settings.activeAiAgent === 'vercel-ai') {
             // Hybrid orchestrator path: server-side MiniMax-enhance +
             // Leonardo-submit via /api/ai/image, then poll via the
@@ -1399,6 +1418,15 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
           // HIGGSFIELD-INTEGRATION: reroll path. Same submit helper
           // as the main loop — the model + aspect ratio come from
           // the reroll inputs and the spec.
+          // V1.0.7-PROMPT-ENG-D: same budget gate as the main loop.
+          const usageR = await loadCreditUsage();
+          const budgetR = checkBudget(settings.higgsfieldMonthlyCreditCap, usageR);
+          if (!budgetR.allowed) {
+            throw new Error(
+              `Higgsfield credit cap reached (${usageR.used}/${settings.higgsfieldMonthlyCreditCap}). ` +
+              `Open Settings → Credit Budget to reset the cycle or override for this cycle.`,
+            );
+          }
           const hfSpecR = getModelSpec(selectedModel);
           const hf = await submitHiggsfieldImage({
             prompt: enhanced.prompt,
@@ -1412,6 +1440,8 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
           success = { url: hf.url };
           activePrompt = enhanced.prompt;
           retried = false;
+          // V1.0.7-PROMPT-ENG-D: charge 1 credit per successful reroll.
+          void incrementCredits(1);
         } else if (settings.activeAiAgent === 'vercel-ai') {
           ({ success, finalPrompt: activePrompt, retried } = await submitViaAiImageWithOneRetry(
             enhanced.prompt,

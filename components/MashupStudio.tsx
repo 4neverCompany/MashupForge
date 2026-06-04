@@ -10,6 +10,8 @@ import { OnboardingWizard } from './onboarding/OnboardingWizard';
 import { SetupUnfinishedPill } from './onboarding/SetupUnfinishedPill';
 import { ShieldAlert } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { CreditBudgetBanner } from './CreditBudgetBanner';
+import { useSettings } from '@/hooks/useSettings';
 
 const Sidebar = dynamic(
   () => import('./Sidebar').then((m) => m.Sidebar),
@@ -130,6 +132,12 @@ function MashupApp() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950">
+      {/* V1.0.7-PROMPT-ENG-D: low-credit + cap-reached banner. The
+          banner is self-gating (returns null when the cap isn't set
+          or usage is under 80%) so this is a safe unconditional
+          mount. Sits above the Sidebar so it never gets covered by
+          the floating panels. */}
+      <StudioCreditStrip />
       <ErrorBoundary section="Sidebar">
         <Sidebar />
       </ErrorBoundary>
@@ -180,5 +188,29 @@ export function MashupStudio() {
         <MashupApp />
       </MashupProvider>
     </ErrorBoundary>
+  );
+}
+
+/**
+ * V1.0.7-PROMPT-ENG-D: thin strip at the top of the studio that
+ * surfaces the credit-budget banner. The strip is always rendered;
+ * the banner inside it self-gates on cap/usage, so the strip is
+ * effectively a no-op when no cap is set or usage is healthy.
+ *
+ * Lives outside the Sidebar/MainContent so the floating MmxStudioPanel
+ * never covers it. Sits at the top of the flex column with the rest
+ * of the studio below — no z-index gymnastics required.
+ */
+function StudioCreditStrip() {
+  const { settings } = useSettings();
+  // Bumping the tick after every successful generation is the
+  // hook's responsibility (out of scope here). The banner re-reads
+  // the persistence on mount + when refreshTick changes.
+  return (
+    <div className="absolute top-0 left-0 right-0 z-30 p-3 pointer-events-none">
+      <div className="pointer-events-auto max-w-3xl mx-auto">
+        <CreditBudgetBanner cap={settings.higgsfieldMonthlyCreditCap} />
+      </div>
+    </div>
   );
 }
