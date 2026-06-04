@@ -17,6 +17,7 @@
 
 import { getModelSpec, type ModelSpec } from './model-specs';
 import type { MmxImageOptions } from './mmx-client';
+import { getCameraAngleById } from './camera-angles';
 
 export interface PromptInjectionInputs {
   /** Model spec key (e.g. "nano-banana-2"). When set, params/styles are
@@ -58,6 +59,42 @@ export interface PromptInjectionInputs {
    * via MCP `negative_prompt`); providers without negative-prompt
    * support silently drop the list. */
   antiAiLook?: boolean;
+  /** V1.0.7-PROMPT-ENG-A2: MCSLA — Model · Camera · Subject · Look
+   * · Action. Five-layer director protocol from
+   * `docs/research/higgsfield-skills/cinema-world-builder-SKILL.md`.
+   * Each layer is a free-text hint; missing layers are dropped.
+   * Applied as a structured tail to the positive prompt, sibling
+   * to the SLCT block. Empty/undefined layers are silently
+   * dropped. The `camera.angle` field accepts either a free-form
+   * description OR a slug from `lib/camera-angles.ts` (the A.3
+   * picker writes a slug; this composer resolves it). */
+  mcsla?: McslaInputs;
+}
+
+/** V1.0.7-PROMPT-ENG-A2: MCSLA — Model · Camera · Subject · Look · Action.
+ *  Each layer is an optional free-text (or structured sub-object) hint.
+ *  The composer drops empty/undefined layers. */
+export interface McslaInputs {
+  /** M - MODEL: model choice (often redundant with `modelId`, but
+   *  kept here so the user can override per-idea). */
+  model?: string;
+  /** C - CAMERA: framing + movement + lens. The angle sub-field
+   *  accepts a `lib/camera-angles.ts` slug (e.g. "low-angle-30"). */
+  camera?: {
+    angle?: string;
+    movement?: string;
+    lens?: string;
+  };
+  /** S - SUBJECT: who/what is in the frame. */
+  subject?: string;
+  /** L - LOOK: lighting + color + texture. */
+  look?: {
+    lighting?: string;
+    color?: string;
+    texture?: string;
+  };
+  /** A - ACTION: what's happening. */
+  action?: string;
 }
 
 /** V1.0.7-PROMPT-ENG-A1: SLCT four-layer director protocol. Each
@@ -206,6 +243,70 @@ function buildSlctFragment(slct: SlctInputs | undefined): string {
   if (textureBits.length > 0) parts.push(`T: ${textureBits.join('; ')}`);
   if (parts.length === 0) return '';
   return `SLCT[${parts.join(' | ')}]`;
+}
+
+// ---------------------------------------------------------------------------
+// V1.0.7-PROMPT-ENG-A2: MCSLA five-layer director protocol
+// ---------------------------------------------------------------------------
+
+/**
+ * Compose the five-layer MCSLA block from optional inputs. Each layer
+ * is a `key: value` segment joined by `|`; missing fields are dropped.
+ * Returns the empty string when no layer has any content, so the
+ * caller can safely concat without a separator guard.
+ *
+ * The output shape is stable for callers / diagnostics:
+ *   "MCSLA[M: <model>] | [C: <angle-fragment>; <movement>; <lens>] | [S: <subject>] | [L: <lighting>; <color>; <texture>] | [A: <action>]"
+ *
+ * Empty fields within a layer are also dropped (so the layer segment
+ * won't have dangling `;` characters). For the `C` (Camera) layer
+ * specifically, the `angle` field is resolved through the
+ * `lib/camera-angles.ts` catalog when it's a known slug — this lets
+ * the A.3 picker write a stable id (e.g. "low-angle-30") and the
+ * composer expand it to the full "Low angle, 30° below eye level"
+ * fragment.
+ */
+function buildMcslaFragment(mcsla: McslaInputs | undefined): string {
+  if (!mcsla) return '';
+  const parts: string[] = [];
+
+  // M — MODEL
+  const m = mcsla.model?.trim();
+  if (m) parts.push(`M: ${m}`);
+
+  // C — CAMERA
+  if (mcsla.camera) {
+    const camBits: string[] = [];
+    // Resolve the angle slug if present, otherwise use the raw string.
+    const rawAngle = mcsla.camera.angle?.trim();
+    if (rawAngle) {
+      const catalog = getCameraAngleById(rawAngle);
+      camBits.push(catalog ? catalog.promptFragment : rawAngle);
+    }
+    const movement = mcsla.camera.movement?.trim();
+    if (movement) camBits.push(movement);
+    const lens = mcsla.camera.lens?.trim();
+    if (lens) camBits.push(lens);
+    if (camBits.length > 0) parts.push(`C: ${camBits.join('; ')}`);
+  }
+
+  // S — SUBJECT
+  const s = mcsla.subject?.trim();
+  if (s) parts.push(`S: ${s}`);
+
+  // L — LOOK
+  if (mcsla.look) {
+    const lookBits = [mcsla.look.lighting, mcsla.look.color, mcsla.look.texture]
+      .map((x) => x?.trim()).filter(Boolean);
+    if (lookBits.length > 0) parts.push(`L: ${lookBits.join('; ')}`);
+  }
+
+  // A — ACTION
+  const a = mcsla.action?.trim();
+  if (a) parts.push(`A: ${a}`);
+
+  if (parts.length === 0) return '';
+  return `MCSLA[${parts.join(' | ')}]`;
 }
 
 // ---------------------------------------------------------------------------
@@ -403,6 +504,16 @@ export function buildEnhancedPrompt(
   const slctFragment = buildSlctFragment(inputs.slct);
   if (slctFragment) {
     hintParts.push(slctFragment);
+  }
+
+  // V1.0.7-PROMPT-ENG-A2: MCSLA five-layer director protocol. Sits
+  // AFTER SLCT (SLCT is image-focused surface/lumina/capture/texture;
+  // MCSLA is the broader video-aware Model/Camera/Subject/Look/Action
+  // protocol). Empty layers are dropped — the block only appears when
+  // the user has set at least one of {model, camera, subject, look, action}.
+  const mcslaFragment = buildMcslaFragment(inputs.mcsla);
+  if (mcslaFragment) {
+    hintParts.push(mcslaFragment);
   }
 
   // Free-text quality hint from caller (last, after spec + SLCT).
