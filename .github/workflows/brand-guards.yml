@@ -37,11 +37,15 @@ jobs:
           # the forbidden patterns as data; the brand-guards job would otherwise
           # self-match. BRAND.md is allowed because it documents the forbidden names
           # for contributors without using them in any runtime surface.
+          # HANDOFF.md is allowed because it is a historical/contextual handoff
+          # doc that explains the workflow itself (including the legacy name in
+          # the workflow-design context). User-facing surfaces (landing pages,
+          # components/landing/, the renderer) are NOT allowlisted.
           #
           # The leading `(\./)?` accounts for the `./` prefix that `grep -r .` adds
           # to relative paths — without it, none of these paths would actually
           # match and the guard would always fail.
-          ALLOWLIST_REGEX='^(\./)?(CHANGELOG\.md|README\.md|docs/|app/landing/|app/components/landing/|\.github/workflows/brand-guards\.yml|BRAND\.md)'
+          ALLOWLIST_REGEX='^(\./)?(CHANGELOG\.md|README\.md|HANDOFF\.md|docs/|app/landing/|app/components/landing/|\.github/workflows/brand-guards\.yml|BRAND\.md)'
 
           # V105.6-BRAND-HARNES: .hermes/ is the previous orchestrator's working
           # dir (Hermes sub-agent memory files), .harness/ is THIS orchestrator's
