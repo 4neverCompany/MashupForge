@@ -58,7 +58,7 @@ git tag -a v<ver> -m "Release v<ver>"
 git push origin v<ver>
 
 # 3. Watch the build (~25-30 min on Windows-latest).
-gh -R Code4neverCompany/MashupForge run watch <run-id> --exit-status
+gh -R 4neverCompany/MashupForge run watch <run-id> --exit-status
 ```
 
 If you find yourself making a "refresh Cargo.lock for v<ver>" companion commit after `release.sh`, something regressed in the script — that step should be automatic now.
@@ -106,7 +106,7 @@ Keep it under 200 lines. The auto-gen sections below will pick up the mechanical
 
 The `.github/workflows/release.yml` uses GitHub's `generate_release_notes: true` to auto-populate the draft release body from PR + commit history. This misses the highlights file — the user-facing "what does this release mean for me" prose. After the workflow completes:
 
-1. Go to `https://github.com/Code4neverCompany/MashupForge/releases/tag/v<ver>` (draft, not yet published)
+1. Go to `https://github.com/4neverCompany/MashupForge/releases/tag/v<ver>` (draft, not yet published)
 2. Click "Edit"
 3. Replace the auto-generated body with the content of `docs/changelog-highlights/<ver>.md` (copy-paste)
 4. The full Highlights block (🎬 Highlights, 🔧 Breaking changes, 📋 Migration notes, 🧪 Test summary, 📚 Research artifacts, 🙏 Credits) is the canonical release story

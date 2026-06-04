@@ -9,12 +9,12 @@ as a fully captioned, scheduled Instagram post — image generation, AI
 captions, approval queue, and a smart scheduler wired into one atomic
 pipeline.
 
-[**🌐 Landing page**](https://mashupforge.vercel.app) · [**📥 Download v1.0.2**](https://github.com/Code4neverCompany/MashupForge/releases/latest) · [**🎨 Try the studio**](https://mashupforge.vercel.app/studio)
+[**🌐 Landing page**](https://mashupforge.vercel.app) · [**📥 Download v1.0.2**](https://github.com/4neverCompany/MashupForge/releases/latest) · [**🎨 Try the studio**](https://mashupforge.vercel.app/studio)
 
 ![MashupForge — AI multiverse crossover studio](./assets/hero-banner.webp)
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0--or--later-c5a062?style=for-the-badge&labelColor=050505)](./LICENSE)
-[![Version](https://img.shields.io/github/v/release/Code4neverCompany/MashupForge?style=for-the-badge&logo=github&logoColor=white&labelColor=050505&color=c5a062)](https://github.com/Code4neverCompany/MashupForge/releases)
+[![Version](https://img.shields.io/github/v/release/4neverCompany/MashupForge?style=for-the-badge&logo=github&logoColor=white&labelColor=050505&color=c5a062)](https://github.com/4neverCompany/MashupForge/releases)
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
@@ -107,7 +107,7 @@ without its `hostedImageUrl` — cannot happen here, by construction.
 
 ```bash
 # Download the latest installer
-# → https://github.com/Code4neverCompany/MashupForge/releases/latest
+# → https://github.com/4neverCompany/MashupForge/releases/latest
 # Run the .exe, the app auto-updates silently on next launch
 ```
 
@@ -121,7 +121,7 @@ Open **[mashupforge.vercel.app/studio](https://mashupforge.vercel.app/studio)** 
 
 ```bash
 # 1. Clone
-git clone https://github.com/Code4neverCompany/MashupForge.git
+git clone https://github.com/4neverCompany/MashupForge.git
 cd MashupForge
 
 # 2. Install
@@ -213,7 +213,7 @@ src-tauri/                  # Tauri 2 desktop shell (Rust)
 
 ## 📦 Releases
 
-Latest: **[v1.0.2](https://github.com/Code4neverCompany/MashupForge/releases/tag/v1.0.2)** — desktop `/studio` boot-URL hotfix
+Latest: **[v1.0.2](https://github.com/4neverCompany/MashupForge/releases/tag/v1.0.2)** — desktop `/studio` boot-URL hotfix
 
 | Version | Date | Highlights |
 |---|---|---|
@@ -229,7 +229,7 @@ target is `1.0.2`.
 
 We welcome PRs! See **[CONTRIBUTING.md](./CONTRIBUTING.md)** for setup,
 code style, and PR guidelines. Bug reports and feature ideas go through
-[GitHub Issues](https://github.com/Code4neverCompany/MashupForge/issues)
+[GitHub Issues](https://github.com/4neverCompany/MashupForge/issues)
 — templates are under `.github/ISSUE_TEMPLATE/`.
 
 Before opening a PR, run:

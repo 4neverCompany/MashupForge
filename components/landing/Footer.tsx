@@ -7,18 +7,18 @@ const linkGroups: Array<{ title: string; links: Array<{ label: string; href: str
     title: 'Product',
     links: [
       { label: 'Launch Studio', href: '/studio' },
-      { label: 'Latest release', href: 'https://github.com/Code4neverCompany/MashupForge/releases/latest' },
-      { label: 'Roadmap', href: 'https://github.com/Code4neverCompany/MashupForge/issues' },
-      { label: 'Brand kit', href: 'https://github.com/Code4neverCompany/MashupForge/blob/main/BRAND.md' },
+      { label: 'Latest release', href: 'https://github.com/4neverCompany/MashupForge/releases/latest' },
+      { label: 'Roadmap', href: 'https://github.com/4neverCompany/MashupForge/issues' },
+      { label: 'Brand kit', href: 'https://github.com/4neverCompany/MashupForge/blob/main/BRAND.md' },
     ],
   },
   {
     title: 'Source',
     links: [
-      { label: 'Repository', href: 'https://github.com/Code4neverCompany/MashupForge' },
-      { label: 'Contributing', href: 'https://github.com/Code4neverCompany/MashupForge/blob/main/CONTRIBUTING.md' },
-      { label: 'Security', href: 'https://github.com/Code4neverCompany/MashupForge/blob/main/SECURITY.md' },
-      { label: 'License (AGPL-3.0)', href: 'https://github.com/Code4neverCompany/MashupForge/blob/main/LICENSE' },
+      { label: 'Repository', href: 'https://github.com/4neverCompany/MashupForge' },
+      { label: 'Contributing', href: 'https://github.com/4neverCompany/MashupForge/blob/main/CONTRIBUTING.md' },
+      { label: 'Security', href: 'https://github.com/4neverCompany/MashupForge/blob/main/SECURITY.md' },
+      { label: 'License (AGPL-3.0)', href: 'https://github.com/4neverCompany/MashupForge/blob/main/LICENSE' },
     ],
   },
   {
@@ -26,8 +26,8 @@ const linkGroups: Array<{ title: string; links: Array<{ label: string; href: str
     links: [
       { label: '4neverCompany', href: 'https://4nevercompany.com' },
       { label: 'Contact', href: 'mailto:hello@4nevercompany.com' },
-      { label: 'Changelog', href: 'https://github.com/Code4neverCompany/MashupForge/releases' },
-      { label: 'Status', href: 'https://github.com/Code4neverCompany/MashupForge' },
+      { label: 'Changelog', href: 'https://github.com/4neverCompany/MashupForge/releases' },
+      { label: 'Status', href: 'https://github.com/4neverCompany/MashupForge' },
     ],
   },
 ];
@@ -75,7 +75,7 @@ export function Footer() {
             </p>
             <div className="mt-6 flex items-center gap-3">
               <a
-                href="https://github.com/Code4neverCompany/MashupForge"
+                href="https://github.com/4neverCompany/MashupForge"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-zinc-400 transition-all hover:border-white/20 hover:bg-white/[0.06] hover:text-white"
