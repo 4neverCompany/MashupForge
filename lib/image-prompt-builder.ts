@@ -45,6 +45,50 @@ export interface PromptInjectionInputs {
    * the route — the API layer re-validates against the model's
    * allow-list. */
   higgsfieldOptions?: Partial<HiggsfieldBuilderOptions>;
+  /** V1.0.7-PROMPT-ENG-A1: SLCT (Surface / Lumina / Capture / Texture)
+   * four-layer director protocol from the Banana Pro Director skill.
+   * Each layer is optional; missing layers are dropped from the
+   * prompt fragment. Applied as a structured tail to the base prompt
+   * — see `buildSlctFragment` for the exact shape. */
+  slct?: SlctInputs;
+  /** V1.0.7-PROMPT-ENG-A4: when true, append the curated anti-AI-look
+   * negative prompt list to `EnhancedPrompt.negativePrompts`. The
+   * caller (route layer) forwards the list to providers that support
+   * negative-prompt fields (Leonardo via `negative_prompt`, Higgsfield
+   * via MCP `negative_prompt`); providers without negative-prompt
+   * support silently drop the list. */
+  antiAiLook?: boolean;
+}
+
+/** V1.0.7-PROMPT-ENG-A1: SLCT four-layer director protocol. Each
+ * field is a free-text hint the user (or the Studio's preset picker)
+ * filled in. Empty / missing fields are silently dropped so the caller
+ * can populate only what they know. Reference:
+ * `docs/research/higgsfield-skills/banana-pro-director-SKILL.md`. */
+export interface SlctInputs {
+  /** S - SURFACE & SOUL: subject as a tactile surface. */
+  surface?: {
+    skinCondition?: string;
+    emotionalRegister?: string;
+    microDetails?: string;
+  };
+  /** L - LUMINA: light physics. */
+  lumina?: {
+    direction?: string;
+    quality?: string;
+    interaction?: string;
+    reflections?: string;
+  };
+  /** C - CAPTURE: camera and proximity. */
+  capture?: {
+    proximity?: string;
+    optics?: string;
+    angle?: string;
+  };
+  /** T - TEXTURE & TRUTH: material authenticity. */
+  texture?: {
+    authenticity?: string;
+  };
 }
 
 export interface LeonardoBuilderOptions {
@@ -123,7 +167,80 @@ export interface EnhancedPrompt {
    * route body. Populated only when the caller passes a
    * `higgsfieldOptions` input; otherwise empty. */
   higgsfield: HiggsfieldBuilderOptions;
+  /** V1.0.7-PROMPT-ENG-A4: negative prompts to forward to providers
+   * that support them. Empty unless `inputs.antiAiLook` is set.
+   * Currently only the curated anti-AI-look list — future work could
+   * let the caller append custom negatives via a separate input. */
+  negativePrompts: string[];
 }
+
+// ---------------------------------------------------------------------------
+// V1.0.7-PROMPT-ENG-A1: SLCT four-layer director protocol
+// ---------------------------------------------------------------------------
+
+/**
+ * Compose the four-layer SLCT block from optional inputs. Each layer
+ * is a `key: value` segment joined by `|`; missing fields are dropped.
+ * Returns the empty string when no layer has any content, so the
+ * caller can safely concat without a separator guard.
+ *
+ * The output shape is stable for callers / diagnostics:
+ *   "SLCT[S: <skin>; <emotion>; <micro>] | [L: <dir>; <quality>; <interaction>; <reflections>] | [C: <proximity>; <optics>; <angle>] | [T: <authenticity>]"
+ *
+ * Empty fields within a layer are also dropped (so the layer segment
+ * won't have dangling `;` characters).
+ */
+function buildSlctFragment(slct: SlctInputs | undefined): string {
+  if (!slct) return '';
+  const parts: string[] = [];
+  const surfaceBits = [slct.surface?.skinCondition, slct.surface?.emotionalRegister, slct.surface?.microDetails]
+    .map((s) => s?.trim()).filter(Boolean);
+  if (surfaceBits.length > 0) parts.push(`S: ${surfaceBits.join('; ')}`);
+  const luminaBits = [slct.lumina?.direction, slct.lumina?.quality, slct.lumina?.interaction, slct.lumina?.reflections]
+    .map((s) => s?.trim()).filter(Boolean);
+  if (luminaBits.length > 0) parts.push(`L: ${luminaBits.join('; ')}`);
+  const captureBits = [slct.capture?.proximity, slct.capture?.optics, slct.capture?.angle]
+    .map((s) => s?.trim()).filter(Boolean);
+  if (captureBits.length > 0) parts.push(`C: ${captureBits.join('; ')}`);
+  const textureBits = [slct.texture?.authenticity].map((s) => s?.trim()).filter(Boolean);
+  if (textureBits.length > 0) parts.push(`T: ${textureBits.join('; ')}`);
+  if (parts.length === 0) return '';
+  return `SLCT[${parts.join(' | ')}]`;
+}
+
+// ---------------------------------------------------------------------------
+// V1.0.7-PROMPT-ENG-A4: anti-AI-look negative prompts (curated)
+// ---------------------------------------------------------------------------
+
+/**
+ * Curated list of negative prompts to suppress the "AI-look" — soft
+ * diffuse lighting, smooth airbrushed skin, flat even light, etc.
+ * Source: `banana-pro-director-SKILL.md` §"Directivas de Limpieza de IA".
+ *
+ * The list is intentionally a const (not generated from style hints) so
+ * it's reviewable in code review and easy to trim when a particular
+ * negative starts causing the model to over-correct.
+ */
+const ANTI_AI_LOOK_NEGATIVES: readonly string[] = [
+  'soft diffused lighting',
+  'no shadows',
+  'flat even light',
+  'blue or cool tones',
+  'smooth airbrushed skin',
+  'no pores',
+  'dark eyebrow',
+  'both eyes visible',
+  'full face',
+  'clean shaven',
+  'studio lighting',
+  'painted',
+  'illustration',
+  'CGI',
+  'plastic skin',
+  'wet skin',
+  'sweat droplets',
+  'bright white background',
+];
 
 // ---------------------------------------------------------------------------
 // Spec readers (small, defensive)
@@ -212,6 +329,11 @@ export function buildEnhancedPrompt(
   const hintParts: string[] = [];
   const mmx: MmxImageOptions = {};
   const leonardo: LeonardoBuilderOptions = {};
+  // V1.0.7-PROMPT-ENG-A4: anti-AI-look negatives are populated only when
+  // the caller asks for them. Default empty list (the `[]` in the
+  // type signature is the contract — callers can rely on `negativePrompts`
+  // always being an array, never undefined).
+  const negativePrompts: string[] = [];
   // HIGGSFIELD-INTEGRATION: start from the spec's `apiName` so the
   // caller doesn't need to know the underlying job_set_type. If no
   // spec is found (ad-hoc Higgsfield call), the caller is expected
@@ -273,9 +395,27 @@ export function buildEnhancedPrompt(
     }
   }
 
-  // Free-text quality hint from caller (after spec hints).
+  // V1.0.7-PROMPT-ENG-A1: SLCT four-layer director protocol. Appended
+  // as a single self-delimiting block AFTER spec-style/aspect/quality
+  // hints but BEFORE the user qualityHint, so the SLCT block sits at
+  // the structural boundary between model-derived and user-derived
+  // text. The block is dropped entirely if all four layers are empty.
+  const slctFragment = buildSlctFragment(inputs.slct);
+  if (slctFragment) {
+    hintParts.push(slctFragment);
+  }
+
+  // Free-text quality hint from caller (last, after spec + SLCT).
   if (inputs.qualityHint && inputs.qualityHint.trim()) {
     hintParts.push(inputs.qualityHint.trim());
+  }
+
+  // V1.0.7-PROMPT-ENG-A4: anti-AI-look negative prompts. Populated as a
+  // separate field on the output (NOT appended to the positive prompt)
+  // because some providers have dedicated negative-prompt channels
+  // (Leonardo `negative_prompt`, Higgsfield MCP `negative_prompt`).
+  if (inputs.antiAiLook) {
+    negativePrompts.push(...ANTI_AI_LOOK_NEGATIVES);
   }
 
   // Image count — all three providers.
@@ -316,5 +456,5 @@ export function buildEnhancedPrompt(
     ? `${basePrompt.trim()}. ${hintParts.join(', ')}`
     : basePrompt.trim();
 
-  return { prompt, appliedHints: hintParts, mmx, leonardo, higgsfield };
+  return { prompt, appliedHints: hintParts, mmx, leonardo, higgsfield, negativePrompts };
 }

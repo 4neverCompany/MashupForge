@@ -160,3 +160,122 @@ describe('buildEnhancedPrompt — providers see the same prompt', () => {
     expect(r.prompt).toMatch(/cinematic lighting/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// V1.0.7-PROMPT-ENG-A1: SLCT four-layer director protocol
+// ---------------------------------------------------------------------------
+
+describe('buildEnhancedPrompt — SLCT four-layer director protocol', () => {
+  it('appends the full SLCT block when all four layers are provided', () => {
+    const r = buildEnhancedPrompt('a portrait', {
+      slct: {
+        surface: {
+          skinCondition: 'weathered texture with enlarged pores',
+          emotionalRegister: 'melancholic introspective expression',
+        },
+        lumina: {
+          direction: 'hard directional light from upper right',
+          quality: 'cinematic low-key',
+        },
+        capture: {
+          proximity: 'extreme macro closeup',
+          optics: '85mm macro lens',
+        },
+        texture: {
+          authenticity: 'raw unretouched surface',
+        },
+      },
+    });
+    expect(r.prompt).toMatch(/a portrait\.\s+SLCT\[/);
+    expect(r.prompt).toMatch(/S: weathered texture with enlarged pores; melancholic introspective expression/);
+    expect(r.prompt).toMatch(/L: hard directional light from upper right; cinematic low-key/);
+    expect(r.prompt).toMatch(/C: extreme macro closeup; 85mm macro lens/);
+    expect(r.prompt).toMatch(/T: raw unretouched surface/);
+    expect(r.appliedHints.find((h) => h.startsWith('SLCT['))).toBeDefined();
+  });
+
+  it('drops empty layers — only surfaces, no S block', () => {
+    const r = buildEnhancedPrompt('p', {
+      slct: { surface: { skinCondition: 'sweaty' } },
+    });
+    expect(r.prompt).toMatch(/SLCT\[S: sweaty\]/);
+    expect(r.prompt).not.toMatch(/L:/);
+    expect(r.prompt).not.toMatch(/C:/);
+    expect(r.prompt).not.toMatch(/T:/);
+  });
+
+  it('drops empty sub-fields within a layer (no dangling ;)', () => {
+    const r = buildEnhancedPrompt('p', {
+      slct: {
+        surface: { skinCondition: 'sweaty', emotionalRegister: '', microDetails: undefined },
+      },
+    });
+    expect(r.prompt).toMatch(/SLCT\[S: sweaty\]/);
+    // The layer block should not have empty segments
+    expect(r.prompt).not.toMatch(/S:\s*sweaty;\s*;/);
+  });
+
+  it('produces an empty fragment when all inputs are empty / undefined', () => {
+    const r = buildEnhancedPrompt('p', {
+      slct: {
+        surface: { skinCondition: '', emotionalRegister: undefined, microDetails: '  ' },
+        lumina: undefined,
+        capture: { proximity: '', optics: '', angle: '' },
+        texture: {},
+      },
+    });
+    expect(r.prompt).toBe('p');
+    expect(r.appliedHints.find((h) => h.startsWith('SLCT['))).toBeUndefined();
+  });
+
+  it('does not append SLCT when no slct input is provided', () => {
+    const r = buildEnhancedPrompt('a cat');
+    expect(r.prompt).toBe('a cat');
+    expect(r.appliedHints.find((h) => h.startsWith('SLCT['))).toBeUndefined();
+  });
+
+  it('orders SLCT after spec hints but before user qualityHint', () => {
+    const r = buildEnhancedPrompt('p', {
+      modelId: 'nano-banana-2',
+      qualityHint: 'user override',
+      slct: { surface: { skinCondition: 'glowing' } },
+    });
+    const slctIdx = r.appliedHints.findIndex((h) => h.startsWith('SLCT['));
+    const userHintIdx = r.appliedHints.indexOf('user override');
+    expect(slctIdx).toBeGreaterThanOrEqual(0);
+    expect(userHintIdx).toBeGreaterThan(slctIdx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1.0.7-PROMPT-ENG-A4: anti-AI-look negative prompts
+// ---------------------------------------------------------------------------
+
+describe('buildEnhancedPrompt — anti-AI-look negative prompts', () => {
+  it('defaults to an empty negativePrompts list when not requested', () => {
+    const r = buildEnhancedPrompt('a cat');
+    expect(r.negativePrompts).toEqual([]);
+  });
+
+  it('populates the curated list when antiAiLook is true', () => {
+    const r = buildEnhancedPrompt('a cat', { antiAiLook: true });
+    expect(r.negativePrompts.length).toBeGreaterThan(0);
+    expect(r.negativePrompts).toContain('soft diffused lighting');
+    expect(r.negativePrompts).toContain('smooth airbrushed skin');
+    expect(r.negativePrompts).toContain('plastic skin');
+  });
+
+  it('does NOT inject the negatives into the positive prompt', () => {
+    const r = buildEnhancedPrompt('a cat', { antiAiLook: true });
+    // The positive prompt should remain user-facing only — negatives
+    // travel in their own channel.
+    expect(r.prompt).toBe('a cat');
+    expect(r.prompt).not.toMatch(/Negative prompt:/i);
+    expect(r.prompt).not.toMatch(/soft diffused lighting/);
+  });
+
+  it('leaves negativePrompts empty when antiAiLook is false', () => {
+    const r = buildEnhancedPrompt('a cat', { antiAiLook: false });
+    expect(r.negativePrompts).toEqual([]);
+  });
+});
