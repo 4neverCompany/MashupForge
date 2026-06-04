@@ -28,6 +28,7 @@ import {
   Sliders,
   Bot,
   Terminal,
+  Sparkles,
 } from 'lucide-react';
 import { useNcaAvailability } from '@/lib/useNcaAvailability';
 import { showToast } from '@/components/Toast';
@@ -1843,6 +1844,41 @@ export function SettingsModal({
                 </div>
               </div>
             )}
+          </SettingsSection>
+
+          {/* V1.0.7-PROMPT-ENG-A4: anti-AI-look toggle. Wired through
+              useImageGeneration → submitLeonardoAndPoll / submitViaAiImage
+              (PR #35). Hidden behind a default-OFF switch so the
+              curated negative list only kicks in when the user
+              explicitly opts in. */}
+          <SettingsSection
+            icon={Sparkles}
+            title="Image Generation"
+            subtitle="Prompt-engineering controls applied to every new image idea."
+            tone="cyan"
+          >
+            <div className="flex items-center justify-between bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
+              <div className="flex-1 min-w-0 pr-4">
+                <div className="text-sm text-zinc-300">Anti-AI-look negatives</div>
+                <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">
+                  Append a curated list of negative cues (no plastic skin, no airbrushed
+                  lighting, no studio backdrop) to every Leonardo / Higgsfield prompt.
+                  Helps portraits and product shots feel less rendered. Off by default.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.antiAiLook === true}
+                aria-label="Enable anti-AI-look negatives"
+                onClick={() => updateSettings({ antiAiLook: !(settings.antiAiLook === true) })}
+                className={`w-12 h-6 rounded-full transition-colors shrink-0 ${settings.antiAiLook === true ? 'bg-[#00e6ff]' : 'bg-zinc-700'} relative`}
+              >
+                <span
+                  className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.antiAiLook === true ? 'translate-x-6' : ''}`}
+                />
+              </button>
+            </div>
           </SettingsSection>
 
           {/* Video Generation Settings */}
