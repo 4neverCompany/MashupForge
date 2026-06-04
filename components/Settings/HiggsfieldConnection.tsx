@@ -107,8 +107,83 @@ export function HiggsfieldConnection({
     // to the Higgsfield authorize page; the callback comes back to
     // /api/higgsfield/oauth/callback which redirects to /studio with
     // ?higgsfield=connected in the URL.
-    window.location.href = '/api/higgsfield/oauth/authorize';
+    //
+    // V107.1-OAUTH: in the Tauri desktop app, pass ?via=desktop so the
+    // authorize route returns a `mashupforge://oauth/callback` redirect
+    // URI instead of the HTTPS one. The OS launches the deep link back
+    // into the WebView2 (where the state/PKCE cookies still live),
+    // and the deep-link listener below re-issues the callback fetch in
+    // that cookie context. Without this, the callback URL opens in the
+    // system browser (Tauri's default for external URLs) which has a
+    // different cookie jar and we get `expired_flow`.
+    const isTauri =
+      typeof window !== 'undefined' &&
+      (Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) ||
+        Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__));
+    const qs = isTauri ? '?via=desktop' : '';
+    window.location.href = `/api/higgsfield/oauth/authorize${qs}`;
   };
+
+  // V107.1-OAUTH: listen for the deep-link event from the Tauri backend
+  // and complete the OAuth flow by re-issuing the callback in the
+  // WebView2 cookie context. Without this, the user gets `expired_flow`
+  // because the state/PKCE cookies were set in WebView2 but the
+  // callback URL is opened in the system browser by Tauri's default
+  // external-URL handling.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const tauriInternals = (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    if (!tauriInternals) return;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      try {
+        // Lazy-import the event API to avoid pulling Tauri internals
+        // into the web bundle's type graph. The dynamic import is a
+        // 1-line shim that the bundler tree-shakes out for the web
+        // build.
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<string[]>('deep-link', (event) => {
+          const urls = (event.payload as string[]) || [];
+          for (const raw of urls) {
+            if (!raw.startsWith('mashupforge://oauth/callback')) continue;
+            // Parse the callback URL and re-issue the callback in the
+            // WebView2 cookie context. Use a same-origin path so the
+            // state/PKCE cookies (set during /authorize) are sent.
+            const url = new URL(raw.replace(/^mashupforge:/, 'https://mashupforge.invalid:'));
+            const code = url.searchParams.get('code');
+            const state = url.searchParams.get('state');
+            const errorParam = url.searchParams.get('error');
+            if (errorParam) {
+              window.location.href = `/studio?higgsfield=error&reason=${encodeURIComponent(errorParam)}`;
+              return;
+            }
+            if (!code || !state) {
+              window.location.href = '/studio?higgsfield=error&reason=missing_params';
+              return;
+            }
+            // Re-issue the callback in the WebView2 cookie context.
+            // The server reads the state/PKCE cookies (set in
+            // WebView2 during /authorize), matches state, exchanges
+            // the code, and redirects to /studio?higgsfield=connected.
+            window.location.href = `/api/higgsfield/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+            return;
+          }
+        });
+      } catch (e) {
+        // Tauri internals present but the event API isn't reachable.
+        // Fall back gracefully — the user will still see the original
+        // expired_flow error and we can debug from the tauri.log.
+        console.error('deep-link listen failed', e);
+      }
+    })();
+    return () => {
+      try {
+        unlisten?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
 
   const handleDisconnect = async () => {
     if (!confirm('Disconnect Higgsfield? Generation will fall back to Leonardo.')) return;

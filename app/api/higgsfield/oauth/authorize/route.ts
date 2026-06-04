@@ -31,22 +31,40 @@ const STATE_COOKIE = 'higgsfield-oauth-state';
 const PKCE_COOKIE = 'higgsfield-oauth-pkce';
 
 function redirectUriFor(req: Request): string {
-  // For desktop, the loopback is a stable localhost port (Tauri binds
-  // it). For web, it's the public origin. We use the request's own
-  // origin so dev / preview / prod each get the right callback.
+  // V107.1-OAUTH: when the request comes from the Tauri desktop app
+  // (detected via ?via=desktop query param from HiggsfieldConnection),
+  // return a `mashupforge://` custom-scheme URI. The OS routes that
+  // back into the Tauri webview where the state/PKCE cookies were
+  // set in step 3 below, instead of into the system browser (which
+  // has a different cookie jar and would surface `expired_flow`).
   const url = new URL(req.url);
+  if (url.searchParams.get('via') === 'desktop') {
+    return 'mashupforge://oauth/callback';
+  }
+  // For web, use the request's own origin so dev / preview / prod
+  // each get the right callback.
   return `${url.origin}/api/higgsfield/oauth/callback`;
 }
 
-async function getOrCreateClientId(redirectUri: string): Promise<string> {
+async function getOrCreateClientId(): Promise<string> {
   const existing = readDesktopConfigValue('HIGGSFIELD_OAUTH_CLIENT_ID');
   if (existing && existing.trim().length > 0) return existing.trim();
 
-  // Register a fresh public client. Persist immediately to config.json
-  // so subsequent authorize calls reuse the same client_id (and
-  // existing refresh tokens don't get orphaned).
+  // Register a fresh public client with BOTH redirect URIs so the same
+  // client_id can be reused for web and desktop flows. Registering
+  // again would return a new client_id and orphan existing refresh
+  // tokens, so we keep a static allowlist of known-good URIs.
   const reg = await registerOAuthClient({
-    redirectUris: [redirectUri],
+    redirectUris: [
+      'mashupforge://oauth/callback',
+      // Web origins. We can't know every preview URL at runtime, so
+      // we register a couple of well-known production hosts. The
+      // /authorize route can still send any origin in the
+      // redirect_uri param as long as the registered allowlist
+      // contains it; some OAuth providers require exact match.
+      'https://mashupforge.vercel.app/api/higgsfield/oauth/callback',
+      'https://mashup-studio.vercel.app/api/higgsfield/oauth/callback',
+    ],
     clientName: 'MashupForge',
   });
   // The desktop-config PATCH endpoint is the canonical way to write
@@ -62,7 +80,7 @@ export async function GET(req: Request): Promise<Response> {
 
   let clientId: string;
   try {
-    clientId = await getOrCreateClientId(redirectUri);
+    clientId = await getOrCreateClientId();
   } catch (e) {
     return NextResponse.json(
       { error: `OAuth client registration failed: ${getErrorMessage(e)}` },
