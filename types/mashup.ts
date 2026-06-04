@@ -268,6 +268,12 @@ export interface UserSettings {
    * Stored as a string slug, not the label, so renames don't
    * break user data. */
   cameraAngle?: string;
+  /** V1.0.7-PROMPT-ENG-D: optional monthly credit cap for the
+   * Higgsfield provider. When set, the gate in
+   * `lib/credit-budget.ts` blocks Higgsfield submissions once the
+   * cycle usage hits this number. Undefined = gate disabled.
+   * The cycle is reset manually via Settings → Credit Budget. */
+  higgsfieldMonthlyCreditCap?: number;
   watermark?: WatermarkSettings;
   agentPrompt?: string;
   agentNiches?: string[];
@@ -949,6 +955,7 @@ export const defaultSettings: UserSettings = {
   defaultVideoModel: 'kling-video-o-3',
   antiAiLook: false,
   cameraAngle: undefined,
+  higgsfieldMonthlyCreditCap: undefined,
   watermark: {
     enabled: false,
     image: null,
