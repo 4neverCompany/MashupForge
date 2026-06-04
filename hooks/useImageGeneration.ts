@@ -1055,6 +1055,14 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             // user-supplied negativePrompt below (Leonardo takes a single
             // `negative_prompt` string).
             antiAiLook: settings.antiAiLook === true,
+            // V1.0.7-PROMPT-ENG-A2/A3: forward the user-picked camera
+            // angle slug (from `lib/camera-angles.ts`) into the MCSLA
+            // `C:` fragment. The composer resolves the slug to its
+            // full prompt fragment. Undefined when the user hasn't
+            // picked an angle — the fragment is dropped entirely.
+            mcsla: settings.cameraAngle
+              ? { camera: { angle: settings.cameraAngle } }
+              : undefined,
           });
 
           const fallbackStyleUuids = (() => {
@@ -1330,6 +1338,12 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
           styleName: modelStyle,
           aspectRatio: currentAspectRatio,
           count: 1,
+          // V1.0.7-PROMPT-ENG-A2/A3: reroll path also forwards the
+          // camera angle (otherwise switching models in the reroll
+          // dropdown would silently drop the angle hint).
+          mcsla: settings.cameraAngle
+            ? { camera: { angle: settings.cameraAngle } }
+            : undefined,
         });
 
         const fallbackStyleUuids = (() => {

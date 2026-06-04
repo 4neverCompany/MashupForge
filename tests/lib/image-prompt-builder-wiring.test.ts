@@ -116,4 +116,74 @@ describe('buildEnhancedPrompt — useImageGeneration wiring contract', () => {
       expect(r.negativePrompts).toEqual([]);
     });
   });
+
+  // V1.0.7-PROMPT-ENG-A2/A3: pin the MCSLA + camera-angle contract
+  // that `hooks/useImageGeneration.ts` and
+  // `components/Settings/CameraAnglePicker.tsx` rely on. The hook
+  // forwards `settings.cameraAngle` (a slug from
+  // `lib/camera-angles.ts`) into the `mcsla.camera.angle` field.
+  // The composer resolves the slug to a full prompt fragment.
+  describe('MCSLA + camera angle', () => {
+    it('emits no MCSLA block when mcsla is omitted', () => {
+      const r = buildEnhancedPrompt('a cat on a sofa', {
+        modelId: 'nano-banana-2',
+        styleName: '3D Render',
+        aspectRatio: '16:9',
+        count: 1,
+      });
+      expect(r.prompt).not.toMatch(/MCSLA/);
+    });
+
+    it('resolves a known camera-angle slug into a full prompt fragment', () => {
+      const r = buildEnhancedPrompt('a cat on a sofa', {
+        mcsla: { camera: { angle: 'low-angle-30' } },
+      });
+      // Slug resolves to "Low angle, 30° below eye level" via the catalog
+      expect(r.prompt).toMatch(/MCSLA\[C: Low angle; 30° below eye level\]/);
+    });
+
+    it('passes through an unknown angle as raw text (forward-compat)', () => {
+      const r = buildEnhancedPrompt('a cat', {
+        mcsla: { camera: { angle: 'tilted-fisheye' } },
+      });
+      // Unknown slugs are kept as-is so a future catalog addition
+      // doesn't crash a still-rolling-out client.
+      expect(r.prompt).toMatch(/MCSLA\[C: tilted-fisheye\]/);
+    });
+
+    it('composes all five layers in the documented M|C|S|L|A order', () => {
+      const r = buildEnhancedPrompt('a cat', {
+        mcsla: {
+          model: 'kling-3.0',
+          camera: { angle: 'eye-level', movement: 'slow push-in', lens: '50mm' },
+          subject: 'a curious orange tabby',
+          look: { lighting: 'golden hour', color: 'warm amber' },
+          action: 'looks up at the camera',
+        },
+      });
+      expect(r.prompt).toMatch(
+        /MCSLA\[M: kling-3\.0 \| C: Eye Level; slow push-in; 50mm \| S: a curious orange tabby \| L: golden hour; warm amber \| A: looks up at the camera\]/
+      );
+    });
+
+    it('drops empty layers without producing dangling `|` separators', () => {
+      const r = buildEnhancedPrompt('a cat', {
+        mcsla: { subject: 'a curious orange tabby' },
+      });
+      // No `M:`, `C:`, `L:`, or `A:` segments — only the `S:` one.
+      expect(r.prompt).toMatch(/MCSLA\[S: a curious orange tabby\]/);
+      expect(r.prompt).not.toMatch(/\| \|/);
+    });
+
+    it('does NOT pollute the negative-prompt channel with MCSLA text', () => {
+      const r = buildEnhancedPrompt('a cat', {
+        antiAiLook: true,
+        mcsla: { camera: { angle: 'eye-level' } },
+      });
+      // negativePrompts only carries the anti-AI-look list; MCSLA
+      // text lives in the positive prompt only.
+      expect(r.negativePrompts).toContain('plastic skin');
+      expect(r.negativePrompts).not.toContain('Eye Level');
+    });
+  });
 });

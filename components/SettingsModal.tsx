@@ -42,6 +42,7 @@ import { getAllTextModelSpecs } from '@/lib/text-model-specs';
 import { DesktopSettingsPanel } from './DesktopSettingsPanel';
 import { VercelAiModelPicker, defaultVercelAiModel } from './Settings/VercelAiModelPicker';
 import { HiggsfieldConnection } from './Settings/HiggsfieldConnection';
+import { CameraAnglePicker } from './Settings/CameraAnglePicker';
 import {
   HIGGSFIELD_DEFAULT_IMAGE_MODEL,
   HIGGSFIELD_DEFAULT_VIDEO_MODEL,
@@ -1878,6 +1879,25 @@ export function SettingsModal({
                   className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.antiAiLook === true ? 'translate-x-6' : ''}`}
                 />
               </button>
+            </div>
+
+            {/* V1.0.7-PROMPT-ENG-A3: 14-angle camera picker. Wired
+                into the MCSLA C: fragment by hooks/useImageGeneration. */}
+            <div className="bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-zinc-300">Default camera angle</div>
+                  <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">
+                    Pick a single angle to fold into the MCSLA director protocol —
+                    lens, tilt, and emotional intent are appended to every prompt.
+                  </p>
+                </div>
+              </div>
+              <CameraAnglePicker
+                settings={settings}
+                value={settings.cameraAngle}
+                onChange={(next) => updateSettings({ cameraAngle: next })}
+              />
             </div>
           </SettingsSection>
 

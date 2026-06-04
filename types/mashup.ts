@@ -261,6 +261,13 @@ export interface UserSettings {
    * Settings → AI Engine (see SettingsModal). Default false so
    * existing users' output doesn't change. */
   antiAiLook?: boolean;
+  /** V1.0.7-PROMPT-ENG-A2/A3: optional camera-angle slug from the
+   * 14-angle catalog in `lib/camera-angles.ts`. When set, the
+   * `buildEnhancedPrompt` composer appends a structured MCSLA
+   * `C:` fragment (angle + lens + intent) to the positive prompt.
+   * Stored as a string slug, not the label, so renames don't
+   * break user data. */
+  cameraAngle?: string;
   watermark?: WatermarkSettings;
   agentPrompt?: string;
   agentNiches?: string[];
@@ -941,6 +948,7 @@ export const defaultSettings: UserSettings = {
   defaultAnimationStyle: 'DYNAMIC',
   defaultVideoModel: 'kling-video-o-3',
   antiAiLook: false,
+  cameraAngle: undefined,
   watermark: {
     enabled: false,
     image: null,
