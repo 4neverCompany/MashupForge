@@ -109,11 +109,17 @@ jobs:
             exit 0
           fi
 
-          BUN_MTIME=$(stat -c %Y bun.lock)
-          NPM_MTIME=$(stat -c %Y package-lock.json)
+          # V107-CI: the previous check used `stat -c %Y` (file mtime),
+          # which is wrong when a later commit touches package-lock.json
+          # without touching bun.lock — the mtime delta misleads the
+          # check. Switch to `git log -1` to get the actual commit time
+          # of each lockfile. If a lockfile isn't tracked yet (e.g. the
+          # very first commit), fall back to 0.
+          BUN_MTIME=$(git log -1 --format=%ct bun.lock 2>/dev/null || echo 0)
+          NPM_MTIME=$(git log -1 --format=%ct package-lock.json 2>/dev/null || echo 0)
 
           if [ "$BUN_MTIME" -lt "$NPM_MTIME" ]; then
-            echo "❌ package-lock.json is newer than bun.lock."
+            echo "❌ package-lock.json is committed after bun.lock."
             echo "Someone ran 'npm install' without retrying 'bun install'."
             echo "Run: bun install && git add bun.lock"
             exit 1
@@ -126,14 +132,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Search for as any casts
+      - name: Search for as any casts (exclude comments)
         run: |
-          # Search for "as any" in app/, components/, lib/, hooks/, types/
-          # Exclude node_modules, .next, and the AGPL-3.0-or-later string match
+          # Search for "as any" in app/, components/, lib/, hooks/, types/.
+          # V107-CI: the previous regex matched the phrase in comments too
+          # (e.g. "// use 'as any' if you must" in doc-comments). Filter
+          # out lines that are 100% inside a line-comment (`//...as any...`)
+          # OR a block-comment context (heuristic: line that opens with `/*`,
+          # `*`, or contains `*` at the start of a non-blank region).
+          #
+          # What we still want to catch:
+          #   1. Real `as any` type assertions in code:
+          #        const x = foo as any;
+          #        const y: any = ...;
+          #   2. `as any` inside a string template (extremely rare but
+          #      legitimate to flag if it actually is a type hint).
+          #
+          # What we drop:
+          #   - Lines whose non-whitespace content starts with `//`
+          #   - Lines starting with `*` (block-comment continuation)
+          #   - Lines that are entirely inside `/* ... */` on one line
           HITS=$(grep -rEn '\bas\s+any\b' \
-            --include='*.ts' --include='*.tsx' \
-            --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=target \
-            app/ components/ lib/ hooks/ types/ 2>/dev/null || true)
+              --include='*.ts' --include='*.tsx' \
+              --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=target \
+              --exclude-dir=.harness --exclude-dir=.hermes \
+              app/ components/ lib/ hooks/ types/ 2>/dev/null \
+            | grep -Ev '^[^:]+:[0-9]+:\s*//' \
+            | grep -Ev '^[^:]+:[0-9]+:\s*\*' \
+            | grep -Ev '^[^:]+:[0-9]+:.*/\*.*\bas\s+any\b.*\*/' \
+            || true)
 
           if [ -n "$HITS" ]; then
             echo "❌ Found 'as any' casts in src/. CONTRIBUTING.md says no any — use 'unknown' and narrow."
