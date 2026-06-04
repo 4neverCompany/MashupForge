@@ -609,7 +609,7 @@ export function SettingsModal({
         <li>
           <strong>Desktop app:</strong> reinstall the latest release from{' '}
           <a
-            href="https://github.com/Code4neverCompany/MashupForge/releases"
+            href="https://github.com/4neverCompany/MashupForge/releases"
             target="_blank"
             rel="noopener noreferrer"
             className="text-zinc-400 hover:text-[#c5a062] underline underline-offset-2"

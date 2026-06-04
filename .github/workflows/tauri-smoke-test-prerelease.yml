@@ -1,0 +1,165 @@
+name: Tauri Smoke Test (Pre-release)
+
+# V107-CI: pre-release smoke test for the Tauri desktop installer.
+# Run this BEFORE publishing a release to validate the build artifacts.
+# Pulls the tauri-nsis-bundle artifact from a workflow run_id (not a release),
+# installs it silently on a fresh windows-latest runner, and confirms:
+#   1. Installer completed without error
+#   2. Binary landed at the expected per-user install path
+#   3. App process started and stayed alive for >5s (didn't crash on webview load)
+#
+# Differs from tauri-smoke-test.yml in two ways:
+#   - Sources the installer from a workflow artifact (run_id) rather than a
+#     GitHub Release. Lets you validate the build before tagging/publishing.
+#   - Checks BOTH per-user and per-machine install paths, since tauri.conf.json
+#     installMode: currentUser puts the binary in %LOCALAPPDATA%\Programs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Workflow run ID of a Tauri Windows Build (e.g. 26951409570). Must be from the same repo."
+        required: true
+        type: string
+      cleanup:
+        description: "Uninstall after smoke test (true leaves it installed for interactive testing)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  smoke-test:
+    name: Install + launch + verify (pre-release)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate run_id input
+        shell: bash
+        run: |
+          RUN_ID="${{ inputs.run_id }}"
+          if ! [[ "$RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::run_id must be numeric (got: $RUN_ID)"
+            exit 1
+          fi
+          echo "Smoke-testing artifacts from run $RUN_ID"
+
+      - name: Download tauri-nsis-bundle artifact from run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RUN_ID="${{ inputs.run_id }}"
+          mkdir -p ./installer
+          gh run download "$RUN_ID" \
+            --repo ${{ github.repository }} \
+            --name tauri-nsis-bundle \
+            --dir ./installer
+          ls -la ./installer
+          echo "::notice title=Artifacts downloaded::$(ls ./installer | tr '\n' ' ')"
+
+      - name: Install silently
+        shell: bash
+        run: |
+          INSTALLER=$(ls ./installer/MashupForge_*_x64-setup.exe | head -1)
+          if [ -z "$INSTALLER" ]; then
+            echo "::error::No MashupForge_*_x64-setup.exe found in artifact"
+            ls -la ./installer
+            exit 1
+          fi
+          echo "Installing: $INSTALLER"
+          # Kill any prior instance first
+          taskkill /F /IM MashupForge.exe 2>/dev/null || true
+          # NSIS silent install: /S = silent, /D = install dir (must be last arg, no quotes)
+          "$INSTALLER" /S
+          INSTALL_EXIT=$?
+          echo "Installer exited with code $INSTALL_EXIT"
+          if [ $INSTALL_EXIT -ne 0 ]; then
+            echo "::error::Installer exited with non-zero code $INSTALL_EXIT"
+            exit 1
+          fi
+
+          # Poll for binary at the per-user install path (tauri.conf.json
+          # installMode: currentUser). Per-machine path is a fallback in case
+          # installMode ever changes.
+          PER_USER="C:/Users/$USERNAME/AppData/Local/Programs/MashupForge/MashupForge.exe"
+          PER_MACHINE="C:/Program Files/MashupForge/MashupForge.exe"
+          FOUND_PATH=""
+          for i in {1..60}; do
+            if [ -f "$PER_USER" ]; then
+              echo "✅ Binary found at per-user path after ${i}s: $PER_USER"
+              FOUND_PATH="$PER_USER"
+              break
+            fi
+            if [ -f "$PER_MACHINE" ]; then
+              echo "✅ Binary found at per-machine path after ${i}s: $PER_MACHINE"
+              FOUND_PATH="$PER_MACHINE"
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "$FOUND_PATH" ]; then
+            echo "::error::Binary not found at per-user ($PER_USER) or per-machine ($PER_MACHINE) path after 60s"
+            echo "--- Searching for MashupForge.exe under C:\\Users and C:\\Program Files ---"
+            find "C:/Users" -maxdepth 6 -name MashupForge.exe 2>/dev/null || true
+            find "C:/Program Files" -maxdepth 3 -name MashupForge.exe 2>/dev/null || true
+            exit 1
+          fi
+          echo "FOUND_PATH=$FOUND_PATH" >> "$GITHUB_ENV"
+          echo "Binary size: $(stat -c '%s' "$FOUND_PATH" 2>/dev/null || echo 'unknown') bytes"
+
+      - name: Launch + verify process alive
+        shell: bash
+        run: |
+          INSTALL_DIR=$(dirname "$FOUND_PATH")
+          echo "Launching from: $INSTALL_DIR/MashupForge.exe"
+          cd "$INSTALL_DIR"
+          ./MashupForge.exe &
+          LAUNCH_PID=$!
+          echo "Launched PID $LAUNCH_PID"
+
+          # Wait up to 15s for the process to be visible in tasklist.
+          # Tauri's webview cold-start can take 3-8s on first run.
+          ALIVE=false
+          for i in {1..15}; do
+            sleep 1
+            if tasklist /FI "IMAGENAME eq MashupForge.exe" 2>/dev/null | grep -qi "MashupForge"; then
+              echo "✅ MashupForge.exe is running (after ${i}s)"
+              ALIVE=true
+              break
+            fi
+          done
+
+          if [ "$ALIVE" = false ]; then
+            echo "::error::MashupForge.exe exited within 15s of launch (PID $LAUNCH_PID gone)"
+            echo "Possible causes: missing WebView2 runtime, bad frontend bundle, or config error"
+            exit 1
+          fi
+
+          # Confirm survives another 5s — catches delayed webview crashes
+          sleep 5
+          if tasklist /FI "IMAGENAME eq MashupForge.exe" 2>/dev/null | grep -qi "MashupForge"; then
+            echo "✅ Process survived 20s total — webview loaded, app stable"
+          else
+            echo "::error::MashupForge.exe exited between 15s and 20s — webview crash after initial load"
+            exit 1
+          fi
+
+          # Optional cleanup
+          if [ "${{ inputs.cleanup }}" = "true" ]; then
+            echo "Cleanup requested — uninstalling..."
+            taskkill /F /IM MashupForge.exe 2>/dev/null || true
+            # NSIS silent uninstall uses the same /S flag with the original installer
+            # pointing at the install dir; Tauri NSIS supports this pattern.
+            INSTALLER=$(ls ./installer/MashupForge_*_x64-setup.exe | head -1)
+            "$INSTALLER" /S _?="$INSTALL_DIR"
+            echo "Uninstall complete"
+          else
+            echo "Cleanup skipped (input.cleanup=false). Leaving app installed at $INSTALL_DIR"
+          fi
+
+          taskkill /F /IM MashupForge.exe 2>/dev/null || true
+          echo "✅ Pre-release smoke test passed"

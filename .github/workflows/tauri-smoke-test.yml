@@ -5,7 +5,8 @@ name: Tauri Smoke Test (Windows)
 # the NSIS installer from the release assets, installs it silently, launches
 # the app, and confirms:
 #   1. The installer completed without error
-#   2. The binary was installed under Program Files
+#   2. The binary was installed (per-user or per-machine path — see tauri
+#      installMode)
 #   3. The app process started and stayed alive for >5 seconds (i.e. didn't
 #      immediately crash on webview load)
 #   4. The webview navigated to /studio (not the landing root) — this is
@@ -62,23 +63,36 @@ jobs:
       - name: Install silently
         shell: bash
         run: |
-          # NSIS silent install: /S for silent, /D for install dir
+          # NSIS silent install: /S for silent, /D for install dir (must be last)
           INSTALLER=$(ls ./installer/MashupForge_*_x64-setup.exe | head -1)
           echo "Installing: $INSTALLER"
           "$INSTALLER" /S
           # NSIS silent install returns immediately; poll the install dir.
+          # tauri.conf.json installMode: currentUser → %LOCALAPPDATA%\Programs;
+          # fall back to per-machine path in case installMode changes.
+          PER_USER="C:/Users/$USERNAME/AppData/Local/Programs/MashupForge/MashupForge.exe"
+          PER_MACHINE="C:/Program Files/MashupForge/MashupForge.exe"
+          FOUND_PATH=""
           for i in {1..60}; do
-            if [ -f "C:/Program Files/MashupForge/MashupForge.exe" ]; then
-              echo "✅ Installer placed binary at expected path"
+            if [ -f "$PER_USER" ]; then
+              echo "✅ Installer placed binary at per-user path after ${i}s: $PER_USER"
+              FOUND_PATH="$PER_USER"
+              break
+            fi
+            if [ -f "$PER_MACHINE" ]; then
+              echo "✅ Installer placed binary at per-machine path after ${i}s: $PER_MACHINE"
+              FOUND_PATH="$PER_MACHINE"
               break
             fi
             sleep 1
           done
-          if [ ! -f "C:/Program Files/MashupForge/MashupForge.exe" ]; then
-            echo "❌ Installer did not place binary in expected path"
-            ls "C:/Program Files/" || true
+          if [ -z "$FOUND_PATH" ]; then
+            echo "❌ Installer did not place binary at per-user ($PER_USER) or per-machine ($PER_MACHINE) path"
+            find "C:/Users" -maxdepth 6 -name MashupForge.exe 2>/dev/null || true
+            find "C:/Program Files" -maxdepth 3 -name MashupForge.exe 2>/dev/null || true
             exit 1
           fi
+          echo "FOUND_PATH=$FOUND_PATH" >> "$GITHUB_ENV"
 
       - name: Launch + verify process + window
         shell: bash
@@ -88,7 +102,8 @@ jobs:
 
           # Launch headless. The webview should navigate to /studio per the
           # Tauri config (frontendDist + window.navigate('/studio')).
-          cd "C:/Program Files/MashupForge"
+          INSTALL_DIR=$(dirname "$FOUND_PATH")
+          cd "$INSTALL_DIR"
           ./MashupForge.exe &
           LAUNCH_PID=$!
 

@@ -261,7 +261,7 @@ export function UpdateChecker() {
         void (async () => {
           try {
             const latestRes = await fetch(
-              'https://github.com/Code4neverCompany/MashupForge/releases/latest/download/latest.json',
+              'https://github.com/4neverCompany/MashupForge/releases/latest/download/latest.json',
               { cache: 'no-cache' },
             );
             if (!latestRes.ok) return;
