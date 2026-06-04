@@ -107,7 +107,10 @@ jobs:
           INSTALL_DIR=$(dirname "$FOUND_PATH")
           echo "Launching: $FOUND_PATH"
           cd "$INSTALL_DIR"
-          ./MashupForge.exe &
+          # Capture stdout + stderr to a log file so we can see crash reasons
+          # when the process exits within seconds. Tauri prints fatal
+          # WebView2 / DLL / config errors to stderr before exiting.
+          ./MashupForge.exe > "$INSTALL_DIR/launch.out" 2> "$INSTALL_DIR/launch.err" &
           LAUNCH_PID=$!
           echo "Launched PID $LAUNCH_PID"
 
@@ -125,7 +128,14 @@ jobs:
 
           if [ "$ALIVE" = false ]; then
             echo "::error::MashupForge.exe exited within 15s of launch (PID $LAUNCH_PID gone)"
-            echo "Possible causes: missing WebView2 runtime, bad frontend bundle, or config error"
+            echo "--- launch.out ---"
+            cat "$INSTALL_DIR/launch.out" 2>/dev/null || echo "(empty)"
+            echo "--- launch.err ---"
+            cat "$INSTALL_DIR/launch.err" 2>/dev/null || echo "(empty)"
+            echo "--- process info ---"
+            tasklist /FI "IMAGENAME eq MashupForge.exe" 2>&1 || true
+            echo "--- last 20 lines of Windows Application event log ---"
+            powershell -Command "Get-WinEvent -LogName Application -MaxEvents 20 -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -match 'Application Error|.NET Runtime|Windows Error Reporting' } | Select-Object -First 5 | ForEach-Object { Write-Output (\"[{0}] {1}\" -f $_.TimeCreated, $_.Message) }" 2>&1 || echo "(event log unavailable)"
             exit 1
           fi
 
@@ -135,6 +145,7 @@ jobs:
             echo "✅ Process survived 20s total — webview loaded, app stable"
           else
             echo "::error::MashupForge.exe exited between 15s and 20s — webview crash after initial load"
+            cat "$INSTALL_DIR/launch.err" 2>/dev/null || echo "(no stderr captured)"
             exit 1
           fi
 
