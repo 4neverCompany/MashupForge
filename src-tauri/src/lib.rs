@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_deep_link::DeepLinkExt;
 
 /// Holds the running Node sidecar child so we can kill it on app quit.
