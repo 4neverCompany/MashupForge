@@ -71,4 +71,49 @@ describe('buildEnhancedPrompt — useImageGeneration wiring contract', () => {
     expect(r.mmx.n).toBe(4);
     expect(r.leonardo.quantity).toBe(4);
   });
+
+  // V1.0.7-PROMPT-ENG-A4: pin the anti-AI-look contract that
+  // `hooks/useImageGeneration.ts` relies on. The hook forwards
+  // `enhanced.negativePrompts` to `submitLeonardoAndPoll` /
+  // `submitViaAiImage` via the `antiAiLookNegatives` parameter; the
+  // route layer concatenates them with the user-supplied `negative_prompt`
+  // and forwards the joined string to the provider. If this contract
+  // ever changes, those submit call-sites break in unexpected ways.
+  describe('anti-AI-look negatives', () => {
+    it('returns an empty array by default so the spread is type-safe', () => {
+      const r = buildEnhancedPrompt('a cat', {
+        modelId: 'nano-banana-2',
+        styleName: '3D Render',
+        aspectRatio: '16:9',
+        count: 1,
+      });
+      expect(r.negativePrompts).toEqual([]);
+    });
+
+    it('returns the curated list when antiAiLook is true', () => {
+      const r = buildEnhancedPrompt('a cat', {
+        modelId: 'nano-banana-2',
+        styleName: '3D Render',
+        aspectRatio: '16:9',
+        count: 1,
+        antiAiLook: true,
+      });
+      // The curated list is non-empty by design (see
+      // lib/image-prompt-builder.ts ANTI_AI_LOOK_NEGATIVES) — pinning
+      // a specific entry so a refactor that drops items shows up
+      // here first.
+      expect(r.negativePrompts.length).toBeGreaterThan(0);
+      expect(r.negativePrompts).toContain('plastic skin');
+      // Negatives must NOT pollute the positive prompt — they're a
+      // provider-channel-only field.
+      expect(r.prompt).not.toMatch(/plastic skin/);
+    });
+
+    it('returns an empty array when antiAiLook is explicitly false', () => {
+      const r = buildEnhancedPrompt('a cat', {
+        antiAiLook: false,
+      });
+      expect(r.negativePrompts).toEqual([]);
+    });
+  });
 });

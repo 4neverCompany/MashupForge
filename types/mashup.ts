@@ -254,6 +254,13 @@ export interface UserSettings {
   higgsfieldConnected?: boolean;
   defaultAnimationDuration?: 3 | 5 | 10;
   defaultAnimationStyle?: string;
+  /** V1.0.7-PROMPT-ENG-A4: when true, the curated anti-AI-look
+   * negative prompt list is appended to every image generation
+   * request (Leonardo's `negative_prompt` field, Higgsfield MCP's
+   * `negative_prompt`). The user-facing control lives in
+   * Settings → AI Engine (see SettingsModal). Default false so
+   * existing users' output doesn't change. */
+  antiAiLook?: boolean;
   watermark?: WatermarkSettings;
   agentPrompt?: string;
   agentNiches?: string[];
@@ -933,6 +940,7 @@ export const defaultSettings: UserSettings = {
   defaultAnimationDuration: 3,
   defaultAnimationStyle: 'DYNAMIC',
   defaultVideoModel: 'kling-video-o-3',
+  antiAiLook: false,
   watermark: {
     enabled: false,
     image: null,
