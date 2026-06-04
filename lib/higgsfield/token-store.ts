@@ -25,6 +25,38 @@ import { get, set, del } from 'idb-keyval';
 
 const KEY_NAME = 'higgsfield-tokens-v1';
 
+/**
+ * BUG-FIX-2026-06-04: `idb-keyval` is a browser-only library. It
+ * references the global `indexedDB` at module-evaluation time and
+ * throws `indexedDB is not defined` when imported into a Node.js
+ * runtime (the Vercel server, a unit-test Node env without jsdom,
+ * the Tauri sidecar if it doesn't ship a DOM, etc.). The /api/higgsfield/*
+ * routes are `runtime = 'nodejs'` and were crashing every time
+ * `loadTokens` / `saveTokens` / `clearTokens` was called.
+ *
+ * Fix: guard every storage call with a single `hasIndexedDB` check.
+ * When unavailable, treat it as "no tokens stored" (load) or
+ * "no-op" (save / clear) and log a one-time warning so production
+ * surfaces the misconfiguration. The web build's OAuth flow has a
+ * deeper architectural issue (serverless functions have no per-user
+ * persistent state), but at least the routes stop 500-ing.
+ */
+function hasIndexedDB(): boolean {
+  return typeof globalThis !== 'undefined'
+    && typeof (globalThis as { indexedDB?: unknown }).indexedDB !== 'undefined';
+}
+
+let didWarnNoIDB = false;
+function warnNoIDBOnce(op: string): void {
+  if (didWarnNoIDB) return;
+    didWarnNoIDB = true;
+    console.warn(
+      `[higgsfield/token-store] ${op}: indexedDB is not available in this runtime ` +
+      `(Node.js without a DOM). Token persistence is a no-op here. This is expected ` +
+      `on the Vercel server; the OAuth flow needs client-side IDB to round-trip tokens.`,
+    );
+}
+
 export interface StoredTokens {
   accessToken: string;
   refreshToken: string;
@@ -118,11 +150,19 @@ export function decryptTokens(packed: string): string | null {
  * treat the store as an untrusted byte bucket.
  */
 export async function saveTokens(tokens: StoredTokens): Promise<void> {
+  if (!hasIndexedDB()) {
+    warnNoIDBOnce('saveTokens');
+    return;
+  }
   const packed = encryptTokens(JSON.stringify(tokens));
   await set(KEY_NAME, packed);
 }
 
 export async function loadTokens(): Promise<StoredTokens | null> {
+  if (!hasIndexedDB()) {
+    warnNoIDBOnce('loadTokens');
+    return null;
+  }
   const packed = await get<string>(KEY_NAME);
   if (!packed) return null;
   const dec = decryptTokens(packed);
@@ -135,6 +175,10 @@ export async function loadTokens(): Promise<StoredTokens | null> {
 }
 
 export async function clearTokens(): Promise<void> {
+  if (!hasIndexedDB()) {
+    warnNoIDBOnce('clearTokens');
+    return;
+  }
   await del(KEY_NAME);
 }
 

@@ -8,7 +8,7 @@
  * key can encrypt + decrypt within one process.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
 import {
   encryptTokens,
@@ -122,5 +122,47 @@ describe('IDB-backed save / load / clear (happy-dom + fake-indexeddb)', () => {
     expect(await loadTokens()).not.toBeNull();
     await clearTokens();
     expect(await loadTokens()).toBeNull();
+  });
+});
+
+// BUG-FIX-2026-06-04: the /api/higgsfield/* routes run on the Vercel
+// Node.js server where `indexedDB` is undefined. `idb-keyval` throws
+// immediately on first call, taking the whole route down with 500.
+//
+// The fix in token-store.ts guards every storage call with a
+// `hasIndexedDB()` check. These tests cover the guard by deleting
+// the `indexedDB` global and asserting the helpers no-op gracefully.
+describe('SSR-safe behaviour when indexedDB is not defined', () => {
+  let savedIndexedDB: unknown;
+
+  beforeEach(() => {
+    savedIndexedDB = (globalThis as { indexedDB?: unknown }).indexedDB;
+    // Remove the global so the guard flips to "no storage".
+    delete (globalThis as { indexedDB?: unknown }).indexedDB;
+  });
+
+  // Cleanup is critical: if we don't restore `indexedDB`, the OTHER
+  // test blocks in this file (the happy-dom ones above) would lose
+  // their IDB backend on the next file run. We do this in `afterEach`
+  // so each SSR test starts from a clean "no indexedDB" state but
+  // leaves the env as it found it.
+  afterEach(() => {
+    if (savedIndexedDB !== undefined) {
+      (globalThis as { indexedDB?: unknown }).indexedDB = savedIndexedDB;
+    } else {
+      delete (globalThis as { indexedDB?: unknown }).indexedDB;
+    }
+  });
+
+  it('loadTokens returns null instead of throwing', async () => {
+    expect(await loadTokens()).toBeNull();
+  });
+
+  it('saveTokens resolves instead of throwing (no-op on the server)', async () => {
+    await expect(saveTokens(sampleTokens)).resolves.toBeUndefined();
+  });
+
+  it('clearTokens resolves instead of throwing (no-op on the server)', async () => {
+    await expect(clearTokens()).resolves.toBeUndefined();
   });
 });
