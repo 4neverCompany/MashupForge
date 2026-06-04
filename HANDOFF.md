@@ -190,7 +190,14 @@ All under `app/api/`:
 ### 4.4 `lib/image-prompt-builder.ts` (v1.0.4 extended)
 - `HiggsfieldBuilderOptions` and `higgsfieldOptions` input added
 - Builds camera-mode + genre + duration prompts for Higgsfield's `seedance_2_0`
-- Anti-AI-look negative prompts are still TODO (candidate A for v1.0.5)
+- Anti-AI-look negative prompts: **DONE (v1.0.7, A.4, PR #35)** — opt-in via
+  `UserSettings.antiAiLook` (default `false`). Hook forwards
+  `enhanced.negativePrompts` to `submitLeonardoAndPoll` /
+  `submitViaAiImage` via the `antiAiLookNegatives` parameter; the
+  helper joins them with the user-supplied `negative_prompt` and
+  forwards the merged string to the provider route. Still TODO:
+  Settings UI toggle to expose the flag (the wiring is in place;
+  only the on/off switch is missing).
 
 ### 4.5 `lib/persistence/`
 - IDB layer with three stores: `settings`, `posts`, `schedule`
