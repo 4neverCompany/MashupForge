@@ -1,19 +1,51 @@
-# CODEOWNERS — MashupForge v1.0
-# Lines are evaluated in order; the LAST matching pattern wins.
-# Replace placeholder team handles with real @org/team slugs before
-# opening the v1.0 PR (see docs/RELEASING.md for the checklist).
+# CODEOWNERS — auto-route PRs to the right reviewer(s).
+# GitHub's CODEOWNERS file — when a PR touches matching paths, the listed
+# owners are auto-requested as reviewers. Combined with branch-protection
+# rules requiring 1+ approval, this is the auto-merge path.
+#
+# V107-CI: this file is the routing layer for the agent team. Each owner
+# is a `mavis` global agent (see ~/.mavis/agents/<name>/agent.md). The
+# agents can also be invoked manually via `mavis team plan run`.
+#
+# NOTE: GitHub CODEOWNERS expects GitHub usernames or team slugs, not
+# Mavis agent names. The values below are documented for human +
+# agent routing — to wire them into GitHub's reviewer system, add
+# the corresponding GitHub user or team as a CODEOWNER via the
+# org's team-mapping (e.g. map `mavis/coder` to a GitHub bot account
+# that the agent's CLI auths as).
+#
+# Until that wiring exists, this file serves as a routing table that
+# agents consult when the orchestrator delegates a review.
 
-# Default: maintainer team owns everything
-*                       @4nevercompany/maintainers
+# ─── Default reviewer ───────────────────────────────────────────────
+# Every PR gets at least the verifier (adversarial) and code-reviewer
+# (line-by-line) look. The orchestrator auto-approves if both pass.
+*  @mavis/verifier @mavis/code-reviewer
 
-# Tauri shell needs desktop review
-/src-tauri/             @4nevercompany/desktop-reviewer
+# ─── Domain routing ──────────────────────────────────────────────────
+# Tests + CI workflow changes → qa + devops-automator pair
+/.github/  @mavis/qa @mavis/devops-automator
+/tests/  @mavis/qa
+/vitest.config.ts  @mavis/qa
 
-# API routes need backend review
-/app/api/               @4nevercompany/backend-reviewer
+# Tauri shell, Cargo.toml, tauri.conf.json → tauri desktop specialist
+/src-tauri/  @mavis/tauri-desktop-expert
+/scripts/release.sh  @mavis/devops-automator
 
-# CI changes need infra review
-/.github/               @4nevercompany/infra-reviewer
+# Post-lifecycle state machine (the v0.9.41 fix lives here) → specialist
+/lib/post-lifecycle/  @mavis/post-lifecycle-expert @mavis/verifier
+/lib/persistence/  @mavis/post-lifecycle-expert
+/hooks/useReconciler.ts  @mavis/post-lifecycle-expert
 
-# Brand/legal changes need brand review
-/LICENSE /SECURITY.md /NOTICE /BRAND.md /CONTRIBUTING.md   @4nevercompany/brand-reviewer
+# Higgsfield MCP + prompt engineering (SLCT / MCSLA / camera angles)
+/lib/higgsfield/  @mavis/ai-providers-expert
+/lib/image-prompt-builder.ts  @mavis/ai-providers-expert
+/lib/text-model-catalog.ts  @mavis/ai-providers-expert
+/docs/research/higgsfield-skills/  @mavis/ai-providers-expert
+
+# Security tooling (this PR)
+/scripts/security/  @mavis/devops-automator
+/.githooks/  @mavis/devops-automator
+
+# Team definition
+/.harness/  @mavis/architect @mavis/code-reviewer
