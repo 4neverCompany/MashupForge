@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, WindowEvent};
+use tauri_plugin_deep_link::DeepLinkExt;
 
 /// Holds the running Node sidecar child so we can kill it on app quit.
 struct SidecarState(Mutex<Option<Child>>);
@@ -552,6 +553,16 @@ pub fn run() {
         // the IndexedDB origin pin (STORY-121). See lib.rs:622+ for
         // the sidecar-kill handler this triggers.
         .plugin(tauri_plugin_process::init())
+        // V107.1-OAUTH: tauri-plugin-deep-link registers the
+        // `mashupforge://` URL scheme with the OS. When the Higgsfield
+        // OAuth provider redirects to `mashupforge://oauth/callback?code=...&state=...`
+        // the OS launches (or focuses) the Tauri app and the plugin
+        // emits a "deep-link://new-url" event with the URL. The frontend
+        // listener (components/Settings/HiggsfieldConnection.tsx) re-issues
+        // the callback fetch in the WebView2 cookie context, which avoids
+        // the `expired_flow` error caused by cookies set in WebView2 not
+        // surviving a redirect to the system browser.
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
@@ -924,6 +935,30 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            // V107.1-OAUTH: register `mashupforge://` at runtime for dev
+            // builds (release builds get it from tauri.conf.json via the
+            // bundler). Also subscribe to the plugin's on_open_url event
+            // and re-emit the URL to the WebView as a "deep-link" event
+            // so the frontend OAuth handler can pick it up.
+            #[cfg(any(debug_assertions, target_os = "windows"))]
+            {
+                if let Err(e) = app.deep_link().register("mashupforge") {
+                    log::warn!("[tauri] deep_link register failed: {}", e);
+                }
+            }
+            let app_handle_for_dl = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                let urls: Vec<String> = event
+                    .urls()
+                    .iter()
+                    .map(|u| u.to_string())
+                    .collect();
+                log::info!("[tauri] deep-link received: {:?}", urls);
+                if let Some(window) = app_handle_for_dl.get_webview_window("main") {
+                    let _ = window.emit("deep-link", urls);
+                }
+            });
 
             Ok(())
         })
