@@ -76,11 +76,16 @@ jobs:
         shell: bash
         run: |
           ZIP=$(ls ./bundle/MashupForge_*_x64-portable.zip | head -1)
-          STAGE="C:/MashupForge-SmokeStage"
+          # Use a workspace-relative path — Git Bash path translation is
+          # unreliable when mixing bash and Windows-native tools.
+          STAGE="$(pwd)/stage"
           rm -rf "$STAGE"
           mkdir -p "$STAGE"
-          # Use PowerShell's Expand-Archive for proper Windows zip handling
-          powershell -Command "Expand-Archive -Path '$ZIP' -DestinationPath '$STAGE' -Force"
+          # `unzip` from Git Bash is the most reliable on windows-latest
+          # runners. Expand-Archive was hanging on 280+ MB zips and 7z
+          # extraction has surfaced ACL issues in past runs. Keep the
+          # call simple: -q quiet, -o overwrite, -d destination.
+          unzip -q -o "$ZIP" -d "$STAGE"
           echo "--- Extracted contents ---"
           ls -la "$STAGE"
           EXE="$STAGE/MashupForge.exe"
@@ -135,7 +140,7 @@ jobs:
 
           # Cleanup
           taskkill /F /IM MashupForge.exe 2>/dev/null || true
-          rm -rf "C:/MashupForge-SmokeStage"
+          rm -rf "$(pwd)/stage"
           echo "✅ Pre-release smoke test PASSED (portable variant)"
 
   # NSIS variant retained for investigation. Currently expected to time out
