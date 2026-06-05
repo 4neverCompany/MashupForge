@@ -7,7 +7,7 @@ const links = [
   { href: '#features', label: 'Features' },
   { href: '#pipeline', label: 'Pipeline' },
   { href: '#stack', label: 'Stack' },
-  { href: 'https://github.com/Code4neverCompany/MashupForge', label: 'GitHub', external: true },
+  { href: 'https://github.com/4neverCompany/MashupForge', label: 'GitHub', external: true },
 ];
 
 export function Nav() {

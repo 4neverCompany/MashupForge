@@ -67,3 +67,40 @@ if (-not (Test-Path $ServerJs)) {
 }
 
 Write-Host "[copy-standalone] Done."
+
+# V108-CLEANUP: strip the user's project source tree that Next.js
+# standalone copied verbatim. Standalone is supposed to include
+# only server.js + trace-minimized node_modules, but with the
+# current `outputFileTracingRoot` config it pulls in `app/`,
+# `components/`, `hooks/`, `lib/`, `types/`, `public/` etc. — that
+# bloats the NSIS installer by ~20 MB and leaks source into the
+# shipped binary. Strip everything except the runtime essentials.
+Write-Host "[copy-standalone] Stripping source tree from standalone copy ..."
+$StripDirs = @('app', 'components', 'hooks', 'lib', 'types', 'docs', 'tests', 'scripts', 'design', 'assets')
+foreach ($d in $StripDirs) {
+    $path = Join-Path $AppDir $d
+    if (Test-Path $path) {
+        Remove-Item -Recurse -Force $path
+        Write-Host "  removed $d/"
+    }
+}
+# The Tauri webview launches via start.js (the wrapper), which only
+# needs server.js + node_modules subset. Keep .next/ (where .next/static
+# landed) and start.js. Drop the project-root cruft that standalone
+# also dragged in (bun.lock, package-lock.json, tsconfig.tsbuildinfo,
+# HANDOFF.md, BRAND.md, etc.) — they aren't needed at runtime.
+$StripFiles = @('bun.lock', 'package-lock.json', 'tsconfig.tsbuildinfo', 'HANDOFF.md', 'BRAND.md', 'NOTICE', 'README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'QA.md', 'DESIGNER.md', 'metadata.json', 'package.json', 'tsconfig.json', 'eslint.config.mjs', 'postcss.config.mjs', 'next.config.ts', 'next-env.d.ts', 'vercel.json', '.eslintrc.json', 'LICENSE', 'build-local.bat', 'build-windows.ps1')
+foreach ($f in $StripFiles) {
+    $path = Join-Path $AppDir $f
+    if (Test-Path $path) {
+        Remove-Item -Force $path
+    }
+}
+# Drop src/ subtree if present (standalone shouldn't include it but
+# be defensive — see HANDOFF.md §9.1 "Tauri `frontendDist` rejects
+# paths containing `node_modules`" gotcha).
+$SrcPath = Join-Path $AppDir 'src'
+if (Test-Path $SrcPath) {
+    Remove-Item -Recurse -Force $SrcPath
+}
+Write-Host "[copy-standalone] Done (post-strip)."

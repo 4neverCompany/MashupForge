@@ -57,7 +57,7 @@ Add the private key + password to GitHub Secrets:
 
 ## Auto-update
 The Tauri auto-updater checks
-https://github.com/Code4neverCompany/MashupForge/releases/latest/download/latest.json
+https://github.com/4neverCompany/MashupForge/releases/latest/download/latest.json
 on every app start. When a new release is published, the desktop
 app prompts the user to update. The signature on the update
 payload is verified against the public key in tauri.conf.json.

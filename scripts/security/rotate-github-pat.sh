@@ -83,7 +83,7 @@ in order:
       (classic)) — Maurice's account, NOT the org bot.
 
   2. Find the leaked token. The handoff §commit fcb30d3 says it had
-     "full repo access" on Code4neverCompany/MashupForge. The token
+     "full repo access" on 4neverCompany/MashupForge. The token
      description will likely reference the project name or the
      "release-body" use case (one of the superseded release scripts
      in docs/working-folder/scripts/).

@@ -83,7 +83,7 @@ export function CTA() {
                 </span>
               </a>
               <a
-                href="https://github.com/Code4neverCompany/MashupForge/releases/latest"
+                href="https://github.com/4neverCompany/MashupForge/releases/latest"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="group inline-flex items-center gap-2 rounded-2xl border border-white/20 bg-white/[0.04] px-6 py-3.5 text-sm font-semibold text-white backdrop-blur transition-all duration-200 hover:border-white/40 hover:bg-white/[0.08]"
