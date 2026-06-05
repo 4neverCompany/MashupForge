@@ -570,7 +570,7 @@ v1.0.5 candidates.
 - `MashupForge_1.0.8_x64-setup.exe` (NSIS, 152 MB)
 - `MashupForge_1.0.8_x64-setup.exe.sig` (signature, 424 B)
 - `MashupForge_1.0.8_x64-portable.zip` (portable, 282 MB)
-- `latest.json` (4neverCompany URL, 705 B)
+- `latest.json` (705 B)
 
 Local backup at `I:\tmp\tauri-artifacts-v108\`.
 
@@ -589,10 +589,25 @@ The v1.0.7 PROMPT-ENG features (A.4 anti-AI-look, A.3 14-angle picker, D credit 
 - **The first assistant turn after a long quiet period** is the right place to do a single `gh run view` and decide. Don't wait for the cron to "notice" the success.
 - **All 3 v1.0.7-hotfix Rust bugs were compile-time errors**, not runtime. The CI caught each one before publish. The pattern: small Rust/Tauri 2.x API renames are easy to miss locally but show up immediately on the windows-latest runner.
 
-**v1.0.8.1 candidate list (next):**
+## 16. v1.0.9 release — TRIGGERED 2026-06-05 (Tauri build in progress)
 
-- See §14 — items 1-7 are still open. v1.0.8 did not advance §14 because it was a build-recovery release, not a feature release.
-- Add: **release-publish cron should be deleted as soon as the build is known complete**, not after the assistant confirms. (See post-mortem above.)
+**Version:** 1.0.8 → 1.0.9 (Cargo requires 3-part semver, so 1.0.8.1 was not an option).
+**Tag:** `v1.0.9` pushed 2026-06-05 22:45 UTC. Triggers `tauri-windows.yml`.
+**Build run:** 27044038434 — watch via cron `watch-v109-build`.
+
+**What v1.0.9 ships:**
+
+- OAuth client migration UX (PR #54 — already in main since merge of 9e9a78f).
+- `POST /api/higgsfield/oauth/reset-client` endpoint.
+- Amber migration banner in `HiggsfieldConnection.tsx` with one-click reset.
+- 4 new vitest tests (1289/1289 pass).
+- v1.0.8 web build is already live and accurate; this release ships the same fix to the Tauri desktop bundle.
+
+**Notes for Maurice:**
+
+- Vercel dashboard actions still needed (one-time):
+  1. Project `mashup-studio` → Settings → Danger Zone → Delete (geist project from old brand).
+  2. Project `mashupforge` → Settings → Git → verify connected repo is `4neverCompany/MashupForge` (not the old personal account). If it's still `Code4neverCompany`, disconnect + reconnect with the new org.
 
 ---
 
