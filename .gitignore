@@ -23,6 +23,12 @@ src-tauri/resources/pi/
 src-tauri/resources/nca/
 dist/
 
+# git worktree dirs created inside the project root (we use
+# I:\c4n-worktrees\<branch>\ as the convention, but the empty stub
+# can get re-created by tooling that defaults to a subdir of the
+# repo root)
+.worktrees/
+
 # Claude Code session files (everything except project-scoped rules,
 # which we DO want tracked so every clone / agent sees the same
 # guidance — e.g. .claude/rules/release-flow.md).

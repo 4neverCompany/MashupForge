@@ -1,9 +1,9 @@
 # MashupForge — Handoff & Project Summary
 
-**Date:** 2026-06-03
+**Date:** 2026-06-04
 **For:** MiniMax Code desktop agent (or any successor)
 **Maintained by:** Mavis (the agent that built the v1.0.0 → v1.0.4 stack)
-**Status:** v1.0.4 shipped; v1.0.5 in planning
+**Status:** v1.0.7 PROMPT-ENG shipped; v1.0.7.1 hotfix in progress (deep-link OAuth)
 
 ---
 
@@ -504,6 +504,94 @@ this. Use `scripts/release.sh <ver>` + the workflow in §5.
 If you find yourself confused, ask: **"what would a thoughtful next release look
 like?"** — and refer to §7 above. The user has already pre-ranked the
 v1.0.5 candidates.
+
+---
+
+## 13. v1.0.7 PROMPT-ENG — what shipped, what broke, what's next
+
+**Shipped 2026-06-04 17:53 Berlin.** Tag `v1.0.7` on `4neverCompany/MashupForge @ 152479b`. All 4 artifacts (NSIS installer, portable zip, sig, latest.json) attached. Release notes in `I:\tmp\v107-release-notes.md`.
+
+**5 features:**
+
+- **A.4 Anti-AI-look negatives (opt-in)** — 18 curated negative cues appended to every Leonardo/Higgsfield `negative_prompt` channel. Off by default. `lib/image-prompt-builder.ts` has the `ANTI_AI_LOOK_NEGATIVES` const; `UserSettings.antiAiLook` + `antiAiLookNegatives?` toggles.
+- **A.2 MCSLA director protocol** — 5-layer framework (Model · Camera · Subject · Look · Action) in `lib/image-prompt-builder.ts`. Camera slot resolves a slug from `lib/camera-angles.ts` (14 angles across 5 registers).
+- **A.3 14-angle camera picker** — `components/Settings/CameraAnglePicker.tsx`, motion/react, role=radio, click-to-toggle, clear button. Cyan accent.
+- **D per-cycle credit budget** — `lib/credit-budget.ts` + `components/CreditBudgetBanner.tsx` + `components/Settings/CreditBudgetSettings.tsx`. Hard-fail gate at the two Higgsfield submit sites in `hooks/useImageGeneration.ts`.
+- **Higgsfield 500 fix** — `lib/higgsfield/token-store.ts` guards `loadTokens`/`saveTokens`/`clearTokens` against missing `indexedDB` (server-side no-op with one-time warning). PR #39.
+
+**Behind the scenes (not in changelog):**
+
+- **Org conversion**: `Code4neverCompany` (user account) → `4neverCompany` (GitHub org). Repo transferred. 5 review teams. Branch protection on `main` with 4 status checks + 1 approving review. Gitleaks license added.
+- **CODEOWNERS wired** with `@4neverCompany/*` as human-fallback reviewers (PR #42).
+- **Brand/version guards** plus secret-scan workflow on org (PR #43).
+
+**Bugs found DURING the v1.0.7 cut** (4 PRs, all merged before publish):
+
+- **PR #45**: post-transfer URL sweep. `tauri-smoke-test.yml` was checking `C:\Program Files\MashupForge\` but tauri.conf.json `installMode: currentUser` puts binary in `%LOCALAPPDATA%\Programs`. `Synthesize latest.json` step in `tauri-windows.yml` hardcoded `Code4neverCompany`. 4 active code paths (`tauri.conf.json` updater + homepage, `Cargo.toml` repo + homepage, `UpdateChecker.tsx`, `AutoUpdateSettings.tsx`, `SettingsModal.tsx`) all pointed at old org.
+- **PR #46**: pre-release smoke test workflow. `tauri-smoke-test.yml` only runs on `release: published`, can't validate before publish.
+- **PR #47**: portable-zip variant. NSIS installer hangs silently on headless Windows. Portable zip extraction is the workaround.
+- **PR #48**: stderr + Windows event log capture on crash. Pre-existing bug: `Expand-Archive` from PowerShell hangs on 280+ MB zips in bash→PS handoff. Switched to `unzip` from Git Bash.
+
+**v1.0.7.1 hotfix (in progress, target 2026-06-04 19:30 Berlin):**
+
+- **PR #49**: register `mashupforge://` URL scheme via `tauri-plugin-deep-link`. Fixes the `Higgsfield connect failed (expired_flow)` error — root cause is Tauri opening the OAuth callback URL in the system browser (different cookie jar than WebView2). With deep-link, the callback lands back in the WebView2 where the state/PKCE cookies still live.
+- Triggered Tauri build run `26965148959` after PR merge. Expected ~35 min. Will publish v1.0.7.1 with the same 4 assets once it lands.
+
+**Architectural findings (defer to v1.0.8+):**
+
+- **NSIS installer hangs on headless Windows runners** AND on Maurice's dev machine (exit 0 in 1:43, no files extracted). Likely a Tauri 2.x NSIS template issue with `installMode: currentUser` not respecting `/S`. Workaround: portable zip.
+- **Tauri 2.x doesn't generate `WebView2Loader.dll` in the build output** (Tauri build warns, continues). The portable zip works on systems with WebView2 runtime installed (typical case). Doesn't work on clean Windows installs without WebView2.
+- **GitHub Actions `windows-latest` runners run in Session 0 (non-interactive)**. Tauri apps that try to create windows crash silently. Architectural limitation. Workarounds: VNC server, RDP, or a third-party service with real desktops. Documented but not fixable.
+- **Vercel integration broke during org transfer** (MashupForge repo transferred from `Code4neverCompany` user account to `4neverCompany` org). Latest Vercel deploy is `f2d49ed` (PR #39 Higgsfield 500 fix), v1.0.7 not deployed. **Needs manual reconnection via Vercel dashboard** — no API access from agent.
+
+## 14. v1.0.8+ candidate list (post-hotfix)
+
+**Triage order:**
+
+1. **NSIS installer hang** — root cause the Tauri 2.x `installMode: currentUser` issue. Tauri docs or upstream PR might have a fix. ~4 hours.
+2. **WebView2Loader.dll bundling** — figure out why tauri-build doesn't generate it. Likely a Tauri config flag we're missing. ~2 hours.
+3. **Vercel integration reconnect** — Maurice's job (1 click in Vercel dashboard → Disconnect → Reconnect with new org URL).
+4. **Existing-user OAuth client migration** — clients registered before v1.0.7.1 don't have the `mashupforge://` URI. Add a one-time re-registration when `?via=desktop` is detected. ~1 hour.
+5. **Headless smoke test strategy** — VNC/RDP in workflow, or external service. ~1 day.
+6. **Camofox-browser integration** — Maurice's request from 2026-06-04 16:21. Camofox is a stealth headless browser (C++ anti-detection on top of Firefox) with a REST API at port 9377. Could replace current `matrix web_search` MCP for trend search (bypass anti-bot on Instagram, TikTok, etc.). Integration plan:
+   - **Sidecar**: ship camofox-browser as a Tauri sidecar (alongside the existing Node sidecar on a stable port). Start it on app launch, stop on quit.
+   - **Proxy layer**: add `lib/camofox/client.ts` that wraps the REST API (snapshot, navigate, search macros, etc.).
+   - **Trend search skill**: replace `matrix web_search` calls in `lib/trend-search/*` with camofox snapshots. The camofox `@instagram_search` / `@tiktok_search` / `@twitter_search` macros give us real trending data, not just text search results.
+   - **Headless**: camofox is headless by default, no Tauri window needed. Works in CI.
+   - ~3-4 days including the sidecar plumbing.
+7. **Post-v1.0.7 URL sweep** — README, BUILDING, CONTRIBUTING, components/landing/* (Nav, Hero, Footer, CTA), docs/* historical references. Brand consistency cleanup. ~2 hours. Non-urgent. (Partial: PR #51 covers Tier 2 user-visible + Tier 3 repo hygiene, awaiting admin-merge.)
+
+## 15. v1.0.8 release — SHIPPED 2026-06-04 23:31 Berlin
+
+**Release:** <https://github.com/4neverCompany/MashupForge/releases/tag/v1.0.8> — auto-published by the release workflow on build success.
+
+**4 assets shipped:**
+- `MashupForge_1.0.8_x64-setup.exe` (NSIS, 152 MB)
+- `MashupForge_1.0.8_x64-setup.exe.sig` (signature, 424 B)
+- `MashupForge_1.0.8_x64-portable.zip` (portable, 282 MB)
+- `latest.json` (4neverCompany URL, 705 B)
+
+Local backup at `I:\tmp\tauri-artifacts-v108\`.
+
+**What v1.0.8 fixes (the v1.0.7 hotfix chain — 3 cascading Rust build bugs):**
+
+1. **PR #50**: Cargo version `1.0.7.1` → `1.0.8` (Cargo requires 3-part semver; the 4-part was rejected at parse time).
+2. **PR #52**: `WebviewWindow::emit` → `AppHandle::emit` (Tauri 2.x split; `WebviewWindow` has no `emit`).
+3. **PR #53**: added `use tauri::Emitter;` (the `emit` method comes from the `Emitter` trait; without the import, the compiler can't resolve the method on `AppHandle`).
+
+The v1.0.7 PROMPT-ENG features (A.4 anti-AI-look, A.3 14-angle picker, D credit budget, Higgsfield 500 fix, OAuth deep-link, portable zip variant) are unchanged from v1.0.7 — v1.0.8 is purely a Rust build recovery on top of the v1.0.7 release.
+
+**Post-mortem — what went wrong and what to do next time:**
+
+- **The release workflow auto-publishes on build success.** This is intentional behavior of the `upload` job (it creates the GitHub release and attaches the artifacts). I (Mavis) had been thinking the cron was waiting for me to manually publish, so the cron was redundant for that step. The cron was only needed to TELL ME the build was done. Lesson: when a release job has a "Upload release assets" step, the release happens automatically — the cron's only job is to nudge the assistant.
+- **The cron kept firing for 17 hours past completion** (`*/2 * * * *` × 17 h ≈ 510 ticks). The TTL field on the cron only stops NEW prompts from being *scheduled*; it doesn't stop the existing tick loop. Lesson (updated, was already in memory as a weaker version): when a build is clearly past expected completion, **delete the cron immediately** — do not wait for "the next tick to confirm". An assistant watching a cron should treat the cron as advisory, not authoritative, and act on direct `gh run view` evidence.
+- **The first assistant turn after a long quiet period** is the right place to do a single `gh run view` and decide. Don't wait for the cron to "notice" the success.
+- **All 3 v1.0.7-hotfix Rust bugs were compile-time errors**, not runtime. The CI caught each one before publish. The pattern: small Rust/Tauri 2.x API renames are easy to miss locally but show up immediately on the windows-latest runner.
+
+**v1.0.8.1 candidate list (next):**
+
+- See §14 — items 1-7 are still open. v1.0.8 did not advance §14 because it was a build-recovery release, not a feature release.
+- Add: **release-publish cron should be deleted as soon as the build is known complete**, not after the assistant confirms. (See post-mortem above.)
 
 ---
 
