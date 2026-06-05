@@ -21,7 +21,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import { Loader2, ExternalLink, Check, X } from 'lucide-react';
+import { Loader2, ExternalLink, Check, X, AlertTriangle, RefreshCcw } from 'lucide-react';
 import {
   HIGGSFIELD_IMAGE_MODELS,
   HIGGSFIELD_VIDEO_MODELS,
@@ -66,6 +66,15 @@ export function HiggsfieldConnection({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
+  // V1.0.8.1-OAUTH-MIGRATION: when the desktop app surfaces
+  // `expired_flow` on the OAuth callback, it almost always means the
+  // user's Higgsfield OAuth client was registered before v1.0.7.1
+  // and doesn't have the `mashupforge://` redirect URI in its
+  // allowlist. We surface a one-click reset banner in that case so
+  // the user doesn't have to dig into the Higgsfield dashboard to
+  // re-register by hand.
+  const [migrationNeeded, setMigrationNeeded] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -200,6 +209,33 @@ export function HiggsfieldConnection({
     }
   };
 
+  // V1.0.8.1-OAUTH-MIGRATION: reset the locally-cached OAuth
+  // client_id and bounce back into the authorize flow. The authorize
+  // route will register a fresh client whose allowlist includes
+  // `mashupforge://oauth/callback`, so the deep-link callback
+  // succeeds on the next attempt.
+  const handleResetAndRetry = async () => {
+    setResetting(true);
+    try {
+      const res = await fetch('/api/higgsfield/oauth/reset-client', { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setMigrationNeeded(false);
+      // Re-enter the connect flow with ?via=desktop (the in-Tauri
+      // detection is the same helper as handleConnect, but we set
+      // it explicitly to be defensive in case the Tauri global is
+      // not yet wired up at the moment the user clicks Reset).
+      const isTauri =
+        typeof window !== 'undefined' &&
+        (Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) ||
+          Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__));
+      const qs = isTauri ? '?via=desktop' : '';
+      window.location.href = `/api/higgsfield/oauth/authorize${qs}`;
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Reset failed');
+      setResetting(false);
+    }
+  };
+
   // Surface a success banner when the URL has ?higgsfield=connected
   // (set by the callback route). Strip it after first read.
   //
@@ -223,8 +259,20 @@ export function HiggsfieldConnection({
       const reason = url.searchParams.get('reason') || 'unknown';
       const detail = url.searchParams.get('detail') || '';
       const msg = `Higgsfield connect failed (${reason})${detail ? `: ${detail.slice(0, 120)}` : ''}`;
+      // V1.0.8.1-OAUTH-MIGRATION: in the desktop app, an `expired_flow`
+      // almost always means the user's Higgsfield OAuth client was
+      // registered before v1.0.7.1 and doesn't have the
+      // `mashupforge://` redirect URI. The web build never hits this
+      // case (it uses the HTTPS callback), so the migration banner
+      // is desktop-only.
+      const isTauri =
+        typeof window !== 'undefined' &&
+        (Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) ||
+          Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__));
+      const needsMigration = reason === 'expired_flow' && isTauri;
       queueMicrotask(() => {
         setError(msg);
+        setMigrationNeeded(needsMigration);
       });
       url.searchParams.delete('higgsfield');
       url.searchParams.delete('reason');
@@ -265,6 +313,47 @@ export function HiggsfieldConnection({
               </div>
             )}
             {error && <div className="mt-2 text-xs text-rose-300">{error}</div>}
+            {migrationNeeded && (
+              <div
+                data-testid="oauth-migration-banner"
+                className="mt-3 rounded border border-amber-400/40 bg-amber-500/10 p-3"
+              >
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300" />
+                  <div className="min-w-0 flex-1 space-y-2 text-[11px] leading-relaxed text-amber-100/90">
+                    <p>
+                      <span className="font-semibold text-amber-200">OAuth client needs a one-time update.</span>{' '}
+                      You connected before v1.0.7.1, so your Higgsfield OAuth
+                      client doesn&apos;t have the <code className="rounded bg-black/30 px-1 font-mono text-amber-200">mashupforge://</code> redirect URI in its allowlist.
+                      The desktop app can&apos;t complete sign-in until that URI is registered.
+                    </p>
+                    <p className="text-amber-100/70">
+                      <strong>One-click fix:</strong> reset the cached client ID and let MashupForge register a fresh one with the right allowlist. Your existing grants stay safe — re-registering only creates a new client, it doesn&apos;t revoke access.
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleResetAndRetry}
+                        disabled={resetting}
+                        className="inline-flex items-center gap-1.5 rounded border border-amber-400/50 bg-amber-500/20 px-2.5 py-1 text-[11px] font-medium text-amber-100 transition hover:bg-amber-500/30 disabled:opacity-50"
+                      >
+                        <RefreshCcw className="h-3 w-3" />
+                        {resetting ? 'Resetting…' : 'Reset OAuth client and retry'}
+                      </button>
+                      <a
+                        href="https://higgsfield.ai/dashboard/developers/oauth"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-amber-200/80 underline-offset-2 hover:text-amber-100 hover:underline"
+                      >
+                        Or update your client manually
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex flex-col items-end gap-2">
             {status?.connected ? (
