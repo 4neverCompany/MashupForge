@@ -560,6 +560,7 @@ v1.0.5 candidates.
    - **Headless**: camofox is headless by default, no Tauri window needed. Works in CI.
    - ~3-4 days including the sidecar plumbing.
 7. **Post-v1.0.7 URL sweep** — README, BUILDING, CONTRIBUTING, components/landing/* (Nav, Hero, Footer, CTA), docs/* historical references. Brand consistency cleanup. ~2 hours. Non-urgent. (Partial: PR #51 covers Tier 2 user-visible + Tier 3 repo hygiene, awaiting admin-merge.)
+8. **OAuth client migration UX for pre-v1.0.7.1 users** — PR #54. New `POST /api/higgsfield/oauth/reset-client` endpoint + amber migration banner in `HiggsfieldConnection.tsx` with one-click reset. Surfaces when desktop OAuth callback errors with `expired_flow` (the pre-v1.0.7.1 client doesn't have `mashupforge://` in its allowlist). 4 new vitest tests.
 
 ## 15. v1.0.8 release — SHIPPED 2026-06-04 23:31 Berlin
 
