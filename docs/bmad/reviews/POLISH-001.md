@@ -47,8 +47,8 @@ read from there.
 +description = "MashupForge — AI-driven multiverse crossover content studio (Tauri desktop shell)"
 +authors = ["Maurice (4neverCompany)"]
 +license = "Proprietary"
-+repository = "https://github.com/Code4neverCompany/MashupForge"
-+homepage = "https://github.com/Code4neverCompany/MashupForge"
++repository = "https://github.com/4neverCompany/MashupForge"
++homepage = "https://github.com/4neverCompany/MashupForge"
 ```
 
 ### `src-tauri/tauri.conf.json` (`bundle` block)
@@ -62,7 +62,7 @@ read from there.
 +    "copyright": "Copyright © 2026 4neverCompany. All rights reserved.",
 +    "shortDescription": "AI-driven multiverse crossover content studio",
 +    "longDescription": "MashupForge is 4neverCompany's content generation pipeline for AI-driven crossover art and social posts. Combines Leonardo.ai image generation, GLM-powered captioning, and a smart Instagram scheduler in a single desktop app.",
-+    "homepage": "https://github.com/Code4neverCompany/MashupForge",
++    "homepage": "https://github.com/4neverCompany/MashupForge",
 +    "category": "Productivity",
 +    "license": "Proprietary",
      "resources": [...],

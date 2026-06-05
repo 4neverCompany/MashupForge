@@ -25,7 +25,7 @@ Windows PC.
 The CI run triggered by STORY-060 must complete green before this
 test can start.
 
-- **Workflow run:** https://github.com/Code4neverCompany/MashupForge/actions/runs/24425218168
+- **Workflow run:** https://github.com/4neverCompany/MashupForge/actions/runs/24425218168
 - **Commit tested:** `5195644` (HEAD at the time of STORY-060 push)
 - **Expected artifacts:**
   - `mashupforge-windows-msi` (Wix-based `.msi`)

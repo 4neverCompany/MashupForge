@@ -209,7 +209,7 @@ jobs:
             fi
           done
           echo "::error::NSIS install did not produce a binary at $PER_USER or $PER_MACHINE within 60s"
-          echo "This is a known issue — see https://github.com/Code4neverCompany/MashupForge/issues for status"
+          echo "This is a known issue — see https://github.com/4neverCompany/MashupForge/issues for status"
           exit 1
 
       - name: Launch + verify

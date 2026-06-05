@@ -19,7 +19,7 @@ The actual binary-downloading/relaunch path is deliberately deferred
 
 ### 1. `app/api/app/version-check/route.ts` — new GET route
 
-Fetches `https://api.github.com/repos/Code4neverCompany/MashupForge/releases/latest`,
+Fetches `https://api.github.com/repos/4neverCompany/MashupForge/releases/latest`,
 parses the `tag_name`, walks `assets[]` for the first `.msi`, and
 returns:
 

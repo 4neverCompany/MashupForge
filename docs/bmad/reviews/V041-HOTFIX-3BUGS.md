@@ -51,7 +51,7 @@ so they're left at whatever the user had previously set.
 new release.
 
 **Investigation** (verified by hand):
-- ✅ Endpoint URL `https://github.com/Code4neverCompany/MashupForge/releases/latest/download/latest.json`
+- ✅ Endpoint URL `https://github.com/4neverCompany/MashupForge/releases/latest/download/latest.json`
   resolves with HTTP 200 and returns valid manifest pointing at v0.4.1
 - ✅ `UpdateChecker` component calls `check()` on mount, gated only by
   `isDesktop === true` and `UPDATE_BEHAVIOR !== 'off'`

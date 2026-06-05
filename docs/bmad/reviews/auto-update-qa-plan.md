@@ -33,7 +33,7 @@
 - [ ] `tauri.conf.json` `pubkey` field is non-empty and has not been removed or blanked
 - [ ] `createUpdaterArtifacts: true` remains in build config (`.sig` files must be generated)
 - [ ] `dialog: false` is preserved — frontend controls update flow, not native dialog
-- [ ] Update endpoint URL unchanged: `https://github.com/Code4neverCompany/MashupForge/releases/latest/download/latest.json`
+- [ ] Update endpoint URL unchanged: `https://github.com/4neverCompany/MashupForge/releases/latest/download/latest.json`
 - [ ] No hardcoded version strings or fallback URLs that bypass the signed endpoint
 
 ### 1.3 Plugin Init (Rust)

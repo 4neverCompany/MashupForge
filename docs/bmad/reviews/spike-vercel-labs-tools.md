@@ -133,8 +133,8 @@ Maurice's fleet (dev / designer / qa / vault-keeper) currently shares `~/.claude
 
 The new capability `npx skills` unlocks is **versioned skill distribution from a git repo with lockfile pinning**. Concrete pattern for Maurice:
 
-1. Create `Code4neverCompany/agent-skills` (private repo with his custom BMAD review skills, dispatch protocols, vault-manager skills, brief-handlers, etc.).
-2. Each project that needs them runs `npx skills add Code4neverCompany/agent-skills --project --skill 'bmad-review,dispatch-handler,vault-update'` once.
+1. Create `4neverCompany/agent-skills` (private repo with his custom BMAD review skills, dispatch protocols, vault-manager skills, brief-handlers, etc.).
+2. Each project that needs them runs `npx skills add 4neverCompany/agent-skills --project --skill 'bmad-review,dispatch-handler,vault-update'` once.
 3. `skills-lock.json` committed → CI / fresh clones get the same skill versions.
 4. Quarterly `npx skills update -p -y` to refresh.
 
@@ -145,9 +145,9 @@ This replaces the current implicit "everyone copy-pastes from `~/.claude/skills/
 - Doesn't help with the multi-machine fleet sync (if Maurice runs Hermes on his Tauri dev machine + a separate VPS). For that, the git-repo approach is the answer (clone + `npx skills install` on each box).
 
 ### Adoption path (after Maurice signs off)
-1. Spin up `Code4neverCompany/agent-skills` repo with `npx --yes skills init <skill-name>` to scaffold first entries.
+1. Spin up `4neverCompany/agent-skills` repo with `npx --yes skills init <skill-name>` to scaffold first entries.
 2. Move 2-3 stable Maurice-authored skills there (the BMAD review skill is a good first candidate — it's the protocol every agent runs).
-3. Add `npx skills add Code4neverCompany/agent-skills --project -y --skill '*'` to repo bootstrap scripts.
+3. Add `npx skills add 4neverCompany/agent-skills --project -y --skill '*'` to repo bootstrap scripts.
 4. Pull `vercel-react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines` from `vercel-labs/agent-skills` into MashupForge's `.claude/skills/` — they're directly relevant to Maurice's React 19 / Next.js 15 stack.
 
 ---
@@ -161,7 +161,7 @@ This replaces the current implicit "everyone copy-pastes from `~/.claude/skills/
 ## Recommended priority of adoption
 
 1. **agent-browser — adopt now.** Plugs a real gap. Low risk. ~1 day of integration (wrapper script + audit logging + skill update).
-2. **npx skills — adopt as a distribution mechanism.** No global change needed; first use is spinning up `Code4neverCompany/agent-skills` and migrating the BMAD review skill there.
+2. **npx skills — adopt as a distribution mechanism.** No global change needed; first use is spinning up `4neverCompany/agent-skills` and migrating the BMAD review skill there.
 3. **portless — defer.** Wait for a concrete need for HTTPS in dev. Working `http://localhost:3000` is fine for current MashupForge work.
 
 ## What was NOT done (per brief constraints)

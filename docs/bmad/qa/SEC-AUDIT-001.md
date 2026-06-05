@@ -105,7 +105,7 @@ const child = spawn(spawnCmd, spawnArgs, {
 ```json
 "plugins": {
   "updater": {
-    "endpoints": ["https://github.com/Code4neverCompany/MashupForge/releases/latest/download/latest.json"],
+    "endpoints": ["https://github.com/4neverCompany/MashupForge/releases/latest/download/latest.json"],
     "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6..."
   }
 }

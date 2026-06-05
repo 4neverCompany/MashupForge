@@ -36,7 +36,7 @@ No public API surface to break (it's a Tauri app, no library consumers), so the 
 
 The workflow at `.github/workflows/tauri-windows.yml` fires on `tags: ['v*.*.*']`, **not** push-to-main. Pushed `4f69596` to `main`, then created annotated tag `v0.2.0` and pushed it — that fired the build.
 
-**CI run URL:** https://github.com/Code4neverCompany/MashupForge/actions/runs/24602985211
+**CI run URL:** https://github.com/4neverCompany/MashupForge/actions/runs/24602985211
 
 Status at handoff: queued (just dispatched). Prior 0.1.9 release run took ~19 min on the same workflow; expect similar.
 
@@ -48,7 +48,7 @@ Status at handoff: queued (just dispatched). Prior 0.1.9 release run took ~19 mi
 |---|---|---|
 | Version bumped in all 3 files (`package.json`, `Cargo.toml`, `tauri.conf.json`) | ✅ | Plus `package-lock.json` corrected from a stale 0.1.8 → 0.2.0. |
 | Committed + pushed to trigger CI | ✅ | `4f69596` on `main`; tag `v0.2.0` pushed (CI is tag-triggered, not push-to-main). |
-| CI run URL reported | ✅ | https://github.com/Code4neverCompany/MashupForge/actions/runs/24602985211 |
+| CI run URL reported | ✅ | https://github.com/4neverCompany/MashupForge/actions/runs/24602985211 |
 | Write FIFO when done | ✅ | After this writeup. |
 
 ## How to verify

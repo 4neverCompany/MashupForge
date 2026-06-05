@@ -4,7 +4,7 @@
 **Agent:** Developer
 **Date:** 2026-04-15
 **Classification:** routine
-**CI run:** https://github.com/Code4neverCompany/MashupForge/actions/runs/24425218168
+**CI run:** https://github.com/4neverCompany/MashupForge/actions/runs/24425218168
 
 ---
 
@@ -17,7 +17,7 @@ queued a new build.
 
 ```
 $ git push origin main
-To https://github.com/Code4neverCompany/MashupForge.git
+To https://github.com/4neverCompany/MashupForge.git
    c730d3d..5195644  main -> main
 ```
 

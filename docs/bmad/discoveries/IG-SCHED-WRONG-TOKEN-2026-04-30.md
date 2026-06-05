@@ -165,7 +165,7 @@ Either way, the fix is the same.
 4. Smoke-test by enqueueing a test post (any image + IG platform with a
    `fireAt` in the past) and triggering the workflow:
    ```
-   gh workflow run cron-fire-scheduled-posts.yml -R Code4neverCompany/MashupForge
+   gh workflow run cron-fire-scheduled-posts.yml -R 4neverCompany/MashupForge
    ```
    Watch for `claimed >= 1` and `posted: 1` in the cron-fire JSON summary.
 

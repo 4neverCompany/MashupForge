@@ -141,7 +141,7 @@ Two supported auth modes:
   exchanges a signed OIDC token for an Entra access token —
   no stored client secret, better rotation story. Configure via
   federated credentials on the app registration tied to
-  `repo:Code4neverCompany/MashupForge:ref:refs/heads/main` or tag
+  `repo:4neverCompany/MashupForge:ref:refs/heads/main` or tag
   patterns.
 
 ### 7. Tauri-specific runtime
@@ -241,7 +241,7 @@ Tauri guidance in `v2.tauri.app/distribute/sign/windows/`.
 
 ### Change 3 — GitHub repo secrets
 
-New secrets to add to `Code4neverCompany/MashupForge`:
+New secrets to add to `4neverCompany/MashupForge`:
 - `AZURE_TENANT_ID`
 - `AZURE_CLIENT_ID`
 - `AZURE_CLIENT_SECRET`

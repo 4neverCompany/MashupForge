@@ -129,5 +129,5 @@ Full release process: `.harness/docs/release-process.md`.
 
 - **Landing:** https://mashupforge.vercel.app
 - **Studio (web):** https://mashupforge.vercel.app/studio
-- **Releases:** https://github.com/Code4neverCompany/MashupForge/releases
-- **Source:** https://github.com/Code4neverCompany/MashupForge
+- **Releases:** https://github.com/4neverCompany/MashupForge/releases
+- **Source:** https://github.com/4neverCompany/MashupForge

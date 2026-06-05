@@ -43,7 +43,7 @@ in the dispatch title is misaligned with the codebase reality.
 "plugins": {
   "updater": {
     "endpoints": [
-      "https://github.com/Code4neverCompany/MashupForge/releases/latest/download/latest.json"
+      "https://github.com/4neverCompany/MashupForge/releases/latest/download/latest.json"
     ],
     "dialog": false,
     "pubkey": "<minisign-key>"

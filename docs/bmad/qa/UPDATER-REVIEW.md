@@ -129,7 +129,7 @@ jq -n \
   --arg version "${TAG#v}" \
   --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg signature "$(cat "$SIG")" \
-  --arg url "https://github.com/Code4neverCompany/MashupForge/releases/download/$TAG/$(basename "$EXE")" \
+  --arg url "https://github.com/4neverCompany/MashupForge/releases/download/$TAG/$(basename "$EXE")" \
   '{
     version: $version,
     notes: "",

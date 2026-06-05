@@ -40,7 +40,7 @@ he was already on the latest version. The plugin correctly reports
 Verified the endpoint is reachable and well-formed:
 
 ```bash
-$ curl -sL https://github.com/Code4neverCompany/MashupForge/releases/latest/download/latest.json
+$ curl -sL https://github.com/4neverCompany/MashupForge/releases/latest/download/latest.json
 {
   "version": "0.5.2",
   "notes": "",
@@ -48,7 +48,7 @@ $ curl -sL https://github.com/Code4neverCompany/MashupForge/releases/latest/down
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkK...",
-      "url": "https://github.com/Code4neverCompany/MashupForge/releases/download/v0.5.2/MashupForge_0.5.2_x64-setup.exe"
+      "url": "https://github.com/4neverCompany/MashupForge/releases/download/v0.5.2/MashupForge_0.5.2_x64-setup.exe"
     }
   }
 }

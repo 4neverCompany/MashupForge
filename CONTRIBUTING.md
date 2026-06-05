@@ -20,7 +20,7 @@ Thanks for your interest in MashupForge. This guide covers what you need to get 
 
 ```bash
 # Clone
-git clone https://github.com/Code4neverCompany/MashupForge.git
+git clone https://github.com/4neverCompany/MashupForge.git
 cd MashupForge
 
 # Install

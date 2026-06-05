@@ -51,7 +51,7 @@
   "platforms": {
     "windows-x86_64": {
       "signature": "<minisign sig>",
-      "url": "https://github.com/Code4neverCompany/MashupForge/releases/download/v0.1.7/MashupForge_0.1.7_x64-setup.exe"
+      "url": "https://github.com/4neverCompany/MashupForge/releases/download/v0.1.7/MashupForge_0.1.7_x64-setup.exe"
     }
   }
 }
