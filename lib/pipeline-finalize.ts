@@ -62,7 +62,19 @@ export async function finalizePipelineImage(
   markPostReady = false,
 ): Promise<GeneratedImage> {
   let finalUrl = img.url;
-  if (watermark?.enabled && finalUrl) {
+  // BUG-FIX-2026-06-06: detect videos and skip the image-only
+  // canvas watermark. The data model treats videos and images as
+  // `GeneratedImage` (they share the same shape), discriminated by
+  // `isVideo`. Canvas-based watermarks don't apply to video URLs —
+  // they corrupt the file (Canvas rasterizes the URL and produces an
+  // image, not a video). For videos we leave the URL untouched and
+  // log the gap. TODO: implement a server-side FFmpeg-based video
+  // watermark (lib/pipeline-finalize.video.ts) once a host is wired
+  // up that has FFmpeg available. For now, videos ship as-is, which
+  // is the pre-existing behavior (just no longer pretending to
+  // watermark and silently producing a broken raster).
+  const isVideo = img.isVideo === true;
+  if (watermark?.enabled && finalUrl && !isVideo) {
     try {
       finalUrl = await applyWatermark(finalUrl, watermark, channelName);
     } catch (err) {
@@ -74,6 +86,13 @@ export async function finalizePipelineImage(
       console.warn('[pipeline-finalize] watermark failed for', img.id, err);
       finalUrl = img.url;
     }
+  } else if (isVideo && watermark?.enabled) {
+    // Video watermark is not yet implemented. Log once per finalize
+    // so dev console shows the gap; the URL is preserved as-is.
+    console.warn(
+      '[pipeline-finalize] video watermark not yet implemented, shipping without watermark for',
+      img.id,
+    );
   }
   return {
     ...img,

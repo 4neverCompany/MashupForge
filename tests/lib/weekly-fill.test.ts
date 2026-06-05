@@ -52,23 +52,27 @@ describe('computeWeekFillStatus', () => {
     expect(s.days[6].dayLabel).toBe('Sun');
   });
 
-  it('counts only scheduled, tracks pending_approval separately, ignores posted + failed', () => {
+  it('counts scheduled AND posted toward fill, tracks pending_approval separately, ignores failed', () => {
+    // BUG-FIX-2026-06-06: previously 'posted' was excluded entirely,
+    // causing the day to show as "open" in the pipeline after a
+    // successful post. Now posted posts contribute to the fill so the
+    // day is correctly recognized as full.
     const posts: ScheduledPost[] = [
       post('2026-04-20', '18:00', 'scheduled'),
       post('2026-04-20', '20:00', 'pending_approval'),
-      post('2026-04-20', '22:00', 'posted'),    // excluded entirely
-      post('2026-04-21', '10:00', 'failed'),    // excluded entirely
+      post('2026-04-20', '22:00', 'posted'),     // NOW counts toward fill
+      post('2026-04-21', '10:00', 'failed'),     // excluded entirely
       post('2026-04-22', '09:00', 'scheduled'),
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
-    // scheduledCount is now scheduled-only — pending_approval is split off
-    expect(s.days[0].scheduledCount).toBe(1);
+    // day 0: 1 scheduled + 1 posted = 2 scheduledCount, 1 pending_approval
+    expect(s.days[0].scheduledCount).toBe(2);
     expect(s.days[0].pendingApprovalCount).toBe(1);
     expect(s.days[1].scheduledCount).toBe(0);
     expect(s.days[1].pendingApprovalCount).toBe(0);
     expect(s.days[2].scheduledCount).toBe(1);
     expect(s.days[2].pendingApprovalCount).toBe(0);
-    expect(s.scheduledTotal).toBe(2);
+    expect(s.scheduledTotal).toBe(3);
     expect(s.pendingApprovalTotal).toBe(1);
   });
 
@@ -116,18 +120,21 @@ describe('computeWeekFillStatus', () => {
     expect(s.filled).toBe(false);
   });
 
-  it('pendingApprovalTotal sums across days; terminal statuses excluded from both buckets', () => {
+  it('pendingApprovalTotal sums across days; posted counts toward fill, failed/rejected excluded', () => {
+    // BUG-FIX-2026-06-06: 'posted' now counts toward fill (it's a
+    // successfully filled slot). 'failed' and 'rejected' still excluded.
     const posts: ScheduledPost[] = [
       post('2026-04-20', '14:00', 'pending_approval'),
       post('2026-04-21', '14:00', 'pending_approval'),
       post('2026-04-22', '14:00', 'pending_approval'),
-      post('2026-04-20', '15:00', 'posted'),     // terminal, excluded
-      post('2026-04-20', '16:00', 'failed'),     // terminal, excluded
-      post('2026-04-20', '17:00', 'rejected'),   // terminal, excluded
+      post('2026-04-20', '15:00', 'posted'),     // NOW counts toward fill
+      post('2026-04-20', '16:00', 'failed'),     // still excluded
+      post('2026-04-20', '17:00', 'rejected'),   // still excluded
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
     expect(s.pendingApprovalTotal).toBe(3);
-    expect(s.scheduledTotal).toBe(0);
+    expect(s.scheduledTotal).toBe(1);
+    expect(s.days[0].scheduledCount).toBe(1);
   });
 
   it('pending_approval posts outside the horizon are ignored from pendingApprovalTotal', () => {

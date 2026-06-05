@@ -93,6 +93,40 @@ export function getOutcome(name: string, modelId: string): NameOutcome {
 }
 
 /**
+ * BUG-FIX-2026-06-06: per-model blocklist grouping for the Settings UI.
+ *
+ * Returns a map of modelId → sorted list of names currently flagged
+ * 'blocked' for that model. The user-whitelist still wins (a name the
+ * user has whitelisted never appears in any model's blocked list, since
+ * the whitelist is the user-override layer). Names with no recorded
+ * observation for a given model (outcome = 'unknown' / 'allowed' for
+ * that model) are excluded.
+ *
+ * Used by SettingsModal to render a per-model breakdown like:
+ *   Nano-banana-2 (3): Spider-Man, Iron Man, Yoda
+ *   GPT-Image-2 (1):   Spider-Man
+ * so the user can see at a glance which model is the stricter filter.
+ */
+export function getBlockedByModel(): Record<string, string[]> {
+  const map = readMap();
+  const whitelist = readUserWhitelist();
+  const out: Record<string, string[]> = {};
+  for (const [name, perModel] of Object.entries(map)) {
+    if (whitelist.has(name)) continue;
+    for (const [modelId, outcome] of Object.entries(perModel)) {
+      if (outcome !== 'blocked') continue;
+      if (!out[modelId]) out[modelId] = [];
+      out[modelId].push(name);
+    }
+  }
+  // Sort each model's blocked list alphabetically for stable display.
+  for (const modelId of Object.keys(out)) {
+    out[modelId].sort((a, b) => a.localeCompare(b));
+  }
+  return out;
+}
+
+/**
  * Record an outcome for `name` on `modelId`. Idempotent. A 'blocked'
  * marking on a specific (name, modelId) pair never gets overwritten by
  * 'allowed' — once a name has reliably failed on this model, subsequent
