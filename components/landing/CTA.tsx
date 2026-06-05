@@ -54,7 +54,7 @@ export function CTA() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-500" />
               </span>
-              v1.0.1 ships with the v0.9.41 production fix
+              v1.0.8 ships with the OAuth deep-link fix
             </div>
 
             <h2
