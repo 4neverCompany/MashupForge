@@ -661,6 +661,10 @@ remotely by `gh pr merge --delete-branch`).
 **Version:** 1.0.9 → **1.1.0** (Minor-Bump, Maurice sign-off 2026-06-06 02:30 Berlin — was originally going to be v1.0.10, then corrected). Cargo requires 3-part semver.
 **Branch:** `feat/camofox-v1.1.0` (4 commits: Day 1-4) → squash `c9f9172` → admin-merged into `main` 2026-06-06 01:44 UTC.
 **PR:** [#56](https://github.com/4neverCompany/MashupForge/pull/56) — all 17 CI checks green.
+**Release:** [v1.1.0](https://github.com/4neverCompany/MashupForge/releases/tag/v1.1.0) published 2026-06-06 02:38 UTC.
+**Tauri build:** run [27049883476](https://github.com/4neverCompany/MashupForge/actions/runs/27049883476) (3rd attempt, 19m35s after two build-fix commits). Build artifacts: NSIS installer 61.8 MB, portable 94.4 MB, minisign signature, latest.json.
+**Post-merge fixes:** commit `121c660` (launcher path: `<root>/package/bin/...` → `<root>/bin/...` in fetch script + Rust `camofox_launcher_path`) and commit `c3756a9` (tsconfig exclude `src-tauri/resources/**` to skip third-party camofox source files during `next build` tsc). Both were on the v1.1.0 tag.
+**Auto-update:** existing v1.0.9 desktop installs auto-update to v1.1.0 silently on next launch.
 **Implementation:** solo, 4 sequential days (team engine blocked from launching new plans in this session — see `MEMORY.md` mavis spawn CLI bug + post-completion aborted-state).
 
 **Maurice-Sign-off 2026-06-06 02:22 Berlin (alle 4 blocking questions):**
