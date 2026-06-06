@@ -391,6 +391,26 @@ export function HiggsfieldConnection({
                 {loading ? 'Loading…' : 'Connect Higgsfield'}
               </button>
             )}
+            {/* V1.1.0-HOTFIX: always-visible recovery action for users
+                whose OAuth client was registered with an outdated
+                redirect_uri allowlist. The OAuth 2.0 spec requires
+                the server to display the `redirect_uri parameter does
+                not match` error IN THE BROWSER (not via redirect), so
+                the migration banner in the parent component never
+                fires for that class of failure — the user is stranded
+                unless they have a button to reset the cached client_id
+                and re-register. This button is always visible (not
+                gated on the migration banner) so any user who hits
+                the redirect_uri error can self-recover. */}
+            <button
+              type="button"
+              onClick={handleResetAndRetry}
+              disabled={resetting || working}
+              title="Wipe the cached OAuth client_id and re-register. Use this if the Connect flow fails with a 'redirect_uri does not match' error in the browser."
+              className="text-[10px] text-white/40 underline-offset-2 transition hover:text-white/70 hover:underline disabled:opacity-50"
+            >
+              {resetting ? 'Resetting…' : 'Reset OAuth client'}
+            </button>
           </div>
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-white/40">
