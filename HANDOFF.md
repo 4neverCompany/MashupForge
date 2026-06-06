@@ -790,5 +790,40 @@ rechtfertigt eher Minor.
 
 ---
 
+## §19 — v1.1.1 — multi-provider video + skills auto-use + 4 hotfixes
+
+**Stand:** 2026-06-06 11:00 Berlin — committet auf Branch `hotfix/v1.1.1-pre-release-batch`, 5 Commits, 1364/1364 vitest, tsc clean. PR + Tauri build pending.
+
+**Scope (5 Bugs, alle in v1.1.1):**
+
+1. **Pipeline-Trendsuche repariert** (camofox in `/api/trending` vergessen in v1.1.0). SearXNG ist dev-only, faellt auf Production-Maschinen aus, der Pipeline-Mode loggte "No trending data found". Fix: camofox als 3. Fan-out-Quelle in `/api/trending/route.ts`, dedup-by-headline absorbiert den Overlap.
+
+2. **Camera-Angle Clear-Button Bug.** mergeSettings strippt `undefined`-Patches per Design (PROP-010), also hat `updateSettings({ cameraAngle: undefined })` nichts geloescht. Fix: neuer `clearSettings(keys)` Primitive in useSettings, threaded durch MashupContext → SettingsModal.
+
+3. **Multi-Provider Video (BIG).** Maurice's Wunsch umgesetzt: User kann jetzt mehrere Provider gleichzeitig fuer Video auswaehlen. Implementation:
+   - `lib/video-providers.ts` neu mit `submitAndPollVideo(provider, opts)` als einzigem Dispatch-Point.
+   - `app/api/minimax-video/route.ts` + `[taskId]/route.ts` neu — nativer Direct-API-Pfad zu Hailuo 2.3.
+   - `MainContent.handleAnimate` refactored: liest `settings.videoProviders ?? ['minimax']`, feuert `Promise.allSettled` an alle.
+   - Settings-Modal: Multi-Checkbox "Active Video Providers" + per-Provider Model-Picker. Default `['minimax']`.
+
+4. **Skills Auto-Use.** Die `*.md` Files in `docs/research/higgsfield-skills/` lagen seit v1.1.0 tot im Repo. Implementation:
+   - `lib/skill-loader.ts` neu mit `loadAllSkills()` + `buildSkillSystemBlock(activeNames)`.
+   - `app/api/ai/prompt/route.ts` liest `body.activeSkills`, injected nach `userSystem` + `focusBlock`.
+   - Settings-Modal: neue "Active Skills" Section. Default `['banana-pro-director']`.
+
+**Wichtige Erkenntnis zur Diskussion mit Maurice ueber "MiniMax M3":** Maurice's Annahme "M3 generiert Videos nativ" ist inkorrekt. M3 ist ein nativ-multimodales Model fuer **Input** (versteht Bilder/Videos, MSA architektur, 1M context), aber **generiert** keine Videos. MiniMax's Video-Generation ist **Hailuo 2.3**, ein separates Model. Die mmx-CLI ist der unified wrapper fuer die ganze MiniMax-Familie (M3 + image-01 + Hailuo 2.3 + Speech + Music). mmx-CLI bleibt im Stack, jetzt offiziell begruendet als Multi-Modal-Wrapper.
+
+**MashupForge Stack nach v1.1.1:**
+- **Text:** MiniMax-M3 (default fuer vercel-ai route) + skills auto-injection.
+- **Image:** image-01 (via `/api/minimax-image`) — keine Aenderung.
+- **Video:** Multi-Provider, default `['minimax']` → Hailuo 2.3 via nativer API.
+
+**Offene Folgearbeit (post-v1.1.1):**
+- Higgsfield video async polling (requestId-only Pfad) — derzeit throws, User muss manuell auf Higgsfield-Dashboard warten. Koennte via eigener Polling-Route + IDB-Cache aufgeloest werden.
+- Camera-Angle-Clear-Bug Lesson: keine `undefined`-Patches mehr in UI → Settings-Wiring. clearSettings ist der Standard-Weg.
+- mmx-CLI Cleanup: User koennte mmx in Zukunft komplett deinstallieren wenn er nur native Routes nutzt — das ist die Konsequenz aus Maurice's "mmx nicht mehr noetig"-Aussage, falls er die mal wieder so formuliert.
+
+---
+
 *— end of handoff. You have the full picture. Build something good. —*
 
