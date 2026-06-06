@@ -48,12 +48,14 @@ export interface GeneratedImage {
   postedTo?: string[];
   postError?: string;
   modelInfo?: {
-    // HIGGSFIELD-INTEGRATION: widened to include `'higgsfield'` for
-    // the new MCP-backed image provider. Each branch in
-    // useImageGeneration's provider switch writes one of the three
-    // values here so post-lifecycle / state-machine code can route
-    // error messages correctly.
-    provider: 'leonardo' | 'minimax' | 'higgsfield';
+    // V1.1.1-MULTI-PROVIDER-VIDEO: widened to include `'mmx'` for
+    // the multi-provider video path (the `mmx` provider in
+    // settings.videoProviders is the CLI-based fallback). The
+    // Studio's Animate button writes the matching provider id so
+    // the gallery badge + post-lifecycle code can route correctly.
+    // Existing entries (leonardo/minimax/higgsfield) keep their
+    // meanings; mmx is the new optional fourth value.
+    provider: 'leonardo' | 'minimax' | 'higgsfield' | 'mmx';
     modelId: string;
     modelName: string;
   };
@@ -239,6 +241,37 @@ export interface UserSettings {
   };
   defaultLeonardoModel: string;
   defaultVideoModel?: string;
+  /**
+   * V1.1.1-MULTI-PROVIDER-VIDEO: ordered list of providers the user
+   * wants to fire in parallel when they click "Animate" in the
+   * Studio. Replaces the implicit "always Leonardo" behavior of
+   * v1.1.0. Empty array means "no providers selected" — the Animate
+   * button surfaces an error in that case.
+   *
+   * Order is preserved for the toast / gallery sort: the first
+   * successful result lands first in the gallery grid.
+   *
+   * Default is `['minimax']` (Hailuo 2.3) — Maurice's v1.1.1
+   * direction. Users with persisted v1.1.0 settings (no
+   * `videoProviders` field) get this new default on first load
+   * after upgrade; the Settings modal lets them re-add Leonardo or
+   * Higgsfield if they want.
+   *
+   * `mmx` is the CLI-wrapper variant of `minimax` — included here
+   * so the Settings modal can offer both paths. In practice the
+   * user usually picks one or the other (not both); the Animate
+   * button honors whatever's checked.
+   */
+  videoProviders?: ('leonardo' | 'minimax' | 'higgsfield' | 'mmx')[];
+  /**
+   * V1.1.1-MULTI-PROVIDER-VIDEO: per-provider MiniMax video model
+   * slug (e.g. 'MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-02'). Lives
+   * alongside `defaultHiggsfieldVideoModel` and the legacy
+   * `defaultVideoModel` (Leonardo). Each provider has its own
+   * model picker so switching providers doesn't clobber the
+   * others.
+   */
+  defaultMinimaxVideoModel?: string;
   /**
    * HIGGSFIELD-INTEGRATION: per-user default models for the
    * Higgsfield MCP-backed image + video generation. Populated by
@@ -953,6 +986,12 @@ export const defaultSettings: UserSettings = {
   defaultAnimationDuration: 3,
   defaultAnimationStyle: 'DYNAMIC',
   defaultVideoModel: 'kling-video-o-3',
+  // V1.1.1-MULTI-PROVIDER-VIDEO: new default is MiniMax (Hailuo 2.3)
+  // instead of the v1.1.0 implicit-Leonardo behavior. The Settings
+  // modal lets the user add or remove providers; the Animate button
+  // fires parallel submissions to all selected ones.
+  videoProviders: ['minimax'] as ('leonardo' | 'minimax' | 'higgsfield' | 'mmx')[],
+  defaultMinimaxVideoModel: 'MiniMax-Hailuo-2.3',
   antiAiLook: false,
   cameraAngle: undefined,
   higgsfieldMonthlyCreditCap: undefined,

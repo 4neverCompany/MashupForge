@@ -90,6 +90,7 @@ const PipelinePanel = dynamic(
   }
 );
 import { streamAIToString, extractJsonArrayFromLLM, extractJsonObjectFromLLM } from '@/lib/aiClient';
+import { submitAndPollVideo } from '@/lib/video-providers';
 import { enhancePromptForModel } from '@/lib/modelOptimizer';
 import { getModelSpec } from '@/lib/model-specs';
 import { getErrorMessage } from '@/lib/errors';
@@ -2039,13 +2040,13 @@ export function MainContent() {
   };
 
   const handleAnimate = async (img: GeneratedImage, isBatch: boolean = false) => {
-    if (!img.imageId) {
-      if (!isBatch) showToast('Only images generated with Leonardo.AI can be animated currently.', 'error');
+    if (!img.imageId && !img.url) {
+      if (!isBatch) showToast('This image has no source for animation.', 'error');
       return;
     }
-    
+
     setImageStatus(img.id, 'animating');
-    
+
     try {
       let duration = settings.defaultAnimationDuration || 5;
       let style = settings.defaultAnimationStyle || 'Standard';
@@ -2057,7 +2058,7 @@ export function MainContent() {
         Determine the best video animation duration (3, 5, or 10 seconds) and the best animation style (Standard, Cinematic, Dynamic, Slow Motion, Fast Motion).
         - Use 3 or 5 seconds for simple actions or portraits.
         - Use 10 seconds for complex scenes, epic landscapes, or slow-motion.
-        - Choose a style that fits the mood (e.g., Cinematic for epic scenes, Dynamic for action, Slow Motion for dramatic moments).
+        - Choose a style that fits the mood (e.g. Cinematic for epic scenes, Dynamic for action, Slow Motion for dramatic moments).
         Return ONLY a JSON object with keys "duration" (number) and "style" (string).`,
           { mode: 'generate', provider: settings.activeAiAgent, model: settings.activeTextModel }
         );
@@ -2091,97 +2092,102 @@ export function MainContent() {
         // enhancement failed — proceed with original videoPrompt
       }
 
-      const res = await fetch('/api/leonardo-video', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: videoPrompt,
-          imageId: img.imageId,
-          duration: duration,
-          model: settings.defaultVideoModel || 'ray-v2',
-          apiKey: settings.apiKeys.leonardo
-        })
-      });
-
-      if (!res.ok) {
-        let errMessage = 'Failed to animate image';
-        try {
-          const err = await res.json() as { error?: string };
-          errMessage = err.error || errMessage;
-        } catch (e) {
-          const text = await res.text();
-          errMessage = `Server error (${res.status}): ${text.slice(0, 100)}...`;
-        }
-        throw new Error(errMessage);
+      // V1.1.1-MULTI-PROVIDER-VIDEO: fan out to every provider in
+      // settings.videoProviders (default ['minimax']). Each provider
+      // gets its own submit+poll via lib/video-providers; we run
+      // them all in parallel via Promise.allSettled so one provider's
+      // failure doesn't sink the others. The successful results
+      // are saved to the gallery, each with its own modelInfo.
+      const providers = settings.videoProviders ?? ['minimax'];
+      if (providers.length === 0) {
+        throw new Error('No video providers configured. Open Settings and enable at least one.');
       }
 
-      const data = await res.json() as { generationId?: string };
-
-      if (data.generationId) {
-        let status = 'PENDING';
-        let attempts = 0;
-        let videoUrl = '';
-        
-        while (status !== 'COMPLETE' && attempts < 60) {
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          attempts++;
-          const statusRes = await fetch(`/api/leonardo/${data.generationId}`);
-          if (!statusRes.ok) {
-            const errText = await statusRes.text();
-            throw new Error(`Failed to check status: ${errText.slice(0, 100)}`);
-          }
-          const statusData = await statusRes.json() as { status?: string; url?: string; error?: string };
-          status = statusData.status ?? 'PENDING';
-          if (status === 'COMPLETE') {
-            videoUrl = statusData.url ?? '';
-          } else if (status === 'FAILED') {
-            throw new Error(statusData.error || 'Leonardo video generation failed');
-          }
+      const modelFor = (provider: string): string => {
+        switch (provider) {
+          case 'leonardo':
+            return settings.defaultVideoModel || 'kling-3.0';
+          case 'minimax':
+            return settings.defaultMinimaxVideoModel || 'MiniMax-Hailuo-2.3';
+          case 'higgsfield':
+            return settings.defaultHiggsfieldVideoModel || 'seedance_2_0';
+          case 'mmx':
+            return 'MiniMax-Hailuo-2.3';
+          default:
+            return 'kling-3.0';
         }
-        
-        if (status !== 'COMPLETE') {
-          throw new Error('Timeout waiting for Leonardo video generation');
+      };
+
+      const results = await Promise.allSettled(
+        providers.map((provider) =>
+          submitAndPollVideo(provider as 'leonardo' | 'minimax' | 'higgsfield' | 'mmx', {
+            prompt: videoPrompt,
+            model: modelFor(provider),
+            duration,
+            leonardoImageId: img.imageId,
+            firstFrameUrl: img.url,
+            leonardoApiKey: settings.apiKeys.leonardo,
+          }),
+        ),
+      );
+
+      const ensureTags = async (prompt: string, existingTags?: string[]) => {
+        if (existingTags && existingTags.length > 0) return existingTags;
+        try {
+          const text = await streamAIToString(
+            `Analyze this image prompt: "${prompt}". Generate 5-8 fitting tags (universe, character, style, theme). Return ONLY a JSON array of strings.`,
+            { mode: 'tag', provider: settings.activeAiAgent, model: settings.activeTextModel }
+          );
+          const parsed = extractJsonArrayFromLLM(text);
+          const strTags = parsed.filter((t): t is string => typeof t === 'string');
+          return strTags.length > 0 ? strTags : ['Mashup'];
+        } catch {
+          return ['Mashup'];
         }
-        
-        if (videoUrl) {
-          let finalVideoUrl = videoUrl;
-          // Watermark logic for video could be added here if supported by a backend service, 
-          // but since we can't easily overlay video watermarks in browser without ffmpeg,
-          // we will handle it via CSS overlay in the UI.
+      };
 
-          const ensureTags = async (prompt: string, existingTags?: string[]) => {
-            if (existingTags && existingTags.length > 0) return existingTags;
-            try {
-              const text = await streamAIToString(
-                `Analyze this image prompt: "${prompt}". Generate 5-8 fitting tags (universe, character, style, theme). Return ONLY a JSON array of strings.`,
-                { mode: 'tag', provider: settings.activeAiAgent, model: settings.activeTextModel }
-              );
-              const parsed = extractJsonArrayFromLLM(text);
-              const strTags = parsed.filter((t): t is string => typeof t === 'string');
-              return strTags.length > 0 ? strTags : ['Mashup'];
-            } catch {
-              return ['Mashup'];
-            }
-          };
+      // We only need to generate tags once (they're prompt-derived,
+      // not provider-derived) and reuse for all saved results.
+      const generatedTags = await ensureTags(videoPrompt, img.tags);
 
-          const generatedTags = await ensureTags(videoPrompt, img.tags);
-
+      let saved = 0;
+      const failures: string[] = [];
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        if (r.status === 'fulfilled') {
+          const v = r.value;
           const newImg: GeneratedImage = {
-            id: `video-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            url: finalVideoUrl,
-            prompt: `Animated: ${img.prompt}`,
+            id: `video-${v.provider}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            url: v.videoUrl,
+            prompt: `Animated (${v.modelName}): ${img.prompt}`,
             tags: generatedTags,
             savedAt: Date.now(),
             isVideo: true,
             modelInfo: {
-              provider: 'leonardo',
-              modelId: settings.defaultVideoModel || 'ray-v2',
-              modelName: settings.defaultVideoModel === 'kling-video-o-3' ? 'Kling O3 Omni' : settings.defaultVideoModel === 'kling-3.0' ? 'Kling 3.0' : settings.defaultVideoModel === 'ray-v2' ? 'Ray V2' : 'Ray V1'
-            }
+              provider: v.provider,
+              modelId: v.modelId,
+              modelName: v.modelName,
+            },
           };
           saveImage(newImg);
-          if (!isBatch) showToast('Video generated and saved to gallery!', 'pipeline-ready');
+          saved++;
+        } else {
+          failures.push(`${providers[i]}: ${getErrorMessage(r.reason)}`);
         }
+      }
+
+      if (saved > 0) {
+        if (!isBatch) {
+          showToast(
+            saved === 1
+              ? 'Video generated and saved to gallery!'
+              : `${saved} videos generated across providers and saved to gallery!`,
+            'pipeline-ready',
+          );
+        }
+      } else {
+        // All providers failed - surface the first failure reason.
+        throw new Error(failures[0] ?? 'All video providers failed');
       }
     } catch (e: unknown) {
       if (!isBatch) showToast(`Animation failed: ${getErrorMessage(e)}`, 'error');
@@ -2191,14 +2197,15 @@ export function MainContent() {
   };
 
   const handleBatchAnimate = async () => {
-    const imagesToAnimate = savedImages.filter(img => selectedForBatch.has(img.id) && img.imageId && !img.isVideo);
+    const imagesToAnimate = savedImages.filter(img => selectedForBatch.has(img.id) && (img.imageId || img.url) && !img.isVideo);
     if (imagesToAnimate.length === 0) {
-      showToast('No valid Leonardo images selected for animation.', 'error');
+      showToast('No valid images selected for animation.', 'error');
       return;
     }
     setSelectedForBatch(new Set());
     await Promise.allSettled(imagesToAnimate.map(img => handleAnimate(img, true)));
   };
+
 
   const handleBatchDelete = () => {
     const ids = Array.from(selectedForBatch);

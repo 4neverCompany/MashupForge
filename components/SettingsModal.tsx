@@ -1951,7 +1951,7 @@ export function SettingsModal({
             title="Default Video Settings"
             subtitle="Frame count, animation style, and resolution applied to every new video idea."
           >
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
               <div className="space-y-2">
                 <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Default Duration</label>
                 <select
@@ -1975,19 +1975,116 @@ export function SettingsModal({
                   <option value="CINEMATIC">Cinematic</option>
                 </select>
               </div>
-              <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Leonardo Video Model</label>
-                <select
-                  value={settings.defaultVideoModel || 'kling-3.0'}
-                  onChange={(e) => updateSettings({ defaultVideoModel: e.target.value })}
-                  className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
-                >
-                  <option value="kling-video-o-3">Kling O3 Omni (New)</option>
-                  <option value="kling-3.0">Kling 3.0 (Pro Quality)</option>
-                  <option value="ray-v2">Ray V2 (High Quality)</option>
-                  <option value="ray-v1">Ray V1 (Standard)</option>
-                </select>
+            </div>
+
+            {/* V1.1.1-MULTI-PROVIDER-VIDEO: per-provider picker.
+                Replaces the v1.1.0 single-select "Leonardo Video
+                Model" dropdown. The user can check one or more
+                providers; the Studio's Animate button fans out to
+                all selected ones in parallel. Each provider has
+                its own model field so switching providers doesn't
+                clobber the others' choice. */}
+            <div className="space-y-4 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60 mt-4">
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">
+                  Active Video Providers
+                </label>
+                <p className="text-[10px] text-zinc-500 mb-3 leading-relaxed">
+                  Pick one or more. The Studio fires parallel
+                  submissions to every selected provider and saves
+                  all successful results to the gallery.
+                </p>
+                {(['leonardo', 'minimax', 'higgsfield', 'mmx'] as const).map((p) => {
+                  const active = (settings.videoProviders ?? ['minimax']).includes(p);
+                  const labels: Record<typeof p, { name: string; cost: string }> = {
+                    leonardo: { name: 'Leonardo.AI', cost: '$$$ (credits)' },
+                    minimax: { name: 'MiniMax (Hailuo 2.3)', cost: '$ (Token Plan)' },
+                    higgsfield: { name: 'Higgsfield MCP', cost: '$$ (credits)' },
+                    mmx: { name: 'mmx CLI (Hailuo via shell)', cost: '$ (Token Plan)' },
+                  };
+                  return (
+                    <label key={p} className="flex items-center gap-2 py-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={active}
+                        onChange={(e) => {
+                          const current = settings.videoProviders ?? ['minimax'];
+                          const next = e.target.checked
+                            ? Array.from(new Set([...current, p]))
+                            : current.filter((x) => x !== p);
+                          updateSettings({ videoProviders: next });
+                        }}
+                        className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-[#c5a062] focus:ring-[#c5a062]"
+                      />
+                      <span className="text-sm text-zinc-200">{labels[p].name}</span>
+                      <span className="text-[10px] text-zinc-500">{labels[p].cost}</span>
+                    </label>
+                  );
+                })}
               </div>
+
+              {/* Per-provider model picker. Renders only for the
+                  providers the user has selected, so the UI stays
+                  scannable. The mmx picker just defaults to
+                  Hailuo 2.3 (mmx is a CLI wrapper around that
+                  same model). */}
+              {(settings.videoProviders ?? ['minimax']).includes('leonardo') && (
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Leonardo Video Model</label>
+                  <select
+                    value={settings.defaultVideoModel || 'kling-3.0'}
+                    onChange={(e) => updateSettings({ defaultVideoModel: e.target.value })}
+                    className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
+                  >
+                    <option value="kling-video-o-3">Kling O3 Omni (New)</option>
+                    <option value="kling-3.0">Kling 3.0 (Pro Quality)</option>
+                    <option value="ray-v2">Ray V2 (High Quality)</option>
+                    <option value="ray-v1">Ray V1 (Standard)</option>
+                    <option value="seedance-2.0">Seedance 2.0</option>
+                    <option value="seedance-2.0-fast">Seedance 2.0 Fast</option>
+                    <option value="veo-3.1">Veo 3.1</option>
+                    <option value="VEO3_1FAST">Veo 3.1 Fast</option>
+                  </select>
+                </div>
+              )}
+              {(settings.videoProviders ?? ['minimax']).includes('minimax') && (
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">MiniMax Video Model</label>
+                  <select
+                    value={settings.defaultMinimaxVideoModel || 'MiniMax-Hailuo-2.3'}
+                    onChange={(e) => updateSettings({ defaultMinimaxVideoModel: e.target.value })}
+                    className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
+                  >
+                    <option value="MiniMax-Hailuo-2.3">Hailuo 2.3 (Latest, recommended)</option>
+                    <option value="MiniMax-Hailuo-02">Hailuo 02 (Mature)</option>
+                    <option value="T2V-01-Director">T2V-01 Director</option>
+                    <option value="T2V-01">T2V-01</option>
+                  </select>
+                </div>
+              )}
+              {(settings.videoProviders ?? ['minimax']).includes('higgsfield') && (
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Higgsfield Video Model</label>
+                  <select
+                    value={settings.defaultHiggsfieldVideoModel || 'seedance_2_0'}
+                    onChange={(e) => updateSettings({ defaultHiggsfieldVideoModel: e.target.value })}
+                    className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
+                  >
+                    <option value="seedance_2_0">Seedance 2.0 (Flagship)</option>
+                    <option value="seedance1_5">Seedance 1.5 Pro</option>
+                    <option value="kling3_0">Kling v3.0</option>
+                    <option value="veo3_1">Google Veo 3.1</option>
+                    <option value="veo3_1_lite">Google Veo 3.1 Lite</option>
+                    <option value="wan2_6">Wan 2.6</option>
+                    <option value="minimax_hailuo">MiniMax Hailuo 02</option>
+                  </select>
+                </div>
+              )}
+              {(settings.videoProviders ?? ['minimax']).includes('mmx') && (
+                <p className="text-[10px] text-zinc-500 leading-relaxed">
+                  mmx uses <code className="text-zinc-400">MiniMax-Hailuo-2.3</code> by default. Install the mmx CLI on the server and ensure it is on PATH.
+                </p>
+              )}
             </div>
           </SettingsSection>
           </>
