@@ -25,6 +25,14 @@ on:
         description: "Release tag to test (e.g. v1.0.6). Leave empty for the latest."
         required: false
         default: ''
+      # CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): opt-in to spin up a real
+      # camofox sidecar in the smoke test. Off by default for fast
+      # PR feedback; flip to true for nightly runs.
+      camofox_enabled:
+        description: "Start a real camofox-browser sidecar in the smoke test"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read

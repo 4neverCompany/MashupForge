@@ -1,74 +1,73 @@
 # Changelog
 
-## [Unreleased] — v1.1.0 camofox-browser integration
+## [1.1.0] — 2026-06-06 — camofox-browser integration
 
-> CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): final v1.1.0 entry will consolidate
-> the 4 days of work on Day 4. This section grows incrementally.
+### What changed
+- **camofox:** bundled `@askjo/camofox-browser@1.11.2` as an optional
+  second sidecar (analog to the existing Node-Next sidecar) to harden
+  the web-search enrichment path against CAPTCHA waves + rate limits.
+  Falls back transparently to the existing DDG/Brave path on any
+  camofox failure.
+- **integrations:** 5 call-sites now route through
+  `withCamofoxHealth(camofoxSearch, webSearch)`:
+  `app/api/{pi,mmx,nca,ai}/prompt/route.ts` (trending enrichment) +
+  `app/api/web-search/route.ts` (standalone endpoint).
+- **ci:** new `actions/cache@v4` step for the npm tarball; new
+  `camofox_enabled: bool` input on the smoke-test workflow (default
+  off); new manual `camofox-integration.yml` for the 3-scenario
+  boot/crash/port-conflict test.
+- **docs:** new `docs/camofox-integration.md` covering setup, runtime,
+  troubleshooting, and what's intentionally NOT in v1.1.0.
+- **license:** new `THIRD_PARTY_LICENSES.md` acknowledging MIT
+  (camofox-browser) and MPL-2.0 (Camoufox engine) — both compatible
+  with our AGPL-3.0-or-later.
+- **cleanup:** dropped the dead `webSearch()` function from
+  `lib/mmx-client.ts` (and its `MmxSearchResult` /
+  `MmxSearchJsonResponse` types). No production caller; the only
+  test that exercised it is updated.
 
-### Day 1 (2026-06-06) — Tauri sidecar plumbing
-- **camofox:** add `scripts/fetch-camofox-browser.ps1` to fetch + cache
-  `@askjo/camofox-browser@1.11.2` from npm into `src-tauri/resources/camofox/`
-- **camofox:** add Rust lifecycle in `src-tauri/src/lib.rs` — `CamofoxState`,
-  `WEB_SEARCH_FALLBACK` atomic, 3-stage port discovery (9377 → reuse →
-  9378-9380 → fallback), boot-probe with 60s timeout, KILL_ON_JOB_CLOSE
-  Job Object, tray "Beenden" kills both sidecars
-- **camofox:** add 1-line CSP diff to `tauri.conf.json` for ports
-  9377-9380
-- **ci:** add `Fetch camofox-browser sidecar` step + `actions/cache@v4`
-  to `.github/workflows/tauri-windows.yml` (after Node fetch)
-- **tests:** add 5 Rust integration tests in `src-tauri/tests/camofox_lifecycle.rs`
-  (1 ignored — see test TODOs)
+### Migration notes
+- The Rust side flips `WEB_SEARCH_FALLBACK` internally on crash
+  detection (3 crashes in 5 min). The JS wrapper
+  `withCamofoxHealth()` short-circuits to `webSearch()` on
+  `CamofoxUnavailableError` or `CamofoxParseError`.
+- The Tauri commands `camofox_status` + `set_camofox_fallback` are
+  not registered in v1.1.0; the JS-side `trySetFallbackFlag()` is a
+  no-op stub. Wiring the commands is a small follow-up.
+- The `ai/prompt` route shows title-only enrichment lines (no
+  snippets) because `camofoxSearch` returns empty snippets. A future
+  release can wire the `/extract` + JSON-schema path for full
+  snippets.
 
-### Day 2 (2026-06-06) — TypeScript client + first integration
-- **camofox:** add `lib/camofox/client.ts` (~470 lines) — typed API,
-  Zod-validated responses, 15s timeout, 3-retry exponential backoff
-  (only on 5xx/429, never on 4xx), `withCamofoxHealth` wrapper,
-  PII scrubber for `@currentUser`-mentions, dedicated
-  `CamofoxHttp4xxError` marker so 4xx isn't retried by the catch handler
-- **camofox:** add `lib/camofox/macros.ts` (14-macro list, JSON-returning
-  set for Reddit, `buildManualSearchUrl` helper for the R9 Pinterest
-  workaround)
-- **camofox:** add `lib/camofox/zod-schemas.ts` — Zod schemas for
-  /health, /tabs, /links responses
-- **camofox:** add `lib/camofox/index.ts` — barrel export
-- **camofox:** add `zod@4.4.3` to `package.json` dependencies
-- **integration:** wire `app/api/pi/prompt/route.ts:356` through
-  `withCamofoxHealth(camofoxSearch, webSearch)` — first call-site,
-  transparently falls back on camofox failure
-- **tests:** add 22 vitest tests in `tests/lib/camofox/client.test.ts`
-  (happy path, parse errors, 5xx retry-then-fail, 4xx no-retry, Reddit
-  JSON path, count clamping, Zod skip, status reachable/healthy,
-  withCamofoxHealth primary/fallback, PII scrubbing)
-- **tests:** add 5 vitest tests in `tests/lib/camofox/macros.test.ts`
-  (14-macro count, Pinterest URL builder, R9 gap flag)
+### Known limitations
+- **Snippet extraction** (master plan §4) is not wired. The
+  `ai/prompt` enrichment degrades to title-only.
+- **`@pinterest_search`** is not shipped by upstream camofox v1.11.2
+  (R9 in the master plan). The `buildManualSearchUrl('pinterest',
+  ...)` helper is the workaround entry point; the call-site that
+  uses it is a follow-up.
+- **macOS / Linux Tauri builds** don't bundle camofox (Windows is
+  the primary target per `docs/runbook/nsis-release.md`). The
+  DDG/Brave path is used on those platforms.
+- **First-run download** of the ~300 MB Camoufox binary takes 30-60s
+  on cold install. The boot probe polls `/health` for 60s before
+  declaring failure.
 
-### Day 3 (2026-06-06) — remaining call-sites + dead-code cleanup
-- **integration:** wire `app/api/mmx/prompt/route.ts:197` through
-  `withCamofoxHealth(camofoxSearch, webSearch)` — same pattern as
-  pi, sessionKey `mmx-trending-${bucket}-${i}`
-- **integration:** wire `app/api/nca/prompt/route.ts:204` through
-  the same wrapper. nca is `@deprecated 2026-06-02` (low priority)
-  but kept consistent with the pi/mmx pattern
-- **integration:** wire `app/api/ai/prompt/route.ts:388` through the
-  same wrapper. This is the highest-CAPTCHA-pressure call-site in
-  the codebase (per master plan §4, call-site #4) so the migration
-  has the most leverage here. PII scrubbing via `scrubPii()` wired
-  in (currently a no-op since ai/prompt is anonymous, but the hook
-  is in place for future SessionConfig). **Known gap:** camofox
-  snapshots return empty snippets (the /extract + JSON-schema path
-  is a Day 4+ enhancement); the enrichment filter drops the snippet
-  requirement and shows title-only lines
-- **integration:** wire `app/api/web-search/route.ts:103,110` through
-  the same wrapper. Provider field still reports which path served
-  the response (camofox / brave / ddg). Serverless-guard and
-  token-bucket rate limit stay in place
-- **cleanup:** delete dead `webSearch()` function (and the
-  `MmxSearchResult` + `MmxSearchJsonResponse` types) from
-  `lib/mmx-client.ts`. No production code called it; the test that
-  exercised it is also updated
-- **cleanup:** update `tests/lib/mmx-client.test.ts` — drop the
-  webSearch-specific test, point the two error-handling tests that
-  used `webSearch('q')` to `generateImage('q')` (same error semantics)
+### Verification
+- `cargo check` (Rust): 0 errors, 0 warnings
+- `cargo test --test camofox_lifecycle`: 5 passed, 1 ignored
+  (the ignored test needs injectable port lists — see test TODO)
+- `bunx tsc --noEmit`: clean
+- `bunx vitest run`: 1313 / 1313 pass (1289 baseline + 25 camofox
+  tests - 1 deleted mmx webSearch test)
+- `bunx eslint lib/camofox/ tests/lib/camofox/ app/api/{pi,mmx,
+  nca,ai,web-search}/`: 0 errors
+
+### Commits
+- `2af48d3` Day 1: Tauri sidecar plumbing
+- `971fcbd` Day 2: TypeScript client + Instagram integration
+- `34c79e8` Day 3: remaining call-sites + dead-code cleanup
+- (Day 4: CI + docs + license + version bump — see PR)
 
 ---
 ## [1.0.4] — 2026-06-03
