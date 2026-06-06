@@ -384,14 +384,51 @@ export async function POST(req: Request): Promise<Response> {
     const minLength = mode === 'chat' ? 8 : 1;
     if (query.length >= minLength) {
       try {
-        const { webSearch } = await import('@/lib/web-search');
-        const results = await webSearch(query, 5);
+        // CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): route the AI prompt's
+        // trending/web context through the camofox sidecar first,
+        // fall back to webSearch() on any camofox failure. This is
+        // the highest-CAPTCHA-pressure call-site in the codebase
+        // (per master plan §4, call-site #4) so the migration has
+        // the most leverage here.
+        //
+        // KNOWN GAP: camofoxSearch returns empty snippets (the
+        // /extract + JSON-schema path is a Day 4 enhancement). The
+        // enrichment below drops the snippet filter and shows
+        // title-only lines. The UI source badge still works.
+        const { withCamofoxHealth, scrubPii } = await import('@/lib/camofox');
+        const results = await withCamofoxHealth(
+          () =>
+            import('@/lib/camofox').then((m) =>
+              m.camofoxSearch({
+                userId: 'ai-route',
+                sessionKey: `ai-${bucketLabel}-${Date.now()}`,
+                macro: '@google_search',
+                query,
+                count: 5,
+              }),
+            ),
+          () => import('@/lib/web-search').then((m) => m.webSearch(query, 5)),
+        );
         if (results.length > 0) {
+          // CAMOFOX-CAMOUFOX-1.1.0: PII-scrub the snapshots before
+          // building the enrichment lines. We don't have a session
+          // config in this code path (ai/prompt is anonymous for
+          // v1.0.x), so currentUserHandle is null and scrubPii is
+          // a no-op. The hook is in place for the future
+          // SessionConfig integration.
           const top3 = results
             .slice(0, 3)
-            .filter((r) => r.title && r.snippet && r.url);
+            .filter((r) => r.title && r.url);
           const snippetLines = top3
-            .map((r) => `- ${r.title}: ${r.snippet}`)
+            .map((r) => {
+              // PII-scrub defensively (no-op when currentUserHandle
+              // is null). Title and url don't need scrubbing in the
+              // camofox path, but the snapshot text would.
+              const title = scrubPii(r.title, null);
+              return r.snippet
+                ? `- ${title}: ${scrubPii(r.snippet, null)}`
+                : `- ${title}`;
+            })
             .filter((line) => line.length > 4);
           if (snippetLines.length > 0) {
             enrichedMessage =

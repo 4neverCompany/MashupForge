@@ -495,26 +495,19 @@ export async function describeImage(
 // ---------------------------------------------------------------------------
 // Web search
 // ---------------------------------------------------------------------------
-
-export interface MmxSearchResult {
-  title: string;
-  link: string;
-  snippet: string;
-  date?: string;
-}
-
-interface MmxSearchJsonResponse {
-  organic?: MmxSearchResult[];
-}
-
-export async function webSearch(
-  query: string,
-  runOpts?: MmxRunOptions,
-): Promise<MmxSearchResult[]> {
-  const args = ['search', 'query', '--q', query];
-  const json = await runMmxJson<MmxSearchJsonResponse>(args, runOpts);
-  return json.organic ?? [];
-}
+//
+// CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): the `webSearch()` function and
+// its `MmxSearchResult` / `MmxSearchJsonResponse` types are REMOVED
+// in v1.1.0. No production code called them (the trending-enrichment
+// loop in `app/api/{pi,mmx,nca,ai}/prompt/route.ts` uses
+// `@/lib/web-search` directly), and the only test that exercised
+// them was `tests/lib/mmx-client.test.ts`, which is also updated.
+// The web-search path now lives in `lib/camofox/client.ts` (camofox
+// sidecar) with `lib/web-search.ts` (DDG/Brave) as the fallback.
+//
+// If mmx ever grows a real web-search product feature (e.g. an
+// mmx-native trend discovery), add it back as a new function with
+// a different name to avoid collision with the deleted symbol.
 
 // ---------------------------------------------------------------------------
 // Health / availability

@@ -7,7 +7,6 @@ import {
   generateVideo,
   synthesizeSpeech,
   describeImage,
-  webSearch,
   isAvailable,
   MmxError,
   MmxQuotaError,
@@ -147,26 +146,6 @@ describe('mmx-client argument construction', () => {
     expect(args).not.toContain('--image');
   });
 
-  it('webSearch parses the organic array', async () => {
-    spawnMock.mockReturnValue(
-      makeChild(
-        JSON.stringify({
-          organic: [
-            { title: 't1', link: 'https://a', snippet: 's1', date: '2026-04-01' },
-            { title: 't2', link: 'https://b', snippet: 's2', date: '' },
-          ],
-        }),
-        0,
-      ) as never,
-    );
-    const results = await webSearch('mashup forge');
-    expect(results).toHaveLength(2);
-    expect(results[0].title).toBe('t1');
-    const args = spawnMock.mock.calls[0][1] as string[];
-    expect(args).toContain('--q');
-    expect(args).toContain('mashup forge');
-  });
-
   it('does not invoke a shell — prompt with metacharacters is passed verbatim', async () => {
     spawnMock.mockReturnValue(
       makeChild(JSON.stringify({ data: { image_urls: [] } }), 0) as never,
@@ -220,12 +199,12 @@ describe('mmx-client error handling', () => {
     setImmediate(() => child.emit('error', Object.assign(new Error('ENOENT'), { code: 'ENOENT' })));
     spawnMock.mockReturnValue(child as never);
 
-    await expect(webSearch('q')).rejects.toBeInstanceOf(MmxSpawnError);
+    await expect(generateImage('q')).rejects.toBeInstanceOf(MmxSpawnError);
   });
 
   it('non-JSON stdout becomes a PARSE error', async () => {
     spawnMock.mockReturnValue(makeChild('not json', 0) as never);
-    await expect(webSearch('q')).rejects.toMatchObject({
+    await expect(generateImage('q')).rejects.toMatchObject({
       name: 'MmxError',
       code: 'PARSE',
     });
@@ -233,7 +212,7 @@ describe('mmx-client error handling', () => {
 
   it('non-zero exit with empty stdout surfaces stderr', async () => {
     spawnMock.mockReturnValue(makeChild('', 2, 'unexpected boom') as never);
-    await expect(webSearch('q')).rejects.toMatchObject({
+    await expect(generateImage('q')).rejects.toMatchObject({
       name: 'MmxError',
       code: 2,
     });

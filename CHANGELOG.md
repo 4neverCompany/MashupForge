@@ -42,6 +42,34 @@
 - **tests:** add 5 vitest tests in `tests/lib/camofox/macros.test.ts`
   (14-macro count, Pinterest URL builder, R9 gap flag)
 
+### Day 3 (2026-06-06) — remaining call-sites + dead-code cleanup
+- **integration:** wire `app/api/mmx/prompt/route.ts:197` through
+  `withCamofoxHealth(camofoxSearch, webSearch)` — same pattern as
+  pi, sessionKey `mmx-trending-${bucket}-${i}`
+- **integration:** wire `app/api/nca/prompt/route.ts:204` through
+  the same wrapper. nca is `@deprecated 2026-06-02` (low priority)
+  but kept consistent with the pi/mmx pattern
+- **integration:** wire `app/api/ai/prompt/route.ts:388` through the
+  same wrapper. This is the highest-CAPTCHA-pressure call-site in
+  the codebase (per master plan §4, call-site #4) so the migration
+  has the most leverage here. PII scrubbing via `scrubPii()` wired
+  in (currently a no-op since ai/prompt is anonymous, but the hook
+  is in place for future SessionConfig). **Known gap:** camofox
+  snapshots return empty snippets (the /extract + JSON-schema path
+  is a Day 4+ enhancement); the enrichment filter drops the snippet
+  requirement and shows title-only lines
+- **integration:** wire `app/api/web-search/route.ts:103,110` through
+  the same wrapper. Provider field still reports which path served
+  the response (camofox / brave / ddg). Serverless-guard and
+  token-bucket rate limit stay in place
+- **cleanup:** delete dead `webSearch()` function (and the
+  `MmxSearchResult` + `MmxSearchJsonResponse` types) from
+  `lib/mmx-client.ts`. No production code called it; the test that
+  exercised it is also updated
+- **cleanup:** update `tests/lib/mmx-client.test.ts` — drop the
+  webSearch-specific test, point the two error-handling tests that
+  used `webSearch('q')` to `generateImage('q')` (same error semantics)
+
 ---
 ## [1.0.4] — 2026-06-03
 
