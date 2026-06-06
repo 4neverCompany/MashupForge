@@ -1,6 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getErrorMessage } from '@/lib/errors';
 
+// V1.1.1-PIPELINE-TRENDING: camofox is added as a tertiary fan-out
+// alongside SearXNG and Reddit. The original two-source design (SearXNG
+// for news, Reddit JSON for franchise sub chatter) had a single point
+// of failure: when SearXNG on `localhost:34567` was not running on a
+// user's machine (the typical case — it's a dev-only meta-search that
+// isn't required at runtime), the route silently returned zero results
+// and the pipeline-mode trend-research step logged "No trending data
+// found — proceeding without". v1.1.0's camofox wiring covered the
+// prompt-routes and /api/web-search but missed /api/trending, so the
+// pipeline kept failing this way.
+//
+// The fix: one camofox @google_search fetch per request, fired in
+// parallel with the SearXNG/Reddit calls. The existing dedup-by-
+// headline-prefix logic absorbs the overlap; camofox just fills the
+// gap when SearXNG is unreachable.
+import { withCamofoxHealth } from '@/lib/camofox';
+import type { WebSearchResult } from '@/lib/web-search';
+
 // Minimal shapes for external API responses — only the fields we actually use.
 interface SearxResult { title?: string; url?: string; publishedDate?: string; pubdate?: string; date?: string; }
 interface SearxResponse { results?: SearxResult[] }
@@ -127,6 +145,40 @@ async function fetchReddit(
   }
 }
 
+// V1.1.1-PIPELINE-TRENDING: camofox-backed web search. Used as the
+// tertiary fan-out when SearXNG on `localhost:34567` isn't reachable
+// (which is the typical case — it's a dev-only meta-search). The
+// fallback returns `[]` so the route degrades to the original
+// SearXNG+Reddit behavior on every camofox failure mode (down,
+// rate-limited, blocked, 4xx-retry budget exhausted, etc.).
+async function fetchCamofox(query: string): Promise<TrendResult[]> {
+  try {
+    const results = await withCamofoxHealth<WebSearchResult[]>(
+      () =>
+        import('@/lib/camofox').then((m) =>
+          m.camofoxSearch({
+            userId: 'trending-route',
+            sessionKey: `trend-${Date.now()}`,
+            macro: '@google_search',
+            query,
+            count: 6,
+          }),
+        ),
+      // No fallback: SearXNG+Reddit are already in the fan-out, so a
+      // camofox failure should not double-fire the same source.
+      async () => [],
+    );
+    return results.map((r) => ({
+      topic: query,
+      headline: r.title,
+      source: 'camofox',
+      url: r.url,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body: TrendingRequest = await req.json();
@@ -243,6 +295,24 @@ export async function POST(req: NextRequest) {
       ...redditHotTerms.map(t => fetchReddit(t, uniqueSubs, 'hot')),
       ...redditNewTerms.map(t => fetchReddit(t, uniqueSubs, 'new')),
     ];
+
+    // V1.1.1-PIPELINE-TRENDING: camofox fan-out. One search per
+    // request, fired alongside the SearXNG+Reddit calls. The query
+    // is the same top-of-bag web term the SearXNG fan-out would
+    // use, so the result overlap is intentional — camofox just
+    // adds CAPTCHA-resilient web results when SearXNG is offline
+    // (the failure mode this fix targets). The dedup step below
+    // collapses the overlap.
+    //
+    // `withCamofoxHealth` returns `[]` if camofox is unavailable
+    // so the route degrades gracefully to the original
+    // SearXNG+Reddit behavior. Per-search timeout is the
+    // `withCamofoxHealth` default (60s); the enclosing 8s
+    // SearXNG/Reddit timeouts don't apply here.
+    if (webTerms.length > 0) {
+      const camofoxQuery = `${allTopics.slice(0, 3).join(' ')} news ${currentYear}`;
+      fetches.push(fetchCamofox(camofoxQuery));
+    }
 
     const allResults: TrendResult[] = [];
     const settled = await Promise.allSettled(fetches);
