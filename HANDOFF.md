@@ -17,20 +17,23 @@ pipeline. There is **also a Vercel-deployed web build** that exposes the
 same Studio surface (less the desktop-only auto-updater and the local
 Tauri-only OAuth browser callback).
 
-You are picking up a **cleanly-released v1.0.4** with:
+You are picking up a **cleanly-released v1.0.9** (Tauri 2 + Next.js 16)
+with **a 5-bug hotfix batch already merged to main** (PR #55, squash
+`e4bb2f0`). See §17 for the bug batch details.
 
-- 1243/1243 tests passing
+- 1289/1289 tests passing
 - TypeScript clean
 - All bundle routes under 300 KB gzipped first-load JS
-- 4 production releases (v1.0.1 → v1.0.4) on the public GitHub Release page
+- 5 production releases (v1.0.1 → v1.0.9) on the public GitHub Release page
 - 4 workflows in `.github/workflows/`
 - 14 API routes, 6 lib sub-systems (Higgsfield, text-AI, image-AI, post-lifecycle,
   persistence, pipeline)
 
 The most important recent work is **Higgsfield AI as a peer of Leonardo** —
-the v1.0.4 release. The user is on a **Higgsfield Plus plan** (~1,000
-credits/month), so the user wants to use Higgsfield as a real production
-backend, not just a feature flag. Default models:
+the v1.0.4 release, with OAuth deep-link + migration UX in v1.0.8–v1.0.9.
+The user is on a **Higgsfield Plus plan** (~1,000 credits/month), so the
+user wants to use Higgsfield as a real production backend, not just a
+feature flag. Default models:
 
 - **Image:** `nano_banana_2` (Nano Banana Pro — 4K-capable, <10¢/image)
 - **Video:** `seedance_2_0` (Seedance 2.0 — the "Hollywood film" model from
@@ -608,6 +611,48 @@ The v1.0.7 PROMPT-ENG features (A.4 anti-AI-look, A.3 14-angle picker, D credit 
 - Vercel dashboard actions still needed (one-time):
   1. Project `mashup-studio` → Settings → Danger Zone → Delete (geist project from old brand).
   2. Project `mashupforge` → Settings → Git → verify connected repo is `4neverCompany/MashupForge` (not the old personal account). If it's still `Code4neverCompany`, disconnect + reconnect with the new org.
+
+---
+
+## 17. v1.0.9 hotfix batch — SHIPPED 2026-06-06 02:01 Berlin (PR #55)
+
+**Branch:** `fix/bug-batch-2026-06-06` → squash `e4bb2f0` → merged admin
+into `main` 2026-06-06 02:01 UTC. No version bump (source-only fix batch;
+no new runtime features, no new Tauri assets).
+
+**Five bugs from v1.0.9 testing, one focused PR:**
+
+| # | Component | What was broken | Fix |
+|---|-----------|-----------------|-----|
+| 1 | `lib/weekly-fill.ts` | Day showed as "open" even when a post was already `posted` | `posted` posts now count toward the day fill; `failed`/`rejected` still excluded (daemon keeps generating for those) |
+| 2 | `components/Settings/HiggsfieldConnection.tsx` | Migration banner only fired on `expired_flow`; server-side `redirect_uri` mismatch (reason=`invalid_request`, raised before our /callback runs) was silent | Banner also fires on `invalid_request` and on any detail mentioning `redirect_uri` / `pre-registered` |
+| 3 | `lib/pipeline-finalize.ts` | Canvas-based `applyWatermark` was silently rasterizing video URLs into broken images | Detect `img.isVideo === true`, skip the canvas watermark, log a warning. TODO tracked for server-side FFmpeg-based video watermark |
+| 4 | `hooks/useSocial.ts` | LLM produced 20+ or 3-4 hashtags for Instagram captions (unbounded) | Prompt tightened to "BETWEEN 8 AND 12"; client-side case-insensitive dedup + cap at 12. Min 8 is aspirational (we never fabricate tags) |
+| 5 | `lib/trademark-outcomes.ts` + `components/SettingsModal.tsx` | Trademark blocklist rendered as a flat list — couldn't tell which model was the strictest filter | New `getBlockedByModel()` returns `Record<modelId, sorted-blocked-names[]>`; UI renders per-model groups with a flat-list fallback for legacy data |
+
+**Verification:** `bunx vitest run` → 1289/1289 pass (110 files, 12.6s);
+`bunx tsc --noEmit` clean; `bunx eslint` 0 errors (1 pre-existing
+`no-img-element` warning in `SettingsModal.tsx:1796` unrelated to this
+batch). CI on PR #55: 17/17 checks green (vitest, tsc, eslint, bundle
+size, brand, version-sync, gitleaks, Vercel preview, etc.).
+
+**Out of scope (intentionally):**
+
+- **Video watermark server-side (FFmpeg)**: real follow-up, needs a host
+  with FFmpeg available. Tracked as a source-comment TODO in
+  `lib/pipeline-finalize.ts`.
+- **OAuth web build (Bug 2)**: the web flow uses HTTPS callbacks and
+  never hits the redirect-uri mismatch path; banner stays desktop-only.
+- **No version bump**: this is a hotfix batch, not a feature release.
+  The Tauri build for v1.0.9 still stands; users picking up v1.0.9 from
+  a future v1.0.9.x rebuild will get these fixes. We could re-bump to
+  v1.0.9.1 or v1.0.10 if a Tauri rebuild is desired — but Cargo requires
+  3-part semver and v1.0.9 is functionally correct as shipped, so this
+  is a web-only / source-only fix until the next planned release.
+
+**Worktree:** `I:\c4n-worktrees\bugfix-batch-2026-06-06` (can be removed
+with `git worktree remove --force`; the branch was already deleted
+remotely by `gh pr merge --delete-branch`).
 
 ---
 

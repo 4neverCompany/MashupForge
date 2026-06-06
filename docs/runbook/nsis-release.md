@@ -191,7 +191,7 @@ prior MashupForge install):
 # From the Windows host, in PowerShell:
 $TAG = "v0.1.9"   # whatever you just cut
 Invoke-WebRequest -OutFile "$env:TEMP\mf-setup.exe" `
-  "https://github.com/Code4neverCompany/MashupForge/releases/download/$TAG/MashupForge_$($TAG.TrimStart('v'))_x64-setup.exe"
+  "https://github.com/4neverCompany/MashupForge/releases/download/$TAG/MashupForge_$($TAG.TrimStart('v'))_x64-setup.exe"
 Start-Process "$env:TEMP\mf-setup.exe"
 ```
 
