@@ -19,6 +19,29 @@
 - **tests:** add 5 Rust integration tests in `src-tauri/tests/camofox_lifecycle.rs`
   (1 ignored — see test TODOs)
 
+### Day 2 (2026-06-06) — TypeScript client + first integration
+- **camofox:** add `lib/camofox/client.ts` (~470 lines) — typed API,
+  Zod-validated responses, 15s timeout, 3-retry exponential backoff
+  (only on 5xx/429, never on 4xx), `withCamofoxHealth` wrapper,
+  PII scrubber for `@currentUser`-mentions, dedicated
+  `CamofoxHttp4xxError` marker so 4xx isn't retried by the catch handler
+- **camofox:** add `lib/camofox/macros.ts` (14-macro list, JSON-returning
+  set for Reddit, `buildManualSearchUrl` helper for the R9 Pinterest
+  workaround)
+- **camofox:** add `lib/camofox/zod-schemas.ts` — Zod schemas for
+  /health, /tabs, /links responses
+- **camofox:** add `lib/camofox/index.ts` — barrel export
+- **camofox:** add `zod@4.4.3` to `package.json` dependencies
+- **integration:** wire `app/api/pi/prompt/route.ts:356` through
+  `withCamofoxHealth(camofoxSearch, webSearch)` — first call-site,
+  transparently falls back on camofox failure
+- **tests:** add 22 vitest tests in `tests/lib/camofox/client.test.ts`
+  (happy path, parse errors, 5xx retry-then-fail, 4xx no-retry, Reddit
+  JSON path, count clamping, Zod skip, status reachable/healthy,
+  withCamofoxHealth primary/fallback, PII scrubbing)
+- **tests:** add 5 vitest tests in `tests/lib/camofox/macros.test.ts`
+  (14-macro count, Pinterest URL builder, R9 gap flag)
+
 ---
 ## [1.0.4] — 2026-06-03
 
