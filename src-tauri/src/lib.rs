@@ -1,8 +1,9 @@
 use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::net::TcpListener;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -14,6 +15,58 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 /// Holds the running Node sidecar child so we can kill it on app quit.
 struct SidecarState(Mutex<Option<Child>>);
+
+// ---- CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): camofox-browser sidecar state ----
+//
+// camofox-browser is an optional, second sidecar that hardens the
+// `lib/web-search.ts` path against CAPTCHA waves and rate limits. It
+// runs on 127.0.0.1 only, default port 9377, with a 3-stage port
+// discovery (see `resolve_camofox_port`).
+//
+// Failure philosophy: if camofox fails to start OR crashes in a loop,
+// we set `WEB_SEARCH_FALLBACK=true` and the frontend transparently
+// falls back to the existing DDG/Brave path. The user is never blocked.
+//
+// The `KILL_ON_JOB_CLOSE` Job Object (see `attach_sidecar_to_kill_on_close_job`)
+// covers abnormal exit paths (auto-updater restart, Task Manager kill).
+// The tray "Beenden" menu item calls `kill_camofox` for the graceful
+// shutdown path.
+struct CamofoxState(Mutex<Option<Child>>);
+static CAMOFOX_HEALTHY: AtomicBool = AtomicBool::new(false);
+static CAMOFOX_ACTIVE_PORT: AtomicU16 = AtomicU16::new(0);
+static WEB_SEARCH_FALLBACK: AtomicBool = AtomicBool::new(false);
+/// CAMOFOX-CAMOUFOX-1.1.0: restart counter, exposed via the
+/// `camofox_status` Tauri command (Day 2+). Currently set/read in
+/// only the boot-probe path; allowed dead_code until Day 2 wires the
+/// command.
+#[allow(dead_code)]
+static CAMOFOX_RESTART_COUNT: AtomicU32 = AtomicU32::new(0);
+/// Rolling-window crash timestamps. Used by `record_camofox_crash` and
+/// `should_fallback_to_websearch` to trip the fallback after
+/// `CAMOFOX_CRASH_LIMIT` crashes within `CAMOFOX_CRASH_WINDOW_SECS`.
+/// Per-process (not persisted) — a fresh launch starts with a clean
+/// slate, which is the right semantics because a new launch also
+/// re-fetches the binary.
+static CAMOFOX_CRASH_TIMES: Mutex<Vec<Instant>> = Mutex::new(Vec::new());
+
+/// Default loopback port for the camofox-browser REST server.
+/// Kept as a documentation constant — the actual port-resolution is
+/// done by `resolve_camofox_port`, which uses `CAMOFOX_PORTS` for
+/// the 3-stage discovery.
+#[allow(dead_code)]
+const CAMOFOX_DEFAULT_PORT: u16 = 9377;
+/// Fallback ports if 9377 is held by a non-camofox process. Camoufox
+/// supports `CAMOFOX_PORT` env var for arbitrary binding, so we cycle
+/// through 4 ports before declaring fallback. Four is enough for
+/// realistic coexistence (Hermes agent on 9377, MashupForge on 9378,
+/// second Hermes on 9379, etc.).
+const CAMOFOX_PORTS: [u16; 4] = [9377, 9378, 9379, 9380];
+/// Cap on the crash counter before we declare the binary broken and
+/// flip the fallback flag. The reset window is 5 minutes (see
+/// `record_camofox_crash`). 3 crashes in 5 min is a strong signal of
+/// a Camoufox renderer bug on a specific site that won't recover.
+const CAMOFOX_CRASH_LIMIT: u32 = 3;
+const CAMOFOX_CRASH_WINDOW_SECS: u64 = 300;
 
 /// Kill the Node sidecar process (if any). Used by both the tray's "Quit"
 /// menu item and any future explicit-shutdown path. Idempotent — safe to
@@ -487,6 +540,218 @@ fn attach_sidecar_to_kill_on_close_job(_child_pid: u32) -> Result<(), String> {
     Ok(())
 }
 
+// ---- CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): camofox helper functions ----
+//
+// Each helper below is a small, pure function that takes the minimum
+// state it needs and returns a primitive. The `.setup()` block composes
+// them in order. Keeping them separate makes them individually
+// unit-testable (see src-tauri/tests/camofox_lifecycle.rs).
+
+/// HTTP-level liveness check. Sends `GET /health` over raw TCP (no
+/// external HTTP dep — we already pay the binary size, no need to add
+/// `reqwest`/`ureq` for one endpoint). Looks for the `engine:"camoufox"`
+/// marker in the response body so we don't accidentally reuse a
+/// non-camofox service on the same port.
+///
+/// **Stage-2 reuse-mode caveat:** if something else (a Hermes agent on
+/// the same host, for example — Maurice's setup, see Q3 in the master
+/// plan) is already listening on 9377, this check protects us from
+/// calling the wrong service. The body marker is fragile against
+/// upstream changes; if `jo-inc/camofox-browser` ever renames the
+/// field, the fallback flips correctly and the user sees DDG search
+/// instead of a confusing 502. That's an acceptable failure mode.
+fn is_camofox_responding_on(port: u16) -> bool {
+    let target = match format!("127.0.0.1:{}", port).parse::<std::net::SocketAddr>() {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+    let mut stream = match TcpStream::connect_timeout(&target, Duration::from_millis(500)) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    // Bound the read so a hostile / misconfigured server can't hang us.
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(1)));
+    let req = b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    if stream.write_all(req).is_err() {
+        return false;
+    }
+    let mut buf = Vec::with_capacity(2048);
+    if stream.read_to_end(&mut buf).is_err() {
+        return false;
+    }
+    // Markers are deliberately redundant: any one matches => camofox.
+    // The body fragment is the most stable; the header `Server:` is a
+    // nice-to-have but not all upstreams set it.
+    let s = String::from_utf8_lossy(&buf);
+    s.contains("\"engine\":\"camoufox\"")
+        || s.contains("\"engine\": \"camoufox\"")
+        || s.to_lowercase().contains("camoufox")
+}
+
+/// 3-stage port discovery (see master plan §2 Port Handling):
+/// 1. Try to bind 9377. If we get the port, we'll spawn there.
+/// 2. If 9377 is taken AND it answers as camofox, REUSE — no second
+///    spawn, saves ~300 MB. This is the common case on Maurice's
+///    host (Hermes agent already running camofox on 9377).
+/// 3. If 9377 is held by a non-camofox process, cycle through 9378,
+///    9379, 9380 with the same try-bind-then-probe logic. If all four
+///    ports are unavailable, the caller should flip WEB_SEARCH_FALLBACK.
+///
+/// Returns `Some((port, is_reuse))` on success, `None` if every port
+/// is taken by a non-camofox process.
+fn resolve_camofox_port(log_dir: &Path) -> Option<(u16, bool)> {
+    for &port in &CAMOFOX_PORTS {
+        match TcpListener::bind(("127.0.0.1", port)) {
+            Ok(listener) => {
+                // The TcpListener drops at end of match arm; the port
+                // is released back to the OS. There's a tiny race
+                // window where another process could grab it before
+                // our spawn completes — acceptable, the boot probe
+                // will catch it and retry.
+                drop(listener);
+                startup_log_line(
+                    log_dir,
+                    &format!("camofox port {} free, will spawn there", port),
+                );
+                return Some((port, false));
+            }
+            Err(_) => {
+                // Port held by something else. Probe to see if it's
+                // camofox. If yes, reuse; if no, try next port.
+                if is_camofox_responding_on(port) {
+                    startup_log_line(
+                        log_dir,
+                        &format!(
+                            "camofox already responding on {} — REUSE mode (no second spawn)",
+                            port
+                        ),
+                    );
+                    return Some((port, true));
+                }
+                startup_log_line(
+                    log_dir,
+                    &format!(
+                        "camofox port {} taken by non-camofox process, trying next",
+                        port
+                    ),
+                );
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the bundled camofox-browser launcher inside the Tauri
+/// resources dir. Build scripts place the Windows launcher at
+/// `resources/camofox/package/bin/camofox-browser.js` (a node-runnable
+/// script). See `scripts/fetch-camofox-browser.ps1` for the layout.
+fn camofox_launcher_path(camofox_root: &Path) -> PathBuf {
+    camofox_root.join("package").join("bin").join("camofox-browser.js")
+}
+
+/// Record a camofox crash for the rolling-window cap. The crash history
+/// is per-process (we don't persist it across launches) — a fresh
+/// launch gets a clean slate, which is the right behavior because a
+/// new launch also re-fetches the binary.
+fn record_camofox_crash() -> u32 {
+    let now = Instant::now();
+    let mut times = CAMOFOX_CRASH_TIMES
+        .lock()
+        .expect("camofox crash-times poisoned");
+    times.retain(|t| now.duration_since(*t) < Duration::from_secs(CAMOFOX_CRASH_WINDOW_SECS));
+    times.push(now);
+    times.len() as u32
+}
+
+/// Decide whether to flip the websearch fallback based on recent
+/// crash history. Called after every crash. 3 crashes in 5 min is
+/// the trip-wire.
+fn should_fallback_to_websearch() -> bool {
+    let now = Instant::now();
+    let mut times = CAMOFOX_CRASH_TIMES
+        .lock()
+        .expect("camofox crash-times poisoned");
+    times.retain(|t| now.duration_since(*t) < Duration::from_secs(CAMOFOX_CRASH_WINDOW_SECS));
+    (times.len() as u32) >= CAMOFOX_CRASH_LIMIT
+}
+
+/// Kill the camofox sidecar process (if any). Pattern is the
+/// tray-Beenden / graceful-shutdown path. Abnormal exits are covered
+/// by the KILL_ON_JOB_CLOSE Job Object; this is the explicit, polite
+/// shutdown. Idempotent.
+fn kill_camofox(app: &AppHandle, reason: &str) {
+    let log_dir = app
+        .path()
+        .app_data_dir()
+        .ok()
+        .map(|p| p.join("logs"));
+    let log_to_startup = |line: &str| {
+        if let Some(ref ld) = log_dir {
+            startup_log_line(ld, line);
+        }
+    };
+
+    let Some(state) = app.try_state::<CamofoxState>() else {
+        log_to_startup(&format!(
+            "{}: CamofoxState not registered (skipping kill)",
+            reason
+        ));
+        return;
+    };
+    let mut guard = match state.0.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            log_to_startup(&format!(
+                "{}: CamofoxState mutex poisoned ({}) — camofox may leak",
+                reason, e
+            ));
+            return;
+        }
+    };
+    let Some(mut child) = guard.take() else {
+        log_to_startup(&format!(
+            "{}: no camofox Child to kill (already taken or never spawned — \
+             may be running in REUSE mode from another process)",
+            reason
+        ));
+        return;
+    };
+    let pid = child.id();
+    log::info!("[tauri] {}: killing camofox pid={}", reason, pid);
+    log_to_startup(&format!("{}: killing camofox pid={}", reason, pid));
+    let kill_result = child.kill();
+    let wait_result = child.wait();
+    log_to_startup(&format!(
+        "{} pid={} kill={} wait={}",
+        reason,
+        pid,
+        if kill_result.is_ok() { "ok" } else { "err" },
+        wait_result
+            .as_ref()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|e| format!("err: {}", e)),
+    ));
+    CAMOFOX_HEALTHY.store(false, Ordering::Relaxed);
+}
+
+/// Best-effort health probe used by the boot probe. Tries up to
+/// `timeout_secs` total, polling every 500 ms. The 60-second ceiling
+/// matches the Node-sidecar boot wait (see `wait_for_port`); camofox
+/// first-launch downloads the ~300 MB Camoufox binary via `postinstall`,
+/// so a fresh install can legitimately take 30+ seconds.
+fn wait_for_camofox_health(port: u16, timeout_secs: u64) -> bool {
+    let deadline = Duration::from_secs(timeout_secs);
+    let start = Instant::now();
+    while start.elapsed() < deadline {
+        if is_camofox_responding_on(port) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+    false
+}
+
 /// Validate that every resource the sidecar needs is present on disk.
 /// Returns a human-readable error with the first missing path.
 fn preflight_resources(
@@ -526,6 +791,11 @@ fn preflight_resources(
 pub fn run() {
     tauri::Builder::default()
         .manage(SidecarState(Mutex::new(None)))
+        // CAMOFOX-CAMOUFOX-1.1.0: camofox sidecar state, parallel to
+        // the Node sidecar slot. Spawned in `.setup()` below; killed
+        // in the tray "Beenden" handler and on abnormal exit via the
+        // KILL_ON_JOB_CLOSE Job Object.
+        .manage(CamofoxState(Mutex::new(None)))
         // tauri-plugin-log runs in BOTH debug and release so the installed
         // .msi leaves a diagnostic trail under
         // %APPDATA%\MashupForge\logs\. Previously this plugin was
@@ -822,6 +1092,229 @@ pub fn run() {
                 .expect("sidecar state poisoned")
                 .replace(child);
 
+            // ---- step 5b: spawn the camofox-browser sidecar
+            //
+            // CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): camofox is OPTIONAL.
+            // If it fails to start, crashes in a loop, or no port is
+            // available, we set WEB_SEARCH_FALLBACK=true and the
+            // frontend transparently uses the existing DDG/Brave
+            // `lib/web-search.ts` path. The user is never blocked.
+            //
+            // Pattern is identical to the Node sidecar above
+            // (CREATE_NO_WINDOW on Windows, stdout/stderr to a log
+            // file, KILL_ON_JOB_CLOSE Job Object) — copy-paste
+            // intentional for the boot sequence, divergent only in
+            // the env-var contract (CAMOFOX_PORT/CAMOFOX_BIND_ADDRESS)
+            // and the 3-stage port discovery.
+            let camofox_log_path = log_dir.join("camofox.log");
+            let camofox_log_file: Option<File> = match File::create(&camofox_log_path) {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    let msg = format!(
+                        "could not create {}: {}",
+                        camofox_log_path.display(),
+                        e
+                    );
+                    startup_log_line(&log_dir, &msg);
+                    // Non-fatal: camofox is optional.
+                    startup_log_line(
+                        &log_dir,
+                        "camofox log file unavailable; websearch fallback will be used",
+                    );
+                    WEB_SEARCH_FALLBACK.store(true, Ordering::Relaxed);
+                    None
+                }
+            };
+            let camofox_log_file_err = camofox_log_file.as_ref().and_then(|f| f.try_clone().ok());
+
+            // Resolve the camofox resources dir using the same
+            // find_resource_subdir helper as `node` and `app`. We do
+            // NOT fail the launch if it's missing — that flips the
+            // fallback flag and we move on.
+            let camofox_root = match find_resource_subdir(&resource_dir, "camofox") {
+                Some(p) => {
+                    startup_log_line(&log_dir, &format!("camofox_root  = {}", p.display()));
+                    p
+                }
+                None => {
+                    let msg = format!(
+                        "bundled camofox-browser dir not found under {} — \
+                         websearch fallback active (rerun build-windows.ps1 to install)",
+                        resource_dir.display()
+                    );
+                    startup_log_line(&log_dir, &format!("CAMOFOX SOFT-FAIL: {}", msg));
+                    WEB_SEARCH_FALLBACK.store(true, Ordering::Relaxed);
+                    log_dir.join("camofox_not_bundled") // unused, satisfies type
+                }
+            };
+
+            // 3-stage port discovery. If all 4 ports are unavailable,
+            // the camofox_root is unused and we fall through with the
+            // fallback flag set.
+            let camofox_port_reuse = if WEB_SEARCH_FALLBACK.load(Ordering::Relaxed) {
+                None
+            } else {
+                resolve_camofox_port(&log_dir)
+            };
+
+            match (camofox_log_file, camofox_log_file_err, camofox_port_reuse) {
+                (Some(stdout), Some(stderr), Some((port, false))) => {
+                    // Spawn path: we own the port, launch a fresh
+                    // camofox-browser.
+                    let launcher = camofox_launcher_path(&camofox_root);
+                    startup_log_line(
+                        &log_dir,
+                        &format!("camofox launch on port {} via {}", port, launcher.display()),
+                    );
+                    let mut cmd = Command::new(&node_bin);
+                    cmd.arg(&launcher)
+                        .current_dir(&resource_dir)
+                        .env("CAMOFOX_PORT", port.to_string())
+                        .env("CAMOFOX_BIND_ADDRESS", "127.0.0.1")
+                        // CAMOFOX-CAMOUFOX-1.1.0: telemetry off (Maurice
+                        // sign-off Q2). Default ON in the upstream
+                        // package — crash reports go to
+                        // camofox-telemetry.askjo.workers.dev and
+                        // auto-create issues in the jo-inc repo.
+                        .env("CAMOFOX_CRASH_REPORT_ENABLED", "false")
+                        .env("NODE_ENV", "production")
+                        .env("MASHUPFORGE_LOG_DIR", &log_dir)
+                        .stdout(Stdio::from(stdout))
+                        .stderr(Stdio::from(stderr));
+                    #[cfg(target_os = "windows")]
+                    {
+                        use std::os::windows::process::CommandExt;
+                        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                        cmd.creation_flags(CREATE_NO_WINDOW);
+                    }
+                    match cmd.spawn() {
+                        Ok(child) => {
+                            let pid = child.id();
+                            startup_log_line(
+                                &log_dir,
+                                &format!("camofox spawned pid={} on port {}", pid, port),
+                            );
+                            // BUG-003-style: attach to KILL_ON_JOB_CLOSE
+                            // so abnormal parent exits (auto-updater
+                            // restart, Task Manager kill) don't leak the
+                            // camofox process.
+                            match attach_sidecar_to_kill_on_close_job(pid) {
+                                Ok(()) => startup_log_line(
+                                    &log_dir,
+                                    &format!(
+                                        "attached camofox pid={} to KILL_ON_JOB_CLOSE Job",
+                                        pid
+                                    ),
+                                ),
+                                Err(e) => startup_log_line(
+                                    &log_dir,
+                                    &format!(
+                                        "WARN attach_sidecar_to_kill_on_close_job(camofox pid={}) failed: {} — \
+                                         camofox may leak on abnormal parent exit",
+                                        pid, e
+                                    ),
+                                ),
+                            }
+                            CAMOFOX_ACTIVE_PORT.store(port, Ordering::Relaxed);
+                            app.state::<CamofoxState>()
+                                .0
+                                .lock()
+                                .expect("camofox state poisoned")
+                                .replace(child);
+                        }
+                        Err(e) => {
+                            let msg = format!(
+                                "failed to spawn camofox at {}: {} — fallback",
+                                launcher.display(),
+                                e
+                            );
+                            startup_log_line(&log_dir, &msg);
+                            WEB_SEARCH_FALLBACK.store(true, Ordering::Relaxed);
+                        }
+                    }
+                }
+                (Some(stdout), Some(stderr), Some((port, true))) => {
+                    // Reuse path: another process (likely Hermes agent
+                    // per Maurice Q3) is already serving camofox on
+                    // this port. Don't spawn, don't track the child,
+                    // just record the port + flip healthy=true.
+                    drop(stdout);
+                    drop(stderr);
+                    CAMOFOX_ACTIVE_PORT.store(port, Ordering::Relaxed);
+                    CAMOFOX_HEALTHY.store(true, Ordering::Relaxed);
+                    startup_log_line(
+                        &log_dir,
+                        &format!("camofox REUSE mode: not spawning, port {} in use", port),
+                    );
+                }
+                (_, _, None) => {
+                    // No port available — all 4 candidate ports held
+                    // by non-camofox processes. Flip fallback.
+                    startup_log_line(
+                        &log_dir,
+                        "camofox: no available port in CAMOFOX_PORTS — fallback to websearch",
+                    );
+                    WEB_SEARCH_FALLBACK.store(true, Ordering::Relaxed);
+                }
+                (None, _, _) => {
+                    // camofox log file failed to open (already logged
+                    // above). Fallback flag already set.
+                    startup_log_line(
+                        &log_dir,
+                        "camofox: log file unavailable, skipping spawn",
+                    );
+                }
+                (Some(_), None, Some(_)) => {
+                    // We have stdout but the stderr clone failed
+                    // (file handle race or filesystem quirk). We
+                    // can't reliably capture stderr — degrade to
+                    // fallback rather than spawn a sidecar we can't
+                    // diagnose. Rare; log and move on.
+                    startup_log_line(
+                        &log_dir,
+                        "camofox: stderr clone failed, skipping spawn — fallback",
+                    );
+                    WEB_SEARCH_FALLBACK.store(true, Ordering::Relaxed);
+                }
+            }
+
+            // Boot probe: wait for camofox to become healthy on the
+            // chosen port (or stay healthy if reuse-mode). Runs on a
+            // background thread so it doesn't block the sidecar's
+            // own boot — the Node sidecar already owns the main wait.
+            if !WEB_SEARCH_FALLBACK.load(Ordering::Relaxed) {
+                let port = CAMOFOX_ACTIVE_PORT.load(Ordering::Relaxed);
+                if port > 0 {
+                    let log_dir_probe = log_dir.clone();
+                    thread::spawn(move || {
+                        if wait_for_camofox_health(port, 60) {
+                            CAMOFOX_HEALTHY.store(true, Ordering::Relaxed);
+                            startup_log_line(
+                                &log_dir_probe,
+                                &format!("camofox HEALTHY on port {}", port),
+                            );
+                        } else {
+                            CAMOFOX_HEALTHY.store(false, Ordering::Relaxed);
+                            let crashes = record_camofox_crash();
+                            startup_log_line(
+                                &log_dir_probe,
+                                &format!(
+                                    "camofox UNHEALTHY after 60s on port {} (crash #{} in window)",
+                                    port, crashes
+                                ),
+                            );
+                            if should_fallback_to_websearch() {
+                                WEB_SEARCH_FALLBACK.store(true, Ordering::Relaxed);
+                                startup_log_line(
+                                    &log_dir_probe,
+                                    "camofox crash limit reached — WEB_SEARCH_FALLBACK=true",
+                                );
+                            }
+                        }
+                    });
+                }
+            }
+
             // ---- step 6: wait for the server on a background thread,
             // then navigate the main window. While we wait, the window
             // keeps showing the frontend-stub loading screen.
@@ -915,6 +1408,12 @@ pub fn run() {
                     }
                     "quit" => {
                         kill_sidecar(app, "Tray Quit");
+                        // CAMOFOX-CAMOUFOX-1.1.0: kill the camofox
+                        // sidecar in the same shutdown path. Idempotent
+                        // — no-op if camofox is in REUSE mode (we
+                        // never owned the child in that case) or
+                        // already shut down.
+                        kill_camofox(app, "Tray Quit");
                         app.exit(0);
                     }
                     _ => {}
@@ -993,4 +1492,33 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// ---- CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): test-helper re-exports ----
+//
+// Integration tests under `src-tauri/tests/` live in a separate crate
+// and can only see `pub` items from this lib. We don't want to
+// promote the lifecycle helpers to `pub` in the public API (they're
+// internal to the boot sequence), so we re-export them through a
+// `#[doc(hidden)]` module that the test crate can `use`.
+//
+// `doc(hidden)` keeps the module out of `cargo doc` output while
+// keeping it `pub` for visibility from sibling test crates. The
+// `_for_test` suffix on the re-exports is a hint to readers that
+// these are not stable production API.
+#[doc(hidden)]
+pub mod camofox_test {
+    use std::path::Path;
+
+    pub fn resolve_camofox_port_for_test(log_dir: &Path) -> Option<(u16, bool)> {
+        super::resolve_camofox_port(log_dir)
+    }
+
+    pub fn should_fallback_to_websearch_for_test() -> bool {
+        super::should_fallback_to_websearch()
+    }
+
+    pub fn record_camofox_crash_for_test() -> u32 {
+        super::record_camofox_crash()
+    }
 }

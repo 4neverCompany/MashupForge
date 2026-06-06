@@ -18,6 +18,11 @@ import { prompt as mmxPrompt, isAvailable, isAuthenticated } from '@/lib/mmx-cli
 import { getErrorMessage } from '@/lib/errors';
 import { coerceMemory, formatMemoryForPrompt } from '@/lib/pipeline-memory';
 import { webSearch, extractTrendingTags, type WebSearchResult } from '@/lib/web-search';
+// CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): camofox sidecar for the
+// trending-enrichment loop. Mirrors the pi route's Day 2 wiring.
+// Dynamic-imported so SSR environments that can't load the
+// camofox module get a clean fallback to webSearch().
+import { withCamofoxHealth } from '@/lib/camofox';
 import {
   buildFocusBlock,
   buildTrendingQuery,
@@ -194,7 +199,24 @@ export async function POST(req: Request) {
     const allResults: WebSearchResult[] = [];
     for (const q of queries) {
       try {
-        const results = await webSearch(q, TRENDING_PER_QUERY_COUNT, undefined, searchOpts);
+        // CAMOFOX-CAMOUFOX-1.1.0: route trending through the camofox
+        // sidecar first; fall back to webSearch() on any camofox
+        // failure. sessionKey includes the query index so concurrent
+        // in-flight calls don't share tabs.
+        const sessionKey = `mmx-trending-${bucket}-${queries.indexOf(q)}`;
+        const results = await withCamofoxHealth(
+          () =>
+            import('@/lib/camofox').then((m) =>
+              m.camofoxSearch({
+                userId: 'mmx-route',
+                sessionKey,
+                macro: '@google_search',
+                query: q,
+                count: TRENDING_PER_QUERY_COUNT,
+              }),
+            ),
+          () => webSearch(q, TRENDING_PER_QUERY_COUNT, undefined, searchOpts),
+        );
         allResults.push(...results);
       } catch {
         /* trending is optional enrichment */

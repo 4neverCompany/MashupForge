@@ -8,6 +8,13 @@ import {
   type WebSearchProvider,
   type WebSearchResult,
 } from '@/lib/web-search';
+// CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): camofox sidecar for the
+// /api/web-search endpoint. We try camofox first, fall back to
+// Brave (if configured) then DDG. Serverless-guard and rate-limit
+// token bucket stay in place. The Brave/DDG path remains the
+// ultimate fallback for environments where camofox isn't bundled
+// (e.g. Vercel preview).
+import { withCamofoxHealth } from '@/lib/camofox';
 
 export const runtime = 'nodejs';
 
@@ -91,25 +98,41 @@ export async function POST(req: Request) {
 
   const count = clampCount(typeof body.count === 'number' ? body.count : undefined);
 
-  // Prefer Brave when configured; fall back to DDG silently on empty
-  // result (key invalid, quota exhausted, 5xx). We surface which provider
-  // actually served the response so the caller / UI can reason about
-  // result quality.
+  // CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): try the camofox sidecar
+  // first, fall back to Brave (if configured) then DDG. The
+  // `provider` field reports which path actually served the
+  // response so the caller / UI can reason about result quality.
+  // Brave stays as the secondary fallback (per master plan §4,
+  // call-site #5) — it gives the user a backup when camofox is
+  // down and the sidecar isn't reachable.
   const braveKey = (process.env.BRAVE_API_KEY ?? '').trim();
   try {
-    let results: WebSearchResult[] = [];
     let provider: WebSearchProvider = 'ddg';
-    if (braveKey) {
-      const brave = await webSearchBrave(query, count, braveKey);
-      if (brave.length > 0) {
-        results = brave;
-        provider = 'brave';
-      }
-    }
-    if (results.length === 0) {
-      results = await webSearchDdg(query, count);
-      provider = 'ddg';
-    }
+    const results = await withCamofoxHealth<WebSearchResult[]>(
+      () =>
+        import('@/lib/camofox').then((m) =>
+          m.camofoxSearch({
+            userId: 'web-search-route',
+            sessionKey: `ws-${Date.now()}`,
+            macro: '@google_search',
+            query,
+            count,
+          }),
+        ),
+      async () => {
+        // Brave → DDG fallback chain (preserves the original
+        // v1.0.x behavior for environments without camofox).
+        if (braveKey) {
+          const brave = await webSearchBrave(query, count, braveKey);
+          if (brave.length > 0) {
+            provider = 'brave';
+            return brave;
+          }
+        }
+        provider = 'ddg';
+        return await webSearchDdg(query, count);
+      },
+    );
     return NextResponse.json({ results, provider });
   } catch (e: unknown) {
     return NextResponse.json({ error: getErrorMessage(e) }, { status: 500 });

@@ -2,6 +2,12 @@ import { prompt as piPrompt, start as piStart, isRunning } from '@/lib/pi-client
 import { getErrorMessage } from '@/lib/errors';
 import { coerceMemory, formatMemoryForPrompt } from '@/lib/pipeline-memory';
 import { webSearch, extractTrendingTags, type WebSearchResult } from '@/lib/web-search';
+// CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): camofox sidecar integration
+// (Day 2 of v1.1.0). The `withCamofoxHealth` wrapper tries camofox
+// first (anti-bot stealth browser) and falls back to `webSearch()`
+// (DDG + Brave) if camofox is down. Trending is optional enrichment
+// so a camofox failure must never break the user-facing prompt.
+import { withCamofoxHealth } from '@/lib/camofox';
 
 /**
  * POST /api/pi/prompt
@@ -353,7 +359,29 @@ export async function POST(req: Request) {
     const allResults: WebSearchResult[] = [];
     for (const q of queries) {
       try {
-        const results = await webSearch(q, TRENDING_PER_QUERY_COUNT, undefined, searchOpts);
+        // CAMOFOX-CAMOUFOX-1.1.0: route trending queries through the
+        // camofox sidecar first, fall back to webSearch() on any
+        // camofox failure. The sessionKey includes the query index
+        // so concurrent in-flight calls don't share tabs.
+        const sessionKey = `pi-trending-${bucket}-${queries.indexOf(q)}`;
+        const results = await withCamofoxHealth(
+          () =>
+            // Dynamic import keeps the camofox client out of the
+            // web-only critical path. If a route handler is invoked
+            // in an environment where `@/lib/camofox` fails to load
+            // (e.g. SSR with no node-fetch), the dynamic import
+            // throws and the wrapper falls back to webSearch.
+            import('@/lib/camofox').then((m) =>
+              m.camofoxSearch({
+                userId: 'pi-route',
+                sessionKey,
+                macro: '@google_search',
+                query: q,
+                count: TRENDING_PER_QUERY_COUNT,
+              }),
+            ),
+          () => webSearch(q, TRENDING_PER_QUERY_COUNT, undefined, searchOpts),
+        );
         allResults.push(...results);
       } catch {
         /* silent — trending is optional enrichment */

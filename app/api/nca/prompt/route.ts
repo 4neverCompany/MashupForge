@@ -18,6 +18,11 @@ import { prompt as ncaPrompt, isAvailable, isAuthenticated } from '@/lib/nca-cli
 import { getErrorMessage } from '@/lib/errors';
 import { coerceMemory, formatMemoryForPrompt } from '@/lib/pipeline-memory';
 import { webSearch, extractTrendingTags, type WebSearchResult } from '@/lib/web-search';
+// CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): camofox sidecar for the
+// trending-enrichment loop. nca is @deprecated 2026-06-02 (low
+// priority) but kept consistent with the pi/mmx pattern. Dynamic
+// import — see pi/route.ts for the rationale.
+import { withCamofoxHealth } from '@/lib/camofox';
 import {
   buildFocusBlock,
   buildTrendingQuery,
@@ -201,7 +206,24 @@ export async function POST(req: Request) {
     const allResults: WebSearchResult[] = [];
     for (const q of queries) {
       try {
-        const results = await webSearch(q, TRENDING_PER_QUERY_COUNT, undefined, searchOpts);
+        // CAMOFOX-CAMOUFOX-1.1.0: same as the pi/mmx pattern. nca is
+        // @deprecated, so this is a defensive consistency change
+        // rather than a real improvement. Trending still falls back
+        // to webSearch() on any camofox failure.
+        const sessionKey = `nca-trending-${bucket}-${queries.indexOf(q)}`;
+        const results = await withCamofoxHealth(
+          () =>
+            import('@/lib/camofox').then((m) =>
+              m.camofoxSearch({
+                userId: 'nca-route',
+                sessionKey,
+                macro: '@google_search',
+                query: q,
+                count: TRENDING_PER_QUERY_COUNT,
+              }),
+            ),
+          () => webSearch(q, TRENDING_PER_QUERY_COUNT, undefined, searchOpts),
+        );
         allResults.push(...results);
       } catch {
         /* trending is optional enrichment */

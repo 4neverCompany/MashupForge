@@ -207,6 +207,7 @@ src-tauri/                  # Tauri 2 desktop shell (Rust)
 - **Image AI:** Leonardo.ai v2 (Nano Banana family, GPT Image, custom presets)
 - **Text AI:** MiniMax-M2.7 + OpenAI fallback via `vercel-ai` SDK
 - **Multimodal:** `mmx` subprocess (image/music/speech/describe) + `nca` text agent
+- **Web search:** camofox-browser sidecar (Camoufox Firefox) + DDG/Brave fallback — see `docs/camofox-integration.md`
 - **Storage:** IndexedDB (web) + SQLite via `tauri-plugin-sql` (desktop)
 - **Persistence model:** Real ACID transactions on both backends, parallel-coexistence migration from legacy IDB shape
 - **Testing:** Vitest 4 + happy-dom + Testing Library — 1,194 tests, 0 flakes

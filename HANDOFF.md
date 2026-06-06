@@ -656,5 +656,76 @@ remotely by `gh pr merge --delete-branch`).
 
 ---
 
+## 18. camofox-browser integration plan — DRAFT ready for Maurice sign-off
+
+**Plan deliverable:** `I:\tmp\camofox-integration-plan.md` (282 lines, 10 sections, German).
+**Synthesized from:** 3 research tracks (api-research 16 KB, call-sites 270+ lines, sidecar-design 500+ lines).
+**Engine verdict:** auto-accepted, all 4 tasks done, 0.86 USD + 0.95 USD + earlier cycles.
+
+**TL;DR:** camofox-browser (Node.js-REST-Wrapper um die C++-Camoufox-Firefox-Engine)
+wird als optionaler Sidecar-Prozess in MashupForge integriert, immer auf
+`127.0.0.1:9377` hartgepinnt, mit nahtlosem Fallback auf den bestehenden
+`lib/web-search.ts`-Pfad (DDG-Scrape + Brave-API). Aufwand 3-4 Arbeitstage.
+
+**Wichtige Korrektur zur Aufgabenpraemisse:** camofox-Migration ist
+**Latenz-/Zuverlaessigkeits-Optimierung**, nicht Anti-Bot-Migration. Der
+`matrix web_search MCP` existiert im Codebase **null Mal** (einziger MCP
+ist Higgsfield). Social-Media-Trend-Scraping (IG/TikTok/Pinterest) waere
+**zusaetzliche Feature-Arbeit**, kein Replacement. Plan beschraenkt sich
+auf das Harden des bestehenden `lib/web-search.ts`-Pfads.
+
+**Architektur-Highlights:**
+- Sidecar-Lifecycle analog zum bestehenden Node-Next-Sidecar (`lib.rs:745-787`)
+- Bundle als `src-tauri/resources/camofox/` (NICHT externalBin, Pattern-Konsistenz)
+- 3-Stufen Port-Discovery (9377 -> reuse-if-camofox -> 9378-9380 -> fallback)
+- Zweischichtige Health-Probe (Rust Boot-Polling 500ms + JS Liveness 30s)
+- Typed TS-Client mit Zod-Validation, 15s Timeout, 3-Retry Exponential Backoff
+- PII-Scrubbing fuer `@currentUser`-Mentions vor WebSearchResult-Mapping
+- 3-Stage-Crash-Wiederholungs-Schutz: 3 Crashes in 5 min -> `WEB_SEARCH_FALLBACK=true`
+- 14-Row Risk Register, 3-Tage-Implementation-Plan, 3 konkret ausgearbeitete Commits
+
+**4 BLOCKING Questions fuer Maurice (vor Tag 1):**
+1. **Q1 — Version-Pin:** Welche `@askjo/camofox-browser`-Version? Default-Vorschlag v1.11.2.
+2. **Q2 — Telemetrie:** camofox sendet per Default anonymisierte Crash-Reports an
+   `camofox-telemetry.askjo.workers.dev` (Issues werden auto-erstellt im jo-inc Repo).
+   Plan setzt `CAMOFOX_CRASH_REPORT_ENABLED=false`. Bestaetigen oder aktivieren?
+3. **Q3 — Port-Konflikt-Fallback:** Nutzt Maurice camofox auch ausserhalb von
+   MashupForge? Falls ja: Reuse-Mode (Stufe 2). Falls nein: direkt auf 9378.
+4. **Q7 — Bundle-Groesse:** camofox + node_modules = ~50 MB komprimiert, ~150 MB
+   entpackt im NSIS-Installer. Akzeptabel, oder "Stealth Mode"-Settings-Toggle mit
+   First-Run-Download?
+
+**7 nice-to-have questions** (CSP-Range, Subtle Status-Indicator, Build-Script-Reihenfolge,
+Test-Strategie, mmx-client-Dead-Code-Loeschung, trending/route-Migration,
+Social-Media-Trend-Features-in-v1.0.8.1) — Details im Plan §10.
+
+**Naechste Schritte:**
+- Maurice beantwortet Q1, Q2, Q3, Q7
+- dev-Implementierung startet Tag 1 (Sidecar Plumbing + Health + Graceful Shutdown)
+- qa arbeitet parallel an Mock-Server-Setup (`tests/lib/camofox/client.test.ts` mit MSW)
+- architect reviewt `lib.rs`-Diffs
+
+**Plan-Stand:** 2026-06-06, v1.0.8.1 — wartet auf Maurice-Sign-off. Nach
+Sign-off: PR-Setup mit den 3 ersten Commits (Sidecar-Config, Typed-Client,
+Instagram-Integration) als Grundlage.
+
+**Maurice-Sign-off 2026-06-06 02:22 Berlin:** alle 4 blocking questions
+mit Defaults bestaetigt.
+- Q1 → v1.11.2 (Default)
+- Q2 → `CAMOFOX_CRASH_REPORT_ENABLED=false` (Default)
+- Q3 → Reuse-Mode bestaetigt — Hermes-Agent nutzt camofox, Maurice persoenlich
+  nicht. 3-Stufen-Algorithmus (9377 / Reuse-if-camofox / 9378-9380 / Fallback)
+  passt exakt: wenn Hermes camofox bereits auf 9377 hat, reused MashupForge
+  die Instanz und spart ~300 MB.
+- Q7 → Bundle drin, kein "Stealth Mode"-Toggle (Default)
+
+**Naechste Entscheidung (offen):** Versions-Nummer der naechsten Release
+mit camofox — v1.0.10 (kleines Patch-Add) oder v1.1.0 (naechstes Minor)?
+Cargo erfordert 3-Part-Semver, also kein 1.0.9.1. Camofox-Integration ist
+strukturell additiv (neuer Sidecar, neue Routes, neue Client-Library) und
+rechtfertigt eher Minor.
+
+---
+
 *— end of handoff. You have the full picture. Build something good. —*
 
