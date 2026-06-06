@@ -195,16 +195,14 @@ describe('GET /api/minimax-video/[taskId] — status polling', () => {
     delete process.env.MINIMAX_API_KEY;
     const res = await getVideoStatus(
       new NextRequest('http://x/api/minimax-video/abc'),
-      { params: { taskId: 'abc' } },
+      { params: Promise.resolve({ taskId: 'abc' }) },
     );
     expect(res.status).toBe(503);
   });
 
   it('returns 400 when taskId is missing', async () => {
     const res = await getVideoStatus(new NextRequest('http://x/api/minimax-video/'), {
-      // Next.js dynamic-route params provide a string; this
-      // simulates an empty path segment by passing an empty string.
-      params: { taskId: '' },
+      params: Promise.resolve({ taskId: '' }),
     });
     expect(res.status).toBe(400);
   });
@@ -221,7 +219,7 @@ describe('GET /api/minimax-video/[taskId] — status polling', () => {
       ),
     );
     const res = await getVideoStatus(new NextRequest('http://x/api/minimax-video/1'), {
-      params: { taskId: '1' },
+      params: Promise.resolve({ taskId: '1' }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -263,7 +261,7 @@ describe('GET /api/minimax-video/[taskId] — status polling', () => {
       return new Response('not found', { status: 404 });
     });
     const res = await getVideoStatus(new NextRequest('http://x/api/minimax-video/1'), {
-      params: { taskId: '1' },
+      params: Promise.resolve({ taskId: '1' }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -286,7 +284,7 @@ describe('GET /api/minimax-video/[taskId] — status polling', () => {
       ),
     );
     const res = await getVideoStatus(new NextRequest('http://x/api/minimax-video/1'), {
-      params: { taskId: '1' },
+      params: Promise.resolve({ taskId: '1' }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -306,7 +304,7 @@ describe('GET /api/minimax-video/[taskId] — status polling', () => {
       ),
     );
     const res = await getVideoStatus(new NextRequest('http://x/api/minimax-video/1'), {
-      params: { taskId: '1' },
+      params: Promise.resolve({ taskId: '1' }),
     });
     expect(res.status).toBe(502);
   });

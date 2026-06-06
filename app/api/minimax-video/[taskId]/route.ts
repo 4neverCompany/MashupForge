@@ -48,9 +48,9 @@ interface MinimaxFileResponse {
 
 export async function GET(
   _req: Request,
-  { params }: { params: { taskId: string } },
+  { params }: { params: Promise<{ taskId: string }> },
 ): Promise<Response> {
-  const taskId = params.taskId;
+  const { taskId } = await params;
   if (!taskId || typeof taskId !== 'string') {
     return NextResponse.json({ error: 'taskId is required' }, { status: 400 });
   }
