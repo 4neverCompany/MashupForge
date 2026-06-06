@@ -25,7 +25,13 @@ Write-Host "[fetch-camofox] Version: $CamofoxVersion"
 Write-Host "[fetch-camofox] Target:  $CamofoxDir"
 
 # Marker file: presence of launcher means the install is complete.
-$LauncherJsx = Join-Path $CamofoxDir 'package' 'bin' 'camofox-browser.js'
+# CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): tarball contents are
+# `<root>/bin/camofox-browser.js` (NOT `<root>/package/bin/...`).
+# `npm pack` extracts the tarball contents into a `package/` subdir
+# under our `$ExtractDir`, then we copy that subdir's CONTENTS
+# (not the `package/` dir itself) into `$CamofoxDir`. So the final
+# layout has the launcher directly at `$CamofoxDir/bin/...`.
+$LauncherJsx = Join-Path $CamofoxDir 'bin' 'camofox-browser.js'
 if (Test-Path $LauncherJsx) {
     Write-Host "[fetch-camofox] launcher already present at $LauncherJsx — skipping download."
     exit 0

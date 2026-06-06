@@ -643,11 +643,14 @@ fn resolve_camofox_port(log_dir: &Path) -> Option<(u16, bool)> {
 }
 
 /// Resolve the bundled camofox-browser launcher inside the Tauri
-/// resources dir. Build scripts place the Windows launcher at
-/// `resources/camofox/package/bin/camofox-browser.js` (a node-runnable
-/// script). See `scripts/fetch-camofox-browser.ps1` for the layout.
+/// resources dir. Build scripts place the launcher at
+/// `resources/camofox/bin/camofox-browser.js` (a node-runnable
+/// script). The `package/` intermediate dir is what `npm pack`
+/// creates during extraction — we copy its CONTENTS (not the
+/// `package/` subdir itself) into the resources dir. See
+/// `scripts/fetch-camofox-browser.ps1` for the layout.
 fn camofox_launcher_path(camofox_root: &Path) -> PathBuf {
-    camofox_root.join("package").join("bin").join("camofox-browser.js")
+    camofox_root.join("bin").join("camofox-browser.js")
 }
 
 /// Record a camofox crash for the rolling-window cap. The crash history
