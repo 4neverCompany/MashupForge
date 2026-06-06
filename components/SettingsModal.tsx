@@ -186,6 +186,7 @@ import {
 } from '@/lib/agent-prompt';
 import {
   getAllBlocked,
+  getBlockedByModel,
   getAllUserWhitelisted,
   addUserWhitelist,
   removeUserWhitelist,
@@ -261,6 +262,11 @@ export function SettingsModal({
   // a re-read on mutation. The lint rule can't see the read-through dep.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const trademarkBlocklist = useMemo(() => getAllBlocked(), [trademarkStoreTick]);
+  // BUG-FIX-2026-06-06: per-model breakdown of the blocklist (same shape
+  // as the underlying store: modelId -> sorted blocked names). Lets the
+  // user see which model is the strictest filter.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const trademarkBlockedByModel = useMemo(() => getBlockedByModel(), [trademarkStoreTick]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const trademarkWhitelist = useMemo(() => getAllUserWhitelisted(), [trademarkStoreTick]);
   // Which password fields are currently revealed.
@@ -2227,21 +2233,54 @@ export function SettingsModal({
                       <p className="text-[10px] text-zinc-500 italic">No auto-blocked names yet.</p>
                     </div>
                   ) : (
-                    <div className="flex flex-wrap gap-2">
-                      {trademarkBlocklist.map((name) => (
-                        <span key={name} className="inline-flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-300 text-[10px] rounded-xl border border-red-500/30">
-                          {name}
-                          <button
-                            type="button"
-                            onClick={() => { addUserWhitelist(name); bumpTrademarkStore(); }}
-                            title="Whitelist this name (let it pass on next attempt)"
-                            className="ml-1 text-[9px] uppercase tracking-wider text-emerald-300 hover:text-emerald-200"
-                          >
-                            Whitelist
-                          </button>
-                        </span>
-                      ))}
-                    </div>
+                    <>
+                      {/* BUG-FIX-2026-06-06: per-model breakdown. If the
+                          store has at least one modelId key, render the
+                          grouped view (shows which model blocks which
+                          names); otherwise fall back to a flat list. */}
+                      {Object.keys(trademarkBlockedByModel).length > 0 ? (
+                        <div className="space-y-3">
+                          {Object.entries(trademarkBlockedByModel).map(([modelId, names]) => (
+                            <div key={modelId} className="space-y-1">
+                              <div className="text-[9px] font-mono text-zinc-600 uppercase tracking-wider">
+                                {modelId} ({names.length})
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {names.map((name) => (
+                                  <span key={`${modelId}:${name}`} className="inline-flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-300 text-[10px] rounded-xl border border-red-500/30">
+                                    {name}
+                                    <button
+                                      type="button"
+                                      onClick={() => { addUserWhitelist(name); bumpTrademarkStore(); }}
+                                      title={`Whitelist "${name}" (let it pass on next attempt across all models)`}
+                                      className="ml-1 text-[9px] uppercase tracking-wider text-emerald-300 hover:text-emerald-200"
+                                    >
+                                      Whitelist
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {trademarkBlocklist.map((name) => (
+                            <span key={name} className="inline-flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-300 text-[10px] rounded-xl border border-red-500/30">
+                              {name}
+                              <button
+                                type="button"
+                                onClick={() => { addUserWhitelist(name); bumpTrademarkStore(); }}
+                                title="Whitelist this name (let it pass on next attempt)"
+                                className="ml-1 text-[9px] uppercase tracking-wider text-emerald-300 hover:text-emerald-200"
+                              >
+                                Whitelist
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 

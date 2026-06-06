@@ -262,14 +262,30 @@ export function HiggsfieldConnection({
       // V1.0.8.1-OAUTH-MIGRATION: in the desktop app, an `expired_flow`
       // almost always means the user's Higgsfield OAuth client was
       // registered before v1.0.7.1 and doesn't have the
-      // `mashupforge://` redirect URI. The web build never hits this
-      // case (it uses the HTTPS callback), so the migration banner
-      // is desktop-only.
+      // `mashupforge://` redirect URI.
+      //
+      // BUG-FIX-2026-06-06: the original trigger only fired on
+      // `expired_flow` (our /callback's "no state cookie" case). But
+      // when the OAuth server itself rejects the redirect_uri at the
+      // /authorize step (before our callback ever runs), it returns
+      // `reason=invalid_request` with a detail mentioning
+      // `redirect_uri`. That was reported in v1.0.9 testing — the
+      // banner never showed because `invalid_request` wasn't in the
+      // trigger set. The fix: also fire the migration banner on
+      // `invalid_request` (or any error whose detail mentions
+      // redirect_uri). The web build never hits this case (it uses
+      // the HTTPS callback), so the migration banner is desktop-only.
       const isTauri =
         typeof window !== 'undefined' &&
         (Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) ||
           Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__));
-      const needsMigration = reason === 'expired_flow' && isTauri;
+      const detailLower = detail.toLowerCase();
+      const isRedirectUriMismatch =
+        reason === 'invalid_request' ||
+        detailLower.includes('redirect_uri') ||
+        detailLower.includes('redirect uri') ||
+        detailLower.includes('pre-registered');
+      const needsMigration = isTauri && isRedirectUriMismatch;
       queueMicrotask(() => {
         setError(msg);
         setMigrationNeeded(needsMigration);

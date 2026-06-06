@@ -106,11 +106,25 @@ export function computeWeekFillStatus(
   const pendingCounts = new Map<string, number>();
   if (posts && posts.length > 0) {
     for (const p of posts) {
-      if (p.status === 'posted' || p.status === 'failed' || p.status === 'rejected') continue;
+      // BUG-FIX-2026-06-06: 'posted' posts now count toward the fill.
+      // A successfully posted post IS a filled slot — the day shouldn't
+      // show as "open" in the pipeline just because the post transitioned
+      // past `scheduled`. We DON'T apply the `ts < now` filter to
+      // 'posted' (posted posts are by definition in the past) — they
+      // count regardless of how long ago they were published.
+      // 'failed' and 'rejected' still excluded — those are "we tried
+      // and it didn't work", the daemon should keep generating.
+      if (p.status === 'failed' || p.status === 'rejected') continue;
       // Treat malformed date/time strings as "skip" rather than throwing —
       // callers include user-edited settings that may be half-filled.
       const ts = new Date(`${p.date}T${p.time}:00`).getTime();
       if (!Number.isFinite(ts)) continue;
+      if (p.status === 'posted') {
+        // Skip the future-only filter — 'posted' posts are always in
+        // the past, but they still satisfy the day target.
+        scheduledCounts.set(p.date, (scheduledCounts.get(p.date) ?? 0) + 1);
+        continue;
+      }
       if (ts < now.getTime()) continue;
       if (p.status === 'pending_approval') {
         pendingCounts.set(p.date, (pendingCounts.get(p.date) ?? 0) + 1);
