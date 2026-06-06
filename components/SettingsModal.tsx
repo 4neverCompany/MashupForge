@@ -2454,6 +2454,57 @@ export function SettingsModal({
               </button>
             </div>
           </SettingsSection>
+
+          {/* V1.1.1-SKILLS-AUTO-USE: toggle list of [agents.md] skills
+              from docs/research/higgsfield-skills/. The list is
+              hard-coded here (the loader discovers them on the
+              server, but the Settings UI shows the curated set
+              we ship with v1.1.1). The user can enable/disable
+              each; the active list is forwarded to /api/ai/prompt
+              on every stream so the model sees the skill bodies
+              as authoritative directives. */}
+          <SettingsSection
+            icon={Sparkles}
+            title="Active Skills"
+            subtitle="Auto-inject skill bodies into the system prompt. The Studio will use them as authoritative directives for every generation."
+          >
+            <div className="space-y-2 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
+              {[
+                {
+                  name: 'banana-pro-director',
+                  label: 'Banana Pro Director (SLCT + Skin Study)',
+                  blurb: 'Cinematic direction protocol — Surface, Lumina, Capture, Texture layers. Strong for cinematic realism.',
+                },
+                {
+                  name: 'cinema-world-builder',
+                  label: 'Cinema World Builder',
+                  blurb: 'World-building and lighting recipes for cinematic scenes.',
+                },
+              ].map((skill) => {
+                const active = (settings.activeSkills ?? ['banana-pro-director']).includes(skill.name);
+                return (
+                  <label key={skill.name} className="flex items-start gap-2 py-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      onChange={(e) => {
+                        const current = settings.activeSkills ?? ['banana-pro-director'];
+                        const next = e.target.checked
+                          ? Array.from(new Set([...current, skill.name]))
+                          : current.filter((x) => x !== skill.name);
+                        updateSettings({ activeSkills: next });
+                      }}
+                      className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-[#c5a062] focus:ring-[#c5a062]"
+                    />
+                    <div>
+                      <div className="text-sm text-zinc-200">{skill.label}</div>
+                      <div className="text-[10px] text-zinc-500">{skill.blurb}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          </SettingsSection>
           </>
           )}
 

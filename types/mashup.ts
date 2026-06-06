@@ -273,6 +273,20 @@ export interface UserSettings {
    */
   defaultMinimaxVideoModel?: string;
   /**
+   * V1.1.1-SKILLS-AUTO-USE: list of [agents.md](https://agents.md)
+   * skill names from `docs/research/higgsfield-skills/` that the
+   * user wants auto-injected into the system prompt on every AI
+   * generation. Each skill's body markdown is appended to the
+   * system prompt as an authoritative directive.
+   *
+   * Default: `['banana-pro-director']` (the SLCT + Skin Study
+   * director protocol) — it's small, focused, and immediately
+   * improves prompt quality for the user's crossover / cinematic
+   * use case. Users can disable it (or add others) in the
+   * Settings → AI Engine panel.
+   */
+  activeSkills?: string[];
+  /**
    * HIGGSFIELD-INTEGRATION: per-user default models for the
    * Higgsfield MCP-backed image + video generation. Populated by
    * the Settings → AI Engine → Higgsfield panel; consumed by
@@ -992,6 +1006,11 @@ export const defaultSettings: UserSettings = {
   // fires parallel submissions to all selected ones.
   videoProviders: ['minimax'] as ('leonardo' | 'minimax' | 'higgsfield' | 'mmx')[],
   defaultMinimaxVideoModel: 'MiniMax-Hailuo-2.3',
+  // V1.1.1-SKILLS-AUTO-USE: default to the banana-pro-director
+  // skill (the SLCT + Skin Study cinematic-direction protocol) for
+  // fresh installs. Users see the active list in Settings and
+  // can toggle on/off.
+  activeSkills: ['banana-pro-director'],
   antiAiLook: false,
   cameraAngle: undefined,
   higgsfieldMonthlyCreditCap: undefined,
