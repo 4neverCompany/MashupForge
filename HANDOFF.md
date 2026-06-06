@@ -656,7 +656,66 @@ remotely by `gh pr merge --delete-branch`).
 
 ---
 
-## 18. camofox-browser integration plan — DRAFT ready for Maurice sign-off
+## 18. camofox-browser integration — SHIPPED 2026-06-06 (PR #56, v1.1.0)
+
+**Version:** 1.0.9 → **1.1.0** (Minor-Bump, Maurice sign-off 2026-06-06 02:30 Berlin — was originally going to be v1.0.10, then corrected). Cargo requires 3-part semver.
+**Branch:** `feat/camofox-v1.1.0` (4 commits: Day 1-4) → squash `c9f9172` → admin-merged into `main` 2026-06-06 01:44 UTC.
+**PR:** [#56](https://github.com/4neverCompany/MashupForge/pull/56) — all 17 CI checks green.
+**Implementation:** solo, 4 sequential days (team engine blocked from launching new plans in this session — see `MEMORY.md` mavis spawn CLI bug + post-completion aborted-state).
+
+**Maurice-Sign-off 2026-06-06 02:22 Berlin (alle 4 blocking questions):**
+- Q1 → @askjo/camofox-browser **v1.11.2** (Default)
+- Q2 → `CAMOFOX_CRASH_REPORT_ENABLED=false` (Default; Telemetrie off)
+- Q3 → **Reuse-Mode** bestaetigt — Hermes-Agent nutzt camofox auf Maurice' Host,
+  persoenlich nicht. 3-Stufen-Algorithmus (9377 / Reuse-if-camofox / 9378-9380 /
+  Fallback) passt exakt.
+- Q7 → Bundle in NSIS, kein "Stealth Mode"-Toggle (Default)
+
+**What shipped in v1.1.0:**
+- **Tauri sidecar plumbing** (`src-tauri/src/lib.rs`): `CamofoxState` parallel zum
+  Node-Sidecar-State, 3-stage port discovery, 60s boot probe, 3-crash-in-5min
+  trip-wire flips `WEB_SEARCH_FALLBACK=true`, KILL_ON_JOB_CLOSE Job Object,
+  tray "Beenden" kills both sidecars.
+- **Fetch script** (`scripts/fetch-camofox-browser.ps1`): `npm pack
+  @askjo/camofox-browser@1.11.2` → extract → `src-tauri/resources/camofox/`.
+  Cached in `.cache/camofox` via `actions/cache@v4`.
+- **TypeScript client** (`lib/camofox/`): typed API, Zod-validated responses,
+  15s timeout, 3-retry exponential backoff (5xx/429 only, never 4xx),
+  `withCamofoxHealth` wrapper, PII scrubber for `@currentUser`-mentions,
+  dedicated `CamofoxHttp4xxError` marker.
+- **5 call-site integrations** wrapped in
+  `withCamofoxHealth(camofoxSearch, webSearch)`:
+  - `app/api/pi/prompt/route.ts:356` — Instagram trend enrichment
+  - `app/api/mmx/prompt/route.ts:197` — same pattern
+  - `app/api/nca/prompt/route.ts:204` — same pattern (nca is @deprecated)
+  - `app/api/ai/prompt/route.ts:388` — highest-CAPTCHA-pressure call-site,
+    PII-scrubbing wired in (currently a no-op since ai/prompt is anonymous)
+  - `app/api/web-search/route.ts:103,110` — standalone endpoint
+- **CI** (`.github/workflows/tauri-smoke-test.yml` + new
+  `.github/workflows/camofox-integration.yml`): `camofox_enabled: bool`
+  smoke-test input, manual boot/crash/port-conflict integration workflow.
+- **Docs:** new `docs/camofox-integration.md` (setup, runtime, first-run,
+  troubleshooting, what's intentionally NOT in v1.1.0).
+- **License:** new `THIRD_PARTY_LICENSES.md` — MIT (camofox-browser) +
+  MPL-2.0 (Camoufox engine), both AGPL-3.0-or-later compatible.
+- **Cleanup:** dead `webSearch()` removed from `lib/mmx-client.ts`.
+- **Tests:** 25 new vitest + 5 new Rust integration tests. Total suite
+  1313/1313 pass, 0 regressions.
+
+**Known limitations (intentionally deferred):**
+- **Snippet extraction** via `/extract` + JSON schema. `ai/prompt` enrichment
+  shows title-only lines.
+- **`@pinterest_search`** macro — upstream gap in v1.11.2 (R9 in the master
+  plan). `buildManualSearchUrl('pinterest', ...)` helper is the workaround
+  entry point; call-site is a follow-up.
+- **Tauri commands `camofox_status` + `set_camofox_fallback`** — not registered
+  in v1.1.0. The JS `trySetFallbackFlag()` is a no-op stub; the Rust side
+  flips the flag internally on crash detection. Small follow-up.
+- **macOS / Linux Tauri builds** don't bundle camofox (Windows is primary).
+
+**Per-day deliverables:** `I:\tmp\camofox-day{1,2,3,4}-deliverable.md`.
+
+**Pre-existing plan content (kept for the design history):**
 
 **Plan deliverable:** `I:\tmp\camofox-integration-plan.md` (282 lines, 10 sections, German).
 **Synthesized from:** 3 research tracks (api-research 16 KB, call-sites 270+ lines, sidecar-design 500+ lines).
