@@ -709,6 +709,22 @@ Social-Media-Trend-Features-in-v1.0.8.1) — Details im Plan §10.
 Sign-off: PR-Setup mit den 3 ersten Commits (Sidecar-Config, Typed-Client,
 Instagram-Integration) als Grundlage.
 
+**Maurice-Sign-off 2026-06-06 02:22 Berlin:** alle 4 blocking questions
+mit Defaults bestaetigt.
+- Q1 → v1.11.2 (Default)
+- Q2 → `CAMOFOX_CRASH_REPORT_ENABLED=false` (Default)
+- Q3 → Reuse-Mode bestaetigt — Hermes-Agent nutzt camofox, Maurice persoenlich
+  nicht. 3-Stufen-Algorithmus (9377 / Reuse-if-camofox / 9378-9380 / Fallback)
+  passt exakt: wenn Hermes camofox bereits auf 9377 hat, reused MashupForge
+  die Instanz und spart ~300 MB.
+- Q7 → Bundle drin, kein "Stealth Mode"-Toggle (Default)
+
+**Naechste Entscheidung (offen):** Versions-Nummer der naechsten Release
+mit camofox — v1.0.10 (kleines Patch-Add) oder v1.1.0 (naechstes Minor)?
+Cargo erfordert 3-Part-Semver, also kein 1.0.9.1. Camofox-Integration ist
+strukturell additiv (neuer Sidecar, neue Routes, neue Client-Library) und
+rechtfertigt eher Minor.
+
 ---
 
 *— end of handoff. You have the full picture. Build something good. —*
