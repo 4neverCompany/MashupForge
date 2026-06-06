@@ -1,5 +1,102 @@
 # Changelog
 
+## [1.1.1] — 2026-06-06 — multi-provider video + skills auto-use + 4 hotfixes
+
+### What changed
+- **bug 1 (pipeline trend search):** `/api/trending` now fans
+  out to camofox as a third source alongside SearXNG and Reddit.
+  v1.1.0's camofox wiring covered the prompt-routes and
+  `/api/web-search` but missed `/api/trending`, so pipeline-mode
+  trend research silently failed when SearXNG on
+  `localhost:34567` wasn't running (the typical case). camofox
+  fills the gap; existing dedup-by-headline-prefix absorbs the
+  overlap.
+- **bug 2 (multi-provider video):** the Studio's Animate button
+  no longer hard-codes Leonardo. The user can now pick any
+  combination of Leonardo, MiniMax (Hailuo 2.3 native),
+  Higgsfield, and the mmx CLI in Settings; the Animate button
+  fires parallel submissions to all selected providers via
+  `Promise.allSettled`, and every successful result is saved
+  to the gallery with its own `modelInfo.provider` badge.
+  - **new route:** `POST /api/minimax-video` + `GET
+    /api/minimax-video/[taskId]` — native direct-API path
+    to MiniMax's `/v1/video_generation` + `/v1/query/...` +
+    `/v1/files/retrieve`. Default model `MiniMax-Hailuo-2.3`.
+    Replaces the v1.1.0 implicit-Leonardo behavior. mmx CLI
+    remains in the stack as a parallel fallback path.
+  - **new helper:** `lib/video-providers.ts` exposes
+    `submitAndPollVideo(provider, opts)` as the single
+    dispatch point for submit + poll + status-shape-mapping
+    across all four providers. `pollIntervalMs` is exposed
+    so the test suite can crank the 5s default down to 5ms.
+  - **new settings field:** `videoProviders: ('leonardo' |
+    'minimax' | 'higgsfield' | 'mmx')[]`, default `['minimax']`.
+    Per-provider `defaultMinimaxVideoModel` field. `modelInfo.
+    provider` widened to include 'mmx'.
+  - **UI:** the v1.1.0 single-select "Leonardo Video Model"
+    dropdown is replaced with a multi-checkbox provider
+    picker + per-provider model dropdown. Each provider is
+    annotated with a cost hint so the user can see at a
+    glance which are expensive.
+- **bug 3 (camera-angle Clear button):** the Clear button in
+  the Settings → Camera Angle picker now actually clears the
+  field. v1.1.0 wired the picker to
+  `updateSettings({ cameraAngle: undefined })`, but
+  `mergeSettings` intentionally strips `undefined` patches
+  (PROP-010 contract — partial updates should leave
+  unmentioned fields alone), so the key was never removed.
+  New `clearSettings(keys: (keyof UserSettings)[])` primitive
+  on `useSettings` does the actual deletion. Threaded through
+  `MashupContext` → `SettingsModal` props. The MCSLA C:
+  fragment now correctly drops on the next render.
+- **bug 4 (skills auto-use):** the `[agents.md]` skills in
+  `docs/research/higgsfield-skills/` (banana-pro-director,
+  cinema-world-builder) are now auto-injected into the
+  system prompt for every AI generation, not just sitting
+  as dead docs. New `lib/skill-loader.ts` discovers the
+  `*-SKILL.md` files, parses frontmatter, and builds a
+  `## Active Skills` system-prompt fragment from the active
+  subset. `app/api/ai/prompt` reads `body.activeSkills` and
+  appends the fragment after `userSystem` + `focusBlock`.
+  Long-form reference variants (`-cinema-SKILL.md`, 100KB+)
+  are excluded by allowlist to keep the always-injected
+  set small. Settings → AI Engine gains an "Active Skills"
+  panel. Default: `['banana-pro-director']` (the SLCT + Skin
+  Study director protocol) for fresh installs.
+
+### Migration notes
+- Upgrades from v1.1.0: `defaultVideoModel` keeps its
+  meaning (the Leonardo model), but the Studio's Animate
+  button now defaults to MiniMax (Hailuo 2.3) instead of
+  Leonardo. Users who want Leonardo back: open Settings →
+  Default Video Settings, check "Leonardo.AI".
+- The `defaultMinimaxVideoModel` field is new. Existing
+  v1.1.0 users with no setting get the default
+  `MiniMax-Hailuo-2.3` on first run.
+- The `activeSkills` field is new. Existing v1.1.0 users
+  with no setting get `['banana-pro-director']` on first
+  run. Toggle on/off in Settings → AI Engine.
+- The video gen flow that previously returned 0 results
+  from the pipeline mode (because the trend research step
+  silently failed) is now expected to work on a typical
+  user machine that doesn't ship SearXNG.
+
+### Test coverage
+- 8 new tests for the camera-angle Clear wiring + the
+  `clearSettings` primitive.
+- 4 new tests for the camofox fan-out in `/api/trending`
+  (fold, degrade, dedup, empty-tiers).
+- 16 new tests for the `minimax-video` route pair
+  (submit, status, success, fail, 1026, 1004, file-retrieve,
+  502-on-no-file_id).
+- 12 new tests for `submitAndPollVideo` dispatch helper
+  (per-provider happy path + failure modes + parameter
+  forwarding).
+- 8 new tests for the skills loader + system-prompt
+  injection (loadAllSkills, buildSkillSystemBlock, route
+  forwarding).
+- **vitest 1364/1364, tsc clean.**
+
 ## [1.1.0] — 2026-06-06 — camofox-browser integration
 
 ### What changed

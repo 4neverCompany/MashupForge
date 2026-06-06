@@ -48,12 +48,14 @@ export interface GeneratedImage {
   postedTo?: string[];
   postError?: string;
   modelInfo?: {
-    // HIGGSFIELD-INTEGRATION: widened to include `'higgsfield'` for
-    // the new MCP-backed image provider. Each branch in
-    // useImageGeneration's provider switch writes one of the three
-    // values here so post-lifecycle / state-machine code can route
-    // error messages correctly.
-    provider: 'leonardo' | 'minimax' | 'higgsfield';
+    // V1.1.1-MULTI-PROVIDER-VIDEO: widened to include `'mmx'` for
+    // the multi-provider video path (the `mmx` provider in
+    // settings.videoProviders is the CLI-based fallback). The
+    // Studio's Animate button writes the matching provider id so
+    // the gallery badge + post-lifecycle code can route correctly.
+    // Existing entries (leonardo/minimax/higgsfield) keep their
+    // meanings; mmx is the new optional fourth value.
+    provider: 'leonardo' | 'minimax' | 'higgsfield' | 'mmx';
     modelId: string;
     modelName: string;
   };
@@ -239,6 +241,51 @@ export interface UserSettings {
   };
   defaultLeonardoModel: string;
   defaultVideoModel?: string;
+  /**
+   * V1.1.1-MULTI-PROVIDER-VIDEO: ordered list of providers the user
+   * wants to fire in parallel when they click "Animate" in the
+   * Studio. Replaces the implicit "always Leonardo" behavior of
+   * v1.1.0. Empty array means "no providers selected" — the Animate
+   * button surfaces an error in that case.
+   *
+   * Order is preserved for the toast / gallery sort: the first
+   * successful result lands first in the gallery grid.
+   *
+   * Default is `['minimax']` (Hailuo 2.3) — Maurice's v1.1.1
+   * direction. Users with persisted v1.1.0 settings (no
+   * `videoProviders` field) get this new default on first load
+   * after upgrade; the Settings modal lets them re-add Leonardo or
+   * Higgsfield if they want.
+   *
+   * `mmx` is the CLI-wrapper variant of `minimax` — included here
+   * so the Settings modal can offer both paths. In practice the
+   * user usually picks one or the other (not both); the Animate
+   * button honors whatever's checked.
+   */
+  videoProviders?: ('leonardo' | 'minimax' | 'higgsfield' | 'mmx')[];
+  /**
+   * V1.1.1-MULTI-PROVIDER-VIDEO: per-provider MiniMax video model
+   * slug (e.g. 'MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-02'). Lives
+   * alongside `defaultHiggsfieldVideoModel` and the legacy
+   * `defaultVideoModel` (Leonardo). Each provider has its own
+   * model picker so switching providers doesn't clobber the
+   * others.
+   */
+  defaultMinimaxVideoModel?: string;
+  /**
+   * V1.1.1-SKILLS-AUTO-USE: list of [agents.md](https://agents.md)
+   * skill names from `docs/research/higgsfield-skills/` that the
+   * user wants auto-injected into the system prompt on every AI
+   * generation. Each skill's body markdown is appended to the
+   * system prompt as an authoritative directive.
+   *
+   * Default: `['banana-pro-director']` (the SLCT + Skin Study
+   * director protocol) — it's small, focused, and immediately
+   * improves prompt quality for the user's crossover / cinematic
+   * use case. Users can disable it (or add others) in the
+   * Settings → AI Engine panel.
+   */
+  activeSkills?: string[];
   /**
    * HIGGSFIELD-INTEGRATION: per-user default models for the
    * Higgsfield MCP-backed image + video generation. Populated by
@@ -953,6 +1000,17 @@ export const defaultSettings: UserSettings = {
   defaultAnimationDuration: 3,
   defaultAnimationStyle: 'DYNAMIC',
   defaultVideoModel: 'kling-video-o-3',
+  // V1.1.1-MULTI-PROVIDER-VIDEO: new default is MiniMax (Hailuo 2.3)
+  // instead of the v1.1.0 implicit-Leonardo behavior. The Settings
+  // modal lets the user add or remove providers; the Animate button
+  // fires parallel submissions to all selected ones.
+  videoProviders: ['minimax'] as ('leonardo' | 'minimax' | 'higgsfield' | 'mmx')[],
+  defaultMinimaxVideoModel: 'MiniMax-Hailuo-2.3',
+  // V1.1.1-SKILLS-AUTO-USE: default to the banana-pro-director
+  // skill (the SLCT + Skin Study cinematic-direction protocol) for
+  // fresh installs. Users see the active list in Settings and
+  // can toggle on/off.
+  activeSkills: ['banana-pro-director'],
   antiAiLook: false,
   cameraAngle: undefined,
   higgsfieldMonthlyCreditCap: undefined,
@@ -1045,6 +1103,15 @@ export interface MashupContextType {
   progress: string;
   settings: UserSettings;
   updateSettings: (newSettings: Partial<UserSettings> | ((prev: UserSettings) => Partial<UserSettings>)) => void;
+  /** V1.1.1-CAMERA-ANGLE-CLEAR: explicit key-removal path. `updateSettings`
+   *  intentionally strips `undefined` patches (so a partial update can
+   *  say "leave this field alone" without clobbering defaults), which
+   *  means a `{ cameraAngle: undefined }` patch never actually clears
+   *  the field. The SettingsModal wires the CameraAnglePicker's "Clear"
+   *  button through this method so the MCSLA C: fragment actually
+   *  drops on the next render. Accepts an array so a future
+   *  "Reset advanced settings" UI can clear multiple keys in one shot. */
+  clearSettings: (keys: (keyof UserSettings)[]) => void;
   /** FEAT-002b S1: lifecycle of the debounced IndexedDB write so the
    *  SettingsModal can render a real save indicator (incl. red error
    *  pill on quota / disabled-storage failures). */

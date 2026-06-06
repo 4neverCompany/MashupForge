@@ -198,6 +198,11 @@ interface SettingsModalProps {
   updateSettings: (
     patch: Partial<UserSettings> | ((prev: UserSettings) => Partial<UserSettings>),
   ) => void;
+  /** V1.1.1-CAMERA-ANGLE-CLEAR: explicit key-removal path. `updateSettings`
+   *  can't actually delete a setting (the `mergeSettings` helper strips
+   *  `undefined` patches), so the CameraAnglePicker "Clear" button goes
+   *  through this instead. */
+  clearSettings: (keys: (keyof UserSettings)[]) => void;
   /** FEAT-002b S1: lifecycle of the debounced IDB save — drives the header pill. */
   saveState: SettingsSaveState;
   isDesktop: boolean | null;
@@ -219,6 +224,7 @@ export function SettingsModal({
   onClose,
   settings,
   updateSettings,
+  clearSettings,
   saveState,
   isDesktop,
   piStatus,
@@ -1920,7 +1926,21 @@ export function SettingsModal({
               <CameraAnglePicker
                 settings={settings}
                 value={settings.cameraAngle}
-                onChange={(next) => updateSettings({ cameraAngle: next })}
+                onChange={(next) => {
+                  if (next === undefined) {
+                    // V1.1.1-CAMERA-ANGLE-CLEAR: `mergeSettings` strips
+                    // undefined patches, so the previous wiring
+                    // `updateSettings({ cameraAngle: undefined })` did
+                    // nothing. Use the explicit clear primitive from
+                    // useSettings to actually drop the key. The
+                    // `useImageGeneration` consumer's truthy check
+                    // (`settings.cameraAngle ? ...`) then drops the
+                    // MCSLA C: fragment on the next render.
+                    clearSettings(['cameraAngle']);
+                  } else {
+                    updateSettings({ cameraAngle: next });
+                  }
+                }}
               />
             </div>
           </SettingsSection>
@@ -1931,7 +1951,7 @@ export function SettingsModal({
             title="Default Video Settings"
             subtitle="Frame count, animation style, and resolution applied to every new video idea."
           >
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
               <div className="space-y-2">
                 <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Default Duration</label>
                 <select
@@ -1955,19 +1975,116 @@ export function SettingsModal({
                   <option value="CINEMATIC">Cinematic</option>
                 </select>
               </div>
-              <div className="space-y-2">
-                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Leonardo Video Model</label>
-                <select
-                  value={settings.defaultVideoModel || 'kling-3.0'}
-                  onChange={(e) => updateSettings({ defaultVideoModel: e.target.value })}
-                  className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
-                >
-                  <option value="kling-video-o-3">Kling O3 Omni (New)</option>
-                  <option value="kling-3.0">Kling 3.0 (Pro Quality)</option>
-                  <option value="ray-v2">Ray V2 (High Quality)</option>
-                  <option value="ray-v1">Ray V1 (Standard)</option>
-                </select>
+            </div>
+
+            {/* V1.1.1-MULTI-PROVIDER-VIDEO: per-provider picker.
+                Replaces the v1.1.0 single-select "Leonardo Video
+                Model" dropdown. The user can check one or more
+                providers; the Studio's Animate button fans out to
+                all selected ones in parallel. Each provider has
+                its own model field so switching providers doesn't
+                clobber the others' choice. */}
+            <div className="space-y-4 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60 mt-4">
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">
+                  Active Video Providers
+                </label>
+                <p className="text-[10px] text-zinc-500 mb-3 leading-relaxed">
+                  Pick one or more. The Studio fires parallel
+                  submissions to every selected provider and saves
+                  all successful results to the gallery.
+                </p>
+                {(['leonardo', 'minimax', 'higgsfield', 'mmx'] as const).map((p) => {
+                  const active = (settings.videoProviders ?? ['minimax']).includes(p);
+                  const labels: Record<typeof p, { name: string; cost: string }> = {
+                    leonardo: { name: 'Leonardo.AI', cost: '$$$ (credits)' },
+                    minimax: { name: 'MiniMax (Hailuo 2.3)', cost: '$ (Token Plan)' },
+                    higgsfield: { name: 'Higgsfield MCP', cost: '$$ (credits)' },
+                    mmx: { name: 'mmx CLI (Hailuo via shell)', cost: '$ (Token Plan)' },
+                  };
+                  return (
+                    <label key={p} className="flex items-center gap-2 py-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={active}
+                        onChange={(e) => {
+                          const current = settings.videoProviders ?? ['minimax'];
+                          const next = e.target.checked
+                            ? Array.from(new Set([...current, p]))
+                            : current.filter((x) => x !== p);
+                          updateSettings({ videoProviders: next });
+                        }}
+                        className="h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-[#c5a062] focus:ring-[#c5a062]"
+                      />
+                      <span className="text-sm text-zinc-200">{labels[p].name}</span>
+                      <span className="text-[10px] text-zinc-500">{labels[p].cost}</span>
+                    </label>
+                  );
+                })}
               </div>
+
+              {/* Per-provider model picker. Renders only for the
+                  providers the user has selected, so the UI stays
+                  scannable. The mmx picker just defaults to
+                  Hailuo 2.3 (mmx is a CLI wrapper around that
+                  same model). */}
+              {(settings.videoProviders ?? ['minimax']).includes('leonardo') && (
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Leonardo Video Model</label>
+                  <select
+                    value={settings.defaultVideoModel || 'kling-3.0'}
+                    onChange={(e) => updateSettings({ defaultVideoModel: e.target.value })}
+                    className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
+                  >
+                    <option value="kling-video-o-3">Kling O3 Omni (New)</option>
+                    <option value="kling-3.0">Kling 3.0 (Pro Quality)</option>
+                    <option value="ray-v2">Ray V2 (High Quality)</option>
+                    <option value="ray-v1">Ray V1 (Standard)</option>
+                    <option value="seedance-2.0">Seedance 2.0</option>
+                    <option value="seedance-2.0-fast">Seedance 2.0 Fast</option>
+                    <option value="veo-3.1">Veo 3.1</option>
+                    <option value="VEO3_1FAST">Veo 3.1 Fast</option>
+                  </select>
+                </div>
+              )}
+              {(settings.videoProviders ?? ['minimax']).includes('minimax') && (
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">MiniMax Video Model</label>
+                  <select
+                    value={settings.defaultMinimaxVideoModel || 'MiniMax-Hailuo-2.3'}
+                    onChange={(e) => updateSettings({ defaultMinimaxVideoModel: e.target.value })}
+                    className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
+                  >
+                    <option value="MiniMax-Hailuo-2.3">Hailuo 2.3 (Latest, recommended)</option>
+                    <option value="MiniMax-Hailuo-02">Hailuo 02 (Mature)</option>
+                    <option value="T2V-01-Director">T2V-01 Director</option>
+                    <option value="T2V-01">T2V-01</option>
+                  </select>
+                </div>
+              )}
+              {(settings.videoProviders ?? ['minimax']).includes('higgsfield') && (
+                <div className="space-y-2">
+                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Higgsfield Video Model</label>
+                  <select
+                    value={settings.defaultHiggsfieldVideoModel || 'seedance_2_0'}
+                    onChange={(e) => updateSettings({ defaultHiggsfieldVideoModel: e.target.value })}
+                    className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
+                  >
+                    <option value="seedance_2_0">Seedance 2.0 (Flagship)</option>
+                    <option value="seedance1_5">Seedance 1.5 Pro</option>
+                    <option value="kling3_0">Kling v3.0</option>
+                    <option value="veo3_1">Google Veo 3.1</option>
+                    <option value="veo3_1_lite">Google Veo 3.1 Lite</option>
+                    <option value="wan2_6">Wan 2.6</option>
+                    <option value="minimax_hailuo">MiniMax Hailuo 02</option>
+                  </select>
+                </div>
+              )}
+              {(settings.videoProviders ?? ['minimax']).includes('mmx') && (
+                <p className="text-[10px] text-zinc-500 leading-relaxed">
+                  mmx uses <code className="text-zinc-400">MiniMax-Hailuo-2.3</code> by default. Install the mmx CLI on the server and ensure it is on PATH.
+                </p>
+              )}
             </div>
           </SettingsSection>
           </>
@@ -2335,6 +2452,57 @@ export function SettingsModal({
                 <RefreshCw className="w-3 h-3" />
                 Reset to Default Agent Personality
               </button>
+            </div>
+          </SettingsSection>
+
+          {/* V1.1.1-SKILLS-AUTO-USE: toggle list of [agents.md] skills
+              from docs/research/higgsfield-skills/. The list is
+              hard-coded here (the loader discovers them on the
+              server, but the Settings UI shows the curated set
+              we ship with v1.1.1). The user can enable/disable
+              each; the active list is forwarded to /api/ai/prompt
+              on every stream so the model sees the skill bodies
+              as authoritative directives. */}
+          <SettingsSection
+            icon={Sparkles}
+            title="Active Skills"
+            subtitle="Auto-inject skill bodies into the system prompt. The Studio will use them as authoritative directives for every generation."
+          >
+            <div className="space-y-2 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
+              {[
+                {
+                  name: 'banana-pro-director',
+                  label: 'Banana Pro Director (SLCT + Skin Study)',
+                  blurb: 'Cinematic direction protocol — Surface, Lumina, Capture, Texture layers. Strong for cinematic realism.',
+                },
+                {
+                  name: 'cinema-world-builder',
+                  label: 'Cinema World Builder',
+                  blurb: 'World-building and lighting recipes for cinematic scenes.',
+                },
+              ].map((skill) => {
+                const active = (settings.activeSkills ?? ['banana-pro-director']).includes(skill.name);
+                return (
+                  <label key={skill.name} className="flex items-start gap-2 py-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      onChange={(e) => {
+                        const current = settings.activeSkills ?? ['banana-pro-director'];
+                        const next = e.target.checked
+                          ? Array.from(new Set([...current, skill.name]))
+                          : current.filter((x) => x !== skill.name);
+                        updateSettings({ activeSkills: next });
+                      }}
+                      className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900 text-[#c5a062] focus:ring-[#c5a062]"
+                    />
+                    <div>
+                      <div className="text-sm text-zinc-200">{skill.label}</div>
+                      <div className="text-[10px] text-zinc-500">{skill.blurb}</div>
+                    </div>
+                  </label>
+                );
+              })}
             </div>
           </SettingsSection>
           </>

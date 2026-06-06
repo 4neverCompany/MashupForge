@@ -45,6 +45,7 @@ import { streamText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModel } from 'ai';
 import { getErrorMessage } from '@/lib/errors';
+import { buildSkillSystemBlock } from '@/lib/skill-loader';
 import {
   getTextModelParams,
   resolveTextModel,
@@ -317,12 +318,25 @@ export async function POST(req: Request): Promise<Response> {
   const cleanGenres = sanitizeStringArray(genres);
   const focusBlock = buildFocusBlock(cleanNiches, cleanGenres);
   const userSystem = typeof systemPrompt === 'string' ? systemPrompt.trim() : '';
-  // Ordering matches the pi route: directive sets the role, user prompt
-  // refines it, focus block targets niches. BASE_SYSTEM_PROMPT anchors
-  // the whole stack so output formatting (JSON-only, no fences) stays
-  // consistent across providers.
+  // V1.1.1-SKILLS-AUTO-USE: pull the user's active skills from the
+  // request body. The frontend reads `settings.activeSkills` and
+  // passes the list here so we don't have to round-trip the IDB
+  // store on the server. Build the system-prompt fragment lazily
+  // (file I/O for the loader) and append to the system stack.
+  const activeSkillsRaw = Array.isArray((body as { activeSkills?: unknown }).activeSkills)
+    ? (body as { activeSkills: unknown[] }).activeSkills
+    : [];
+  const activeSkills = activeSkillsRaw.filter(
+    (s): s is string => typeof s === 'string' && s.length > 0,
+  );
+  const skillBlock = await buildSkillSystemBlock(activeSkills);
+  // Ordering matches the pi route: directive sets the role, user
+  // prompt refines it, focus block targets niches, skills layer
+  // authoritative directives on top. BASE_SYSTEM_PROMPT anchors
+  // the whole stack so output formatting (JSON-only, no fences)
+  // stays consistent across providers.
   const system =
-    [BASE_SYSTEM_PROMPT, directive, userSystem, focusBlock]
+    [BASE_SYSTEM_PROMPT, directive, userSystem, focusBlock, skillBlock]
       .filter((s): s is string => typeof s === 'string' && s.length > 0)
       .join('\n\n') || undefined;
 

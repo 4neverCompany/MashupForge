@@ -111,6 +111,15 @@ export interface StreamAIOptions {
    * never fires.
    */
   onSources?: (sources: AiSource[]) => void;
+  /**
+   * V1.1.1-SKILLS-AUTO-USE: list of skill names from
+   * `docs/research/higgsfield-skills/` to inject into the system
+   * prompt for this stream. The frontend reads
+   * `settings.activeSkills` and forwards the list here; the server
+   * route loads + concatenates the skill bodies before calling
+   * the model. Unknown names are silently ignored.
+   */
+  activeSkills?: string[];
 }
 
 /**
@@ -159,6 +168,12 @@ export async function* streamAI(
       niches: options?.niches,
       genres: options?.genres,
       model: options?.model,
+      // V1.1.1-SKILLS-AUTO-USE: forward the active skill list to
+      // the server so it can load + inject the skill bodies into
+      // the system prompt. Pi and nca routes ignore this field
+      // (they build the system prompt server-side from their own
+      // state), but vercel-ai honors it.
+      activeSkills: options?.activeSkills,
     }),
     signal: options?.signal,
   });
