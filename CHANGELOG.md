@@ -1,77 +1,23 @@
 # Changelog
 
-All notable changes to MashupForge are documented in this file.
+## [Unreleased] — v1.1.0 camofox-browser integration
 
+> CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): final v1.1.0 entry will consolidate
+> the 4 days of work on Day 4. This section grows incrementally.
 
-### 🎬 Highlights
-
-
-> Hand-curated release notes. The auto-generated `### Added` / `### Fixed`
-> sections below come from conventional-commit subjects; the **Highlights**
-> block is the bit the user actually wants to read.
-
-#### 🎬 Highlights
-
-### Higgsfield AI is now a peer of Leonardo, not a replacement
-
-MashupForge now ships with **Higgsfield** as a second image + video generation backend. Each user connects their own Higgsfield account via OAuth — no shared API key, no per-user metering headaches, no leaked-key support tickets. The user pays for their own generations through their existing Higgsfield subscription.
-
-The integration fronts **30+ models** through a curated 7-image + 7-video surface in the Studio picker, and exposes 7 dedicated MCP tools (image gen, video gen, soul character training, cinema i2v, viral clip generator, virality predictor, video analyzer) via the same OAuth session.
-
-**Why MCP, not REST+SDK?** The official Higgsfield YouTube tutorial (Julian Ivanov, "Claude kann jetzt Hollywood-Filme generieren") demonstrates ONLY the MCP path. Each user OAuths in with their own subscription; the server registers a public OAuth client via dynamic client registration on first connect. We preserve this as a clean multi-tenant-from-day-1 architecture — no shared key on the server, future SaaS path preserved.
-
-### What this enables for users
-
-- **4 new curated image models**: Nano Banana Pro (default, 4K-capable, <10¢/image), FLUX.2, GPT Image 2, Higgsfield Soul V2
-- **3 new curated video models**: Seedance 2.0 (default, the "Hollywood film" model the YouTube video showcased), Kling v3.0, Veo 3.1
-- **3-step character workflow** (Phase 2): lock character with feedback loop → multi-angle template (front/side/back/hands/nails) → scene still as image → video. Saves characters as "Soul Packs" reusable across video clips.
-- **Per-user credit isolation**: each user has their own plan (Starter 200 / Plus 1,000 / Ultra 3,000 credits/mo). Typical weekly MashupForge run (5 images + 2 short videos) ≈ 150-200 credits — fits comfortably in the Plus plan.
-
-### What's NOT in this release
-
-The following are deferred to **v1.0.5+** (already researched, files in `docs/research/higgsfield-skills/`):
-
-- **SLCT prompt framework** integration in `lib/image-prompt-builder.ts` (Surface / Lumina / Capture / Texture 4-layer structure for anti-AI-look image prompts)
-- **MCSLA prompt formula** for video (Model · Camera · Subject · Look · Action)
-- **Camera angles catalog** (14 angles from `camera-angles.md`: close-up 85mm, low angle 30°, OTS, POV, etc.) as a Settings picker
-- **Per-cycle credit budget enforcement** (cap + running total + low-credit banner)
-- **Full "long-form video with recurring character" feature** (the 3-step character template workflow above, end-to-end)
-
-#### 🔧 Breaking changes
-
-None. The integration is purely additive:
-
-- New `imageProvider: 'higgsfield'` value in `GenerateOptions` (existing `'leonardo'` and `'minimax'` unchanged)
-- New optional `UserSettings` fields: `defaultHiggsfieldImageModel`, `defaultHiggsfieldVideoModel`, `higgsfieldConnected`
-- New OAuth keys in `config.json` (auto-populated, transparent to user)
-
-#### 📋 Migration notes
-
-**No action required for existing users.** Leonardo remains the default image provider. To enable Higgsfield:
-
-1. Open **Settings → AI Engine** in the Studio
-2. Click **Connect Higgsfield** (OAuth flow)
-3. Grant permissions on the Higgsfield account
-4. Pick default image + video models
-5. The Higgsfield option appears in the per-idea provider picker
-
-**Power users** can browse the full 35-model catalog via `npx @higgsfield/cli model list` (the CLI shares the same OAuth account).
-
-#### 🧪 Test summary
-
-- **1,243/1,243 tests pass** (up from 1,198 — added 45 new Higgsfield tests)
-- TypeScript clean
-- `next build` succeeds, all routes within 300KB gzipped first-load JS budget
-- Studio: 218.2KB · Root: 214.9KB · Login: 197.1KB
-
-#### 📚 Research artifacts (saved for future iterations)
-
-- `docs/research/HIGGSFIELD-RESEARCH.md` — 713 lines, 13 sections (full YouTube transcript + Skills analysis)
-- `docs/research/higgsfield-skills/` — 7 files (~130KB) of the Banana Pro Director + Cinema World Builder skills that informed this design
-
-#### 🙏 Credits
-
-Higgsfield MCP integration inspired by Julian Ivanov's YouTube tutorial on the Higgsfield + Claude + Seedance 2.0 workflow. The "Banana Pro Director" and "Cinema World Builder" Skills from the public Higgsfield skill community informed the default model picks and the deferred v1.0.5 prompt engineering work.
+### Day 1 (2026-06-06) — Tauri sidecar plumbing
+- **camofox:** add `scripts/fetch-camofox-browser.ps1` to fetch + cache
+  `@askjo/camofox-browser@1.11.2` from npm into `src-tauri/resources/camofox/`
+- **camofox:** add Rust lifecycle in `src-tauri/src/lib.rs` — `CamofoxState`,
+  `WEB_SEARCH_FALLBACK` atomic, 3-stage port discovery (9377 → reuse →
+  9378-9380 → fallback), boot-probe with 60s timeout, KILL_ON_JOB_CLOSE
+  Job Object, tray "Beenden" kills both sidecars
+- **camofox:** add 1-line CSP diff to `tauri.conf.json` for ports
+  9377-9380
+- **ci:** add `Fetch camofox-browser sidecar` step + `actions/cache@v4`
+  to `.github/workflows/tauri-windows.yml` (after Node fetch)
+- **tests:** add 5 Rust integration tests in `src-tauri/tests/camofox_lifecycle.rs`
+  (1 ignored — see test TODOs)
 
 ---
 ## [1.0.4] — 2026-06-03
