@@ -167,5 +167,25 @@ export function useSettings() {
     });
   }, []);
 
-  return { settings, updateSettings, isSettingsLoaded, saveState };
+  // V1.1.1-CAMERA-ANGLE-CLEAR: explicit key-removal path. `mergeSettings`
+  // intentionally strips `undefined` patches (PROP-010 contract — a
+  // partial update that explicitly says "no value" is treated as
+  // "don't touch this field"), so passing `{ cameraAngle: undefined }`
+  // never actually clears the field. The CameraAnglePicker passes
+  // `undefined` to mean "clear"; the SettingsModal wiring translates
+  // that into a `clearSettings` call which actually drops the key.
+  //
+  // Multiple keys can be cleared in a single call so a future "Reset
+  // all advanced settings" button can use the same primitive.
+  const clearSettings = useCallback((keys: (keyof UserSettings)[]) => {
+    setSettings((prev) => {
+      const next = { ...prev } as Record<string, unknown>;
+      for (const key of keys) {
+        delete next[key as string];
+      }
+      return next as unknown as UserSettings;
+    });
+  }, []);
+
+  return { settings, updateSettings, clearSettings, isSettingsLoaded, saveState };
 }

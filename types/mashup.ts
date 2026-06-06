@@ -1045,6 +1045,15 @@ export interface MashupContextType {
   progress: string;
   settings: UserSettings;
   updateSettings: (newSettings: Partial<UserSettings> | ((prev: UserSettings) => Partial<UserSettings>)) => void;
+  /** V1.1.1-CAMERA-ANGLE-CLEAR: explicit key-removal path. `updateSettings`
+   *  intentionally strips `undefined` patches (so a partial update can
+   *  say "leave this field alone" without clobbering defaults), which
+   *  means a `{ cameraAngle: undefined }` patch never actually clears
+   *  the field. The SettingsModal wires the CameraAnglePicker's "Clear"
+   *  button through this method so the MCSLA C: fragment actually
+   *  drops on the next render. Accepts an array so a future
+   *  "Reset advanced settings" UI can clear multiple keys in one shot. */
+  clearSettings: (keys: (keyof UserSettings)[]) => void;
   /** FEAT-002b S1: lifecycle of the debounced IndexedDB write so the
    *  SettingsModal can render a real save indicator (incl. red error
    *  pill on quota / disabled-storage failures). */

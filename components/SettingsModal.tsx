@@ -198,6 +198,11 @@ interface SettingsModalProps {
   updateSettings: (
     patch: Partial<UserSettings> | ((prev: UserSettings) => Partial<UserSettings>),
   ) => void;
+  /** V1.1.1-CAMERA-ANGLE-CLEAR: explicit key-removal path. `updateSettings`
+   *  can't actually delete a setting (the `mergeSettings` helper strips
+   *  `undefined` patches), so the CameraAnglePicker "Clear" button goes
+   *  through this instead. */
+  clearSettings: (keys: (keyof UserSettings)[]) => void;
   /** FEAT-002b S1: lifecycle of the debounced IDB save — drives the header pill. */
   saveState: SettingsSaveState;
   isDesktop: boolean | null;
@@ -219,6 +224,7 @@ export function SettingsModal({
   onClose,
   settings,
   updateSettings,
+  clearSettings,
   saveState,
   isDesktop,
   piStatus,
@@ -1920,7 +1926,21 @@ export function SettingsModal({
               <CameraAnglePicker
                 settings={settings}
                 value={settings.cameraAngle}
-                onChange={(next) => updateSettings({ cameraAngle: next })}
+                onChange={(next) => {
+                  if (next === undefined) {
+                    // V1.1.1-CAMERA-ANGLE-CLEAR: `mergeSettings` strips
+                    // undefined patches, so the previous wiring
+                    // `updateSettings({ cameraAngle: undefined })` did
+                    // nothing. Use the explicit clear primitive from
+                    // useSettings to actually drop the key. The
+                    // `useImageGeneration` consumer's truthy check
+                    // (`settings.cameraAngle ? ...`) then drops the
+                    // MCSLA C: fragment on the next render.
+                    clearSettings(['cameraAngle']);
+                  } else {
+                    updateSettings({ cameraAngle: next });
+                  }
+                }}
               />
             </div>
           </SettingsSection>

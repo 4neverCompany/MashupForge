@@ -179,14 +179,15 @@ import { showToast } from '@/components/Toast';
 export function MainContent() {
   const { logout } = useAuth();
   const { isDesktop, credentials: desktopCreds } = useDesktopConfig();
-  const { 
-    images, 
-    savedImages, 
+  const {
+    images,
+    savedImages,
     collections,
-    isGenerating, 
-    progress, 
+    isGenerating,
+    progress,
     settings,
     updateSettings,
+    clearSettings,
     settingsSaveState,
     generateImages,
     generatePostContent,
@@ -5014,6 +5015,7 @@ export function MainContent() {
           onClose={() => setShowSettings(false)}
           settings={settings}
           updateSettings={updateSettings}
+          clearSettings={clearSettings}
           saveState={settingsSaveState}
           isDesktop={isDesktop}
           piStatus={piStatus}
