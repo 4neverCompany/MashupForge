@@ -68,6 +68,57 @@ const CAMOFOX_PORTS: [u16; 4] = [9377, 9378, 9379, 9380];
 const CAMOFOX_CRASH_LIMIT: u32 = 3;
 const CAMOFOX_CRASH_WINDOW_SECS: u64 = 300;
 
+// ---- V1.1.3-CORS (2026-06-07): CORS origin whitelist for the sidecar ----
+//
+// We forward a `CAMOFOX_CORS_ORIGINS` env-var to the sidecar process so
+// the same wire is ready when upstream `@askjo/camofox-browser` adds
+// CORS support. As of v1.11.2 the upstream server.js binds to
+// 127.0.0.1 only and emits NO CORS headers, so the Vercel-Web build
+// still needs the CORS-proxy workaround documented in
+// `docs/camofox-standalone-install.md`. The Tauri-WebView build can
+// hit the sidecar directly because its WebView2 origin is permissive
+// about loopback fetches (CSP-gated, not CORS-gated) — see
+// `src-tauri/tauri.conf.json` for the existing `connect-src` rule.
+//
+// SECURITY: defaults to a strict 2-origin whitelist (no `*`). The
+// rationale is that 127.0.0.1 is reachable from any browser tab the
+// user has open, and `*` would let a malicious page on any origin
+// instruct the user's local camofox instance to navigate and
+// exfiltrate state.
+const DEFAULT_CAMOFOX_CORS_ORIGINS: &str = "http://localhost:3000,https://mashupforge.vercel.app";
+
+/// Parse the `CAMOFOX_CORS_ORIGINS` env-var. Returns the default
+/// whitelist when the env-var is unset. Explicitly rejects `*` (the
+/// wildcard) and any entry that isn't a syntactically-valid http(s)
+/// origin — both for the security reasons above.
+fn resolve_camofox_cors_origins() -> String {
+    let raw = std::env::var("CAMOFOX_CORS_ORIGINS")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_CAMOFOX_CORS_ORIGINS.to_string());
+    let sanitized: Vec<String> = raw
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .filter(|s| s != "*")
+        .filter(|s| {
+            // Accept only http:// or https:// origins. Anything else
+            // (file://, null, empty scheme) is dropped.
+            s.starts_with("http://") || s.starts_with("https://")
+        })
+        .collect();
+    if sanitized.is_empty() {
+        // Last-resort fallback: if the env-var was set but every
+        // entry was rejected (e.g. `*` only), emit the default
+        // whitelist rather than an empty string. The sidecar would
+        // otherwise default-deny and the Web build would silently
+        // 403.
+        DEFAULT_CAMOFOX_CORS_ORIGINS.to_string()
+    } else {
+        sanitized.join(",")
+    }
+}
+
 /// Kill the Node sidecar process (if any). Used by both the tray's "Quit"
 /// menu item and any future explicit-shutdown path. Idempotent — safe to
 /// call when no sidecar exists or the mutex is poisoned.
@@ -1208,6 +1259,20 @@ pub fn run() {
                         .current_dir(&resource_dir)
                         .env("CAMOFOX_PORT", port.to_string())
                         .env("CAMOFOX_BIND_ADDRESS", "127.0.0.1")
+                        // V1.1.3-CORS: forward the parsed CORS
+                        // origin whitelist to the sidecar. As of
+                        // `@askjo/camofox-browser@1.11.2` the
+                        // upstream server.js does not read this env
+                        // var, but the wire is in place for the
+                        // version that will (PR upstream tracked
+                        // under docs/camofox-standalone-install.md).
+                        // The Tauri build doesn't need it (WebView2
+                        // allows loopback fetches without CORS), but
+                        // the standalone-Install path uses it once
+                        // the CORS-proxy workaround in
+                        // `scripts/camofox-cors-proxy.mjs` is in
+                        // front.
+                        .env("CAMOFOX_CORS_ORIGINS", resolve_camofox_cors_origins())
                         // CAMOFOX-CAMOUFOX-1.1.0: telemetry off (Maurice
                         // sign-off Q2). Default ON in the upstream
                         // package — crash reports go to
@@ -1557,5 +1622,13 @@ pub mod camofox_test {
 
     pub fn record_camofox_crash_for_test() -> u32 {
         super::record_camofox_crash()
+    }
+
+    // V1.1.3-CORS: re-export the CORS-origin parser so the
+    // integration test crate can exercise the env-var filter
+    // logic (rejects `*`, validates http(s) scheme, falls back
+    // to the default whitelist on empty).
+    pub fn resolve_camofox_cors_origins_for_test() -> String {
+        super::resolve_camofox_cors_origins()
     }
 }
