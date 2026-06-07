@@ -16,6 +16,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
+import * as mmxClient from '@/lib/mmx-client';
 import { __setSpawnForTests } from '@/lib/mmx-client';
 import { MinimaxTextAdapter } from '@/lib/providers/minimax/text-adapter';
 import { MinimaxVideoAdapter } from '@/lib/providers/minimax/video-adapter';
@@ -206,5 +207,33 @@ describe('MinimaxVideoAdapter (Hailuo 2.3)', () => {
   it('isAvailable mirrors mmx probe', async () => {
     spawnMock.mockReturnValue(makeChild({ stdout: 'mmx 1.0' }) as never);
     expect(await videoAdapter.isAvailable()).toBe(true);
+  });
+});
+
+describe('MinimaxVideoAdapter.generateVideo — timeout default (spec 60s)', () => {
+  it('applies 60s default when opts.timeoutMs is undefined', async () => {
+    const spy = vi.spyOn(mmxClient, 'generateVideo').mockResolvedValueOnce({
+      taskId: 'hailuo-default-1',
+    } as never);
+    await videoAdapter.generateVideo({ prompt: 'a slow zoom' });
+    expect(spy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ timeoutMs: 60_000 }),
+    );
+    spy.mockRestore();
+  });
+
+  it('respects opts.timeoutMs override when set', async () => {
+    const spy = vi.spyOn(mmxClient, 'generateVideo').mockResolvedValueOnce({
+      taskId: 'hailuo-override-1',
+    } as never);
+    await videoAdapter.generateVideo({ prompt: 'a slow zoom', timeoutMs: 5000 });
+    expect(spy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
+    spy.mockRestore();
   });
 });

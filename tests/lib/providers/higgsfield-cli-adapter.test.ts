@@ -14,6 +14,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
+import * as cliUtils from '@/lib/providers/cli-utils';
 import {
   __setSpawnForTests,
   __setLogForTests,
@@ -239,5 +240,33 @@ describe('HiggsfieldCliAdapter.isAvailable', () => {
     (fresh as unknown as { resolvedBinary: string | null; resolveAttempted: boolean }).resolveAttempted = true;
     (fresh as unknown as { resolvedBinary: string | null; resolveAttempted: boolean }).resolvedBinary = null;
     expect(await fresh.isAvailable()).toBe(false);
+  });
+});
+
+describe('HiggsfieldCliAdapter.generateVideo — timeout default (spec 60s)', () => {
+  it('applies 60s default when opts.timeoutMs is undefined', async () => {
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { url: 'https://cdn.higgsfield.ai/clip.mp4', request_id: 'r-1', duration: 8 },
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    await adapter.generateVideo({ prompt: 'a sunrise', durationSec: 8 });
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 60_000 }));
+    spy.mockRestore();
+  });
+
+  it('respects opts.timeoutMs override when set', async () => {
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { url: 'https://cdn.higgsfield.ai/clip.mp4', request_id: 'r-2', duration: 8 },
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    await adapter.generateVideo({ prompt: 'a sunrise', durationSec: 8, timeoutMs: 5000 });
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 5000 }));
+    spy.mockRestore();
   });
 });

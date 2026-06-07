@@ -18,6 +18,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
+import * as mmxClient from '@/lib/mmx-client';
 import { __setSpawnForTests } from '@/lib/mmx-client';
 import { MmxCliAdapter } from '@/lib/providers/mmx/cli-adapter';
 import {
@@ -178,5 +179,33 @@ describe('MmxCliAdapter.isAvailable', () => {
       makeChild({ errorOnSpawn: new Error('not found') }) as never,
     );
     expect(await adapter.isAvailable()).toBe(false);
+  });
+});
+
+describe('MmxCliAdapter.generateVideo — timeout default (spec 60s)', () => {
+  it('applies 60s default when opts.timeoutMs is undefined', async () => {
+    const spy = vi.spyOn(mmxClient, 'generateVideo').mockResolvedValueOnce({
+      taskId: 'task-1',
+    } as never);
+    await adapter.generateVideo({ prompt: 'a sunrise' });
+    expect(spy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ timeoutMs: 60_000 }),
+    );
+    spy.mockRestore();
+  });
+
+  it('respects opts.timeoutMs override when set', async () => {
+    const spy = vi.spyOn(mmxClient, 'generateVideo').mockResolvedValueOnce({
+      taskId: 'task-2',
+    } as never);
+    await adapter.generateVideo({ prompt: 'a sunrise', timeoutMs: 5000 });
+    expect(spy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
+    spy.mockRestore();
   });
 });

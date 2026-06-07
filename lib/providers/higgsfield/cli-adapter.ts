@@ -44,6 +44,7 @@ import {
 } from '../interface';
 import {
   binaryExists,
+  clampTimeout,
   cliInvoke,
   isBinaryAvailable,
   pushFlag,
@@ -184,11 +185,11 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
       provider: this.name,
       binary: bin,
       args,
-      // Video gen is the slow path; allow up to 5 minutes by default
-      // (overridable per-call). 60s spec cap applies to image calls
-      // and to "fast" video models — slow models (kling, veo) need
-      // more headroom or the timeout fires before the queue returns.
-      timeoutMs: opts.timeoutMs ?? 5 * 60 * 1000,
+      // Video gen is the slow path; clampTimeout applies the spec
+      // 60s default when no override is supplied. Callers needing
+      // longer (e.g. slow models behind a queue) pass an explicit
+      // `opts.timeoutMs` and clampTimeout honours it.
+      timeoutMs: clampTimeout(opts.timeoutMs),
       signal: opts.signal,
     };
 

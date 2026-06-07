@@ -36,6 +36,7 @@ import {
   MmxSpawnError,
   type MmxVideoResult,
 } from '../../mmx-client';
+import { clampTimeout } from '../cli-utils';
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -103,7 +104,9 @@ export class MinimaxVideoAdapter implements ProviderAdapter {
           noWait: true,
         },
         {
-          timeoutMs: opts.timeoutMs ?? 5 * 60 * 1000,
+          // 60s spec default; explicit override via opts.timeoutMs is
+          // honoured (no upper clamp) so slow models can opt in.
+          timeoutMs: clampTimeout(opts.timeoutMs),
           signal: opts.signal,
         },
       );

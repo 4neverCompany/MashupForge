@@ -44,6 +44,7 @@ import {
   type MmxImageResult,
   type MmxVideoResult,
 } from '../../mmx-client';
+import { clampTimeout } from '../cli-utils';
 
 // ---------------------------------------------------------------------------
 // Zod schemas for the inputs we accept
@@ -170,7 +171,9 @@ export class MmxCliAdapter implements ProviderAdapter {
           noWait: true,
         },
         {
-          timeoutMs: opts.timeoutMs ?? 5 * 60 * 1000,
+          // 60s spec default; explicit override via opts.timeoutMs is
+          // honoured (no upper clamp) so slow models can opt in.
+          timeoutMs: clampTimeout(opts.timeoutMs),
           signal: opts.signal,
         },
       );

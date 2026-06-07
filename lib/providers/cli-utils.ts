@@ -46,6 +46,24 @@ import {
  *  `timeoutMs`; this is the safety net. */
 export const DEFAULT_TIMEOUT_MS = 60_000;
 
+/**
+ * Adapter-side timeout resolver. Returns the spec default (60s) when
+ * the caller doesn't supply `opts.timeoutMs`; otherwise returns the
+ * caller's value verbatim so an explicit override is respected.
+ *
+ * This is intentionally NOT a hard upper clamp: the cliInvoke helper
+ * applies its own safety net (60_000) inside `runOnce`, but adapters
+ * that legitimately need longer (e.g. slow video models behind a
+ * queue) can opt-in by passing an explicit `timeoutMs`. Mirrors the
+ * pattern callers expected in the v1.2 spec.
+ */
+export function clampTimeout(optsTimeoutMs: number | undefined): number {
+  if (typeof optsTimeoutMs !== 'number' || !Number.isFinite(optsTimeoutMs) || optsTimeoutMs <= 0) {
+    return DEFAULT_TIMEOUT_MS;
+  }
+  return optsTimeoutMs;
+}
+
 /** Default PATH lookup for `which`-style resolution. Adapter code
  *  can override per-call via `binary`. */
 export const DEFAULT_BIN = '';
