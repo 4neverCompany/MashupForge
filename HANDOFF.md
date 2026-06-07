@@ -825,5 +825,64 @@ rechtfertigt eher Minor.
 
 ---
 
+## §20 — v1.1.2 — single-instance OAuth + camofox-only trending
+
+**Stand:** 2026-06-07 ~18:50 Berlin — committet auf Branch
+`hotfix/v1.1.2-single-instance-and-camofox-only`, 2 Commits,
+1366/1366 vitest, tsc clean, cargo check clean. PR + Tauri
+build pending.
+
+**Scope (2 Bugs, post-v1.1.1 reported):**
+
+1. **Higgsfield OAuth öffnete neues Tauri-Fenster** statt
+   im selben weiterzuleiten. Der OS-Handler für
+   `mashupforge://oauth/callback` hat eine neue Tauri-Instanz
+   gespawnt (kein single-instance plugin installiert), die
+   keinen State+PKCE-Cookies hatte, dadurch expired_flow und
+   Welcome-Back-Screen. Fix: `tauri-plugin-single-instance` mit
+   `deep-link` feature, vor `tauri-plugin-deep-link`
+   initialisiert. Plugin routet 2. Launch an die laufende
+   Instanz + pumpt deep-link URL via den gleichen `deep-link`
+   Event-Channel, den der existierende Frontend-Listener
+   abonniert. KEIN Frontend-Change nötig.
+
+2. **Pipeline-Trendsuche weiterhin leer** trotz v1.1.1-Fix.
+   v1.1.1 hatte camofox nur als 3. Fan-out dazugeschaltet;
+   SearXNG (dev-only, Maurice' Maschine hat's nicht) und
+   Reddit-JSON (rate-limited, franchise-only) returnten 0
+   Results. Fix: komplettes Rewrite auf camofox-only mit
+   `@google_search` (3 Queries per Nische, max 6) und
+   `@reddit_search` (1 kombinierte Query mit
+   `site:reddit.com/r/<sub>` Scoping). Franchise-Subs werden
+   jetzt ZUERST in die `targetedSubs` Liste gepusht (v1.1.1
+   hatte ART_SUBREDDITS zuerst, was die Franchise-Hits für
+   Marvel/StarWars/etc. aus dem `slice(0, 3)` rausschnitt).
+   v1.1.1 Test-File gelöscht (testete obsolete 3-Way-Fanout).
+
+**Strategischer Kontext (für v1.2+ Planung):**
+
+Heutige Architektur ist "AI rewritet User-Input" — nicht
+agentic. Die AI bekommt web-search als one-shot enrichment blob
+und skills als system-prompt context. Sie kann KEINE Tools
+aufrufen, keine Schleifen ziehen, nicht selbst entscheiden was
+zu generieren ist.
+
+Websearch 2026-04 hat gezeigt: **CLI ist klarer Gewinner
+gegenüber MCP für agentic AI** (10-32x weniger Tokens, ~100%
+vs 72% Reliability, arxiv 2602.14878). Perplexity hat MCP aus
+Agent-Architektur geworfen, Anthropic's eigene Forschung
+zeigt 98.7% Token-Reduktion mit shell-basiertem Tool-Aufruf.
+
+Für v1.2 (echte agentic loop):
+- Vercel AI SDK `stopWhen` für multi-step
+- Skills werden zu **callable Tools** statt system-prompt context
+- camofox, Higgsfield (CLI), Leonardo, MiniMax-Video als Tools
+- Pipeline-Mode: AI kuratiert Ideen aus Trending, schlägt vor,
+  wartet auf User-Approval
+
+NICHT in v1.1.2 — das ist v1.2-Scope.
+
+---
+
 *— end of handoff. You have the full picture. Build something good. —*
 

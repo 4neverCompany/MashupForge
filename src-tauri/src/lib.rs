@@ -826,6 +826,40 @@ pub fn run() {
         // the IndexedDB origin pin (STORY-121). See lib.rs:622+ for
         // the sidecar-kill handler this triggers.
         .plugin(tauri_plugin_process::init())
+        // V1.1.2-SINGLE-INSTANCE: tauri-plugin-single-instance routes
+        // a second launch (e.g. an OS-handled `mashupforge://oauth/callback`
+        // click) to the running instance instead of spawning a fresh
+        // Tauri process. Without this, the OAuth callback opens a new
+        // WebView2 with no state/PKCE cookies and the user lands on
+        // the empty "Welcome Back" login screen with a `expired_flow`
+        // error. The `deep-link` feature routes the second-launch args
+        // (which contain the deep-link URL) into the existing
+        // on_open_url handler, so the existing deep-link listener in
+        // HiggsfieldConnection.tsx picks it up unchanged.
+        //
+        // MUST be registered BEFORE tauri-plugin-deep-link so the
+        // single-instance init can wrap the second-launch routing
+        // before the deep-link plugin's own URL handling kicks in.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Bring the main window forward. unminimize() in case the
+            // user minimized the running instance before the OAuth
+            // round-trip; set_focus() to surface it on top of other
+            // apps.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+            // The single-instance plugin's `deep-link` feature
+            // already extracts the `mashupforge://` URLs from the
+            // launch args and emits them as a "deep-link" event on
+            // the AppHandle (same channel the regular on_open_url
+            // handler uses), so the existing frontend listener in
+            // HiggsfieldConnection.tsx picks them up and re-issues
+            // the callback in the WebView2 cookie context.
+            //
+            // No manual emit here — the plugin does it for us.
+            log::info!("[tauri] single-instance fired with {} args, deep-link URLs handled by plugin", args.len());
+        }))
         // V107.1-OAUTH: tauri-plugin-deep-link registers the
         // `mashupforge://` URL scheme with the OS. When the Higgsfield
         // OAuth provider redirects to `mashupforge://oauth/callback?code=...&state=...`
