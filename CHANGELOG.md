@@ -1,5 +1,49 @@
 # Changelog
 
+## [1.1.2] — 2026-06-07 — single-instance OAuth + camofox-only trending
+
+### What changed
+- **bug 1 (Higgsfield OAuth opens new window):** Added
+  `tauri-plugin-single-instance` with the `deep-link` feature.
+  When a second launch is triggered (e.g. the OS-handled
+  `mashupforge://oauth/callback` click after the Higgsfield
+  consent), the plugin routes the launch args to the running
+  Tauri instance instead of spawning a fresh one. The
+  deep-link feature pipes the URLs through the existing
+  on_open_url handler, so the frontend listener in
+  HiggsfieldConnection.tsx picks them up unchanged. Result:
+  the OAuth round-trip stays in the same WebView (with the
+  state+PKCE cookies from `/authorize`), and the user no
+  longer lands on the empty "Welcome Back" login screen
+  after Allow.
+- **bug 2 (pipeline trend search still empty):** Rewrote
+  `/api/trending` to be camofox-only. v1.1.1's design still
+  fanned out to three sources (SearXNG on `localhost:34567`,
+  Reddit JSON, camofox as tertiary) and SearXNG/Reddit
+  returned nothing on a typical user machine. The new design
+  uses two camofox macros: `@google_search` (3 queries per
+  niche, capped at 6) and `@reddit_search` (single combined
+  query with `site:reddit.com/r/<sub>` scoping for the
+  franchise subreddit matches). SearXNG + Reddit-JSON code
+  paths are removed. Franchise subreddits are pushed FIRST
+  in the targetedSubs list so the `slice(0, 3)` keeps them
+  ahead of the ART_SUBREDDITS tail (the v1.1.1 ordering had
+  ART subs first, which sliced out the franchise hits for
+  Marvel/Star Wars/etc.).
+
+### Migration notes
+- No user-facing migration. v1.1.1 → v1.1.2 ships silent via
+  Tauri auto-update. Settings (including the new
+  `videoProviders` field from v1.1.1) are preserved.
+- The `tests/api/trending-camofox.test.ts` test file from
+  v1.1.1 is removed; replaced by
+  `tests/api/trending-camofox-only.test.ts`.
+
+### Test coverage
+- 6 new tests for the camofox-only trending rewrite.
+- 1 v1.1.1 test file removed (obsolete behavior).
+- **vitest 1366/1366, tsc clean.**
+
 ## [1.1.1] — 2026-06-06 — multi-provider video + skills auto-use + 4 hotfixes
 
 ### What changed
