@@ -32,6 +32,31 @@
  * Dedup: by headline prefix (strips Reddit's `[42↑] ` score
  * bracket so the same title doesn't land twice from different
  * sort orders).
+ *
+ * V1.1.3-ORCH (2026-06-07) — hybrid client-side fallback:
+ *
+ *   The Server-Side route is on the Vercel/Web build, where the
+ *   Node sidecar runs on `127.0.0.1` but the browser enforces
+ *   CORS for cross-origin fetch. If the sidecar doesn't emit CORS
+ *   headers (current state of `@askjo/camofox-browser@1.11.2`),
+ *   the route falls through to "no results".
+ *
+ *   As an escape hatch, the frontend (Tauri-WebView OR a browser
+ *   with the CORS-proxy workaround) can reach the same sidecar
+ *   directly. When the request includes the
+ *   `x-client-can-search: true` header (set by
+ *   `lib/trending-client.ts` after the frontend has confirmed
+ *   `window.__TAURI_INTERNALS__` is set OR a direct fetch probe
+ *   succeeds), AND the Server-Side camofox path returns nothing,
+ *   we surface a `CLIENT_SEARCH_REQUIRED` envelope containing the
+ *   queries the frontend should run, plus the cacheKey. The
+ *   frontend then calls `clientSideCamofoxSearch()` per query and
+ *   POSTs the merged results back to `/api/trending/results` for
+ *   dedup + caching.
+ *
+ *   This branch is opt-in: without the header, the route behaves
+ *   exactly as before (returns the empty/limited results with a
+ *   graceful note).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -166,6 +191,14 @@ export async function POST(req: NextRequest): Promise<Response> {
     if (ideaConcept) cacheKeyParts.push(ideaConcept);
     const cacheKey = cacheKeyParts.join('|');
 
+    // V1.1.3-ORCH: detect the opt-in client-side search header.
+    // Frontend sets this when it has confirmed it can reach camofox
+    // directly (Tauri-WebView with the `camofox_search` Tauri command
+    // wired, or a web build where the CORS-proxy workaround is in
+    // place). Without the header, the existing camofox-fallback
+    // path runs unchanged.
+    const clientCanSearch = req.headers.get('x-client-can-search') === 'true';
+
     const cached = trendCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       return NextResponse.json({
@@ -275,6 +308,43 @@ export async function POST(req: NextRequest): Promise<Response> {
         seen.add(key);
         unique.push(item);
       }
+    }
+
+    // V1.1.3-ORCH: hybrid client-side fallback branch. If the
+    // Server-Side camofox path returned nothing (the sidecar
+    // was unreachable from inside the Node sidecar — typically
+    // CORS on the Vercel-Web build) AND the request opted in
+    // via `x-client-can-search: true`, surface a
+    // `CLIENT_SEARCH_REQUIRED` envelope instead of an empty
+    // result. The frontend orchestrator
+    // (`lib/trending-client.ts`) will then run the same
+    // queries through `clientSideCamofoxSearch()` and POST the
+    // results back to `/api/trending/results` for dedup +
+    // caching.
+    //
+    // The queries we ship are the same ones we would have run
+    // Server-Side — the frontend doesn't need to rebuild them.
+    if (unique.length === 0 && clientCanSearch) {
+      // Build the query list the client should run. We
+      // deliberately reuse `dedupedGoogle` and the scoped
+      // redditQuery so the work the frontend does is a
+      // mirror of what we'd do Server-Side.
+      const clientQueries: string[] = [...dedupedGoogle];
+      if (redditQuery && CAMOFOX_MACROS.includes('@reddit_search')) {
+        const scopedQuery = `${redditQuery} ${uniqueSubs
+          .slice(0, 3)
+          .map((s) => `site:reddit.com/r/${s}`)
+          .join(' ')}`;
+        clientQueries.push(scopedQuery);
+      }
+      return NextResponse.json({
+        success: true,
+        results: [],
+        summary: '',
+        note: 'CLIENT_SEARCH_REQUIRED',
+        queries: clientQueries,
+        cacheKey,
+      });
     }
 
     const note = unique.length < 3
