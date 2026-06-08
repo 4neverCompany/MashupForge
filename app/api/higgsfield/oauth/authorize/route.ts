@@ -122,5 +122,17 @@ export async function GET(req: Request): Promise<Response> {
     state,
     codeChallenge: challenge,
   });
+
+  // V1.2.8: when the caller asks for JSON, return the final
+  // authorize URL as a JSON body instead of a 302 redirect. The
+  // Tauri desktop app needs this so the frontend can hand the
+  // URL to `tauri-plugin-opener`'s `openUrl()` and open the
+  // OAuth consent page in the user's system browser. The
+  // 302 default is kept for the web build, where the in-app
+  // navigation is the right behaviour.
+  const wantsJson = new URL(req.url).searchParams.get('format') === 'json';
+  if (wantsJson) {
+    return NextResponse.json({ url, state }, { status: 200 });
+  }
   return NextResponse.redirect(url);
 }

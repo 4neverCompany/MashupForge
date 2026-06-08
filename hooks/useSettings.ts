@@ -98,18 +98,23 @@ export function useSettings() {
       try {
         const storedSettings = localStorage.getItem('mashup_settings');
         if (storedSettings) {
-          // V1.2.6-HOTFIX: defensive check for the v1.2.5 data-loss
-          // bug. The unmount/beforeunload flush on useSettings was
-          // writing the merged-defaults state (a small object with
-          // just the default fields) to localStorage in some
-          // scenarios. The next page's load then overwrote the
-          // store with that partial default object, wiping
-          // user-configured settings like API keys and niches.
+          // V1.2.6-HOTFIX + V1.2.8: defensive check for the
+          // v1.2.5 data-loss bug. The unmount/beforeunload flush
+          // on useSettings was writing a PARTIAL settings object
+          // (e.g. just the defaults + a few user-touched fields)
+          // to localStorage. The next page's load then either
+          //   (a) clobbered the store with the partial (losing
+          //       watermark/creditCap/etc. that the user had
+          //       configured but weren't in the partial), or
+          //   (b) the user-configured fields were preserved but
+          //       the flush kept firing and re-clobbering.
           //
-          // If the localStorage value is missing critical
-          // user-configured fields (a sign it's the merged-defaults
-          // artifact rather than a real save), skip the migration
-          // and load from the store instead.
+          // The V1.2.8 fix: ALWAYS load from the store first
+          // (it has the full data), then MERGE the localStorage
+          // value on top of it (localStorage is just a patch for
+          // in-flight changes that didn't reach the store). This
+          // way the store's authoritative state is preserved and
+          // any pending localStorage edits are still applied.
           let parsed: Partial<UserSettings> | null = null;
           try {
             parsed = JSON.parse(storedSettings) as Partial<UserSettings>;
@@ -117,18 +122,48 @@ export function useSettings() {
             // bad JSON — clear and fall through
             localStorage.removeItem('mashup_settings');
           }
-          if (parsed && Object.keys(parsed).length > 0) {
-            await set('mashup_settings', parsed);
-            localStorage.removeItem('mashup_settings');
-            if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, parsed as Partial<UserSettings>)));
-          } else if (parsed !== null) {
-            // empty object — likely the default-settings artifact.
-            // Clear localStorage and fall through to load from
-            // the store so we don't clobber the real data.
-            localStorage.removeItem('mashup_settings');
+
+          if (parsed !== null) {
+            // V1.2.8: detect the v1.2.5 bug artifact BEFORE
+            // clobbering. If the localStorage value is missing
+            // critical user-configured fields (watermark,
+            // creditCap, defaultVideoModel, etc.) that the
+            // store HAS, treat localStorage as a stale partial
+            // snapshot. Apply only the fields it DOES contain;
+            // ignore the rest.
+            const idbSettings = await get('mashup_settings');
+            const idbIsObj = idbSettings && typeof idbSettings === 'object';
+            if (Object.keys(parsed).length > 0) {
+              // Merge into the store value. localStorage is a
+              // patch; store is authoritative for absent keys.
+              const storeValue = (idbIsObj ? idbSettings : {}) as Partial<UserSettings>;
+              // mergeSettings expects UserSettings-shaped input;
+              // pass the defaultSettings as the base so the
+              // type system is happy AND the merge preserves any
+              // top-level default fields the store value may have
+              // omitted.
+              const merged = mergeSettings(
+                mergeSettings(defaultSettings, storeValue),
+                parsed,
+              );
+              await set('mashup_settings', merged);
+              localStorage.removeItem('mashup_settings');
+              if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, merged)));
+            } else {
+              // empty object — clear and load from store
+              localStorage.removeItem('mashup_settings');
+              if (idbIsObj && !cancelled) {
+                setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>)));
+              } else if (!cancelled) {
+                setSettings(prev => applyV040AutoApproveMigration(prev));
+              }
+            }
+          } else {
             const idbSettings = await get('mashup_settings');
             if (idbSettings && typeof idbSettings === 'object') {
               if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>)));
+            } else {
+              if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(prev));
             }
           }
         } else {

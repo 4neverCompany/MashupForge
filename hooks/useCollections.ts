@@ -27,24 +27,28 @@ export function useCollections(settings: UserSettings) {
       try {
         const storedCollections = localStorage.getItem('mashup_collections');
         if (storedCollections) {
-          // V1.2.6-HOTFIX: defensive check (same pattern as
-          // useImages). The mutators in this file (createCollection,
-          // deleteCollection) write localStorage directly, but they
-          // only fire on real user changes so the in-memory
-          // `[]`-then-non-[] transition is safe. However if the
-          // v1.2.5 unmount-flush bug ever fires on a hook that
-          // imported this one, we still want the load to skip
-          // an empty localStorage value rather than clobber the
-          // store.
+          // V1.2.6-HOTFIX + V1.2.8: same merge-with-store pattern
+          // as useImages. localStorage is a patch, the store is
+          // authoritative.
           const parsed = JSON.parse(storedCollections);
           if (Array.isArray(parsed) && parsed.length === 0) {
+            // V1.2.5 bug artifact — empty array from a write
+            // that shouldn't have happened. Clear and fall
+            // through to the store.
             localStorage.removeItem('mashup_collections');
             const idbCollections = await get('mashup_collections');
             if (idbCollections && !cancelled) setCollections(idbCollections);
           } else {
-            await set('mashup_collections', parsed);
+            // Merge: store first, localStorage on top (by id).
+            const idbCollections = await get('mashup_collections');
+            const storeValue = Array.isArray(idbCollections) ? idbCollections : [];
+            const byId = new Map<string, Collection>();
+            for (const c of storeValue) byId.set(c.id, c);
+            for (const c of (Array.isArray(parsed) ? parsed : [])) byId.set(c.id, c);
+            const merged = Array.from(byId.values());
+            await set('mashup_collections', merged);
             localStorage.removeItem('mashup_collections');
-            if (!cancelled) setCollections(parsed);
+            if (!cancelled) setCollections(merged);
           }
         } else {
           const idbCollections = await get('mashup_collections');

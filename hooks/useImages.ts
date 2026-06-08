@@ -56,28 +56,43 @@ export function useImages() {
         if (storedImages) {
           try {
             const images = JSON.parse(storedImages).map(normalizeOnLoad);
-            // V1.2.6-HOTFIX: defensive check for the v1.2.5 data-loss
-            // bug. The unmount/beforeunload flush on useImages was
-            // registered with `isImagesLoaded=true` even when the
-            // user had never visited Gallery (loadTriggered=false),
-            // so the flush wrote the initial in-memory `[]` to
-            // localStorage. The next page's load then overwrote
-            // the store with `[]`, wiping the user's images.
+            // V1.2.6-HOTFIX + V1.2.8: defensive check for the
+            // v1.2.5 data-loss bug. The unmount/beforeunload flush
+            // on useImages was registered with `isImagesLoaded=true`
+            // even when the user had never visited Gallery
+            // (loadTriggered=false), so the flush wrote the
+            // initial in-memory `[]` to localStorage. The next
+            // page's load then overwrote the store with `[]`,
+            // wiping the user's images.
             //
-            // If the localStorage value is an empty array, treat
-            // it as a bug artifact rather than a real save. Skip
-            // the store-migration (which would clobber real data)
-            // and fall through to load from the store. Also
-            // clear the stale localStorage entry so subsequent
-            // loads don't keep hitting this branch.
+            // V1.2.8: ALWAYS load from the store first (it has
+            // the full data), then merge localStorage on top.
+            // localStorage is a patch for in-flight changes that
+            // didn't reach the store; the store is authoritative
+            // for the full data.
+            const idbImages = await get('mashup_saved_images');
             if (images.length === 0) {
+              // V1.2.5 bug artifact — empty array from beforeunload
+              // firing before the user visited Gallery. Clear
+              // localStorage and load from the store.
               localStorage.removeItem('mashup_saved_images');
-              const idbImages = await get('mashup_saved_images');
               if (idbImages && !cancelled) setSavedImages(idbImages.map(normalizeOnLoad));
             } else {
-              await set('mashup_saved_images', images);
+              // Merge: store first, localStorage on top. If the
+              // localStorage is a partial (e.g. an in-flight
+              // addImage that hasn't been IDB-persisted yet),
+              // the merge keeps the rest of the store intact.
+              const storeValue = Array.isArray(idbImages) ? idbImages : [];
+              // For images, "merge" is union by id (later wins).
+              // The in-flight localStorage edit supersedes the
+              // store version of the same id.
+              const byId = new Map<string, GeneratedImage>();
+              for (const img of storeValue) byId.set(img.id, img);
+              for (const img of images) byId.set(img.id, img);
+              const merged = Array.from(byId.values());
+              await set('mashup_saved_images', merged);
               localStorage.removeItem('mashup_saved_images');
-              if (!cancelled) setSavedImages(images);
+              if (!cancelled) setSavedImages(merged);
             }
           } catch {
             const idbImages = await get('mashup_saved_images');

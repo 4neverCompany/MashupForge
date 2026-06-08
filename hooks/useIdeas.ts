@@ -32,11 +32,18 @@ export function useIdeas() {
     return () => { cancelled = true; };
   }, [loadTriggered]);
 
+  // V1.2.8: gate the auto-save effect on BOTH isIdeasLoaded AND
+  // loadTriggered. The original code wrote to the store as
+  // soon as isIdeasLoaded flipped to true, which is
+  // immediately on mount BEFORE the actual store-load ran. If
+  // the in-memory state was empty `[]` (e.g. user never
+  // visited Ideas), the effect would write `[]` to the store
+  // — wiping the user's ideas. Mirror the v1.2.7 fix on
+  // useImages/useSettings.
   useEffect(() => {
-    if (isIdeasLoaded) {
-      set('mashup_ideas', ideas);
-    }
-  }, [ideas, isIdeasLoaded]);
+    if (!isIdeasLoaded || !loadTriggered) return;
+    set('mashup_ideas', ideas);
+  }, [ideas, isIdeasLoaded, loadTriggered]);
 
   const addIdea = (concept: string, context?: string) => {
     const newIdea: Idea = {

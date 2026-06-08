@@ -1,5 +1,116 @@
 # Changelog
 
+## [1.2.8] — 2026-06-09 — Hotfix: OAuth in system browser + load-side merge fix
+
+Two follow-ups to v1.2.7:
+
+1. The Higgsfield OAuth "Allow/Deny" buttons did nothing
+   in the Tauri desktop app because the OAuth consent
+   page was being loaded INSIDE the MashupForge WebView
+   (not in the system browser). When the user clicked
+   Allow, Higgsfield tried to redirect to
+   `mashupforge://oauth/callback` — a custom scheme that
+   WebView2 doesn't know how to handle. The redirect
+   silently failed.
+
+2. The v1.2.7 load fix had a subtle gap: if localStorage
+   had a PARTIAL settings object (e.g. just a few fields
+   from an in-flight save), the load effect would
+   `await set('mashup_settings', parsed)` and clobber
+   the store with that partial — losing the watermark,
+   creditCap, defaultVideoModel, etc. that the user had
+   configured but weren't in the partial.
+
+### Bug fixes
+
+**1. OAuth window now opens in the system browser.**
+
+`HiggsfieldConnection.handleConnect` now detects the
+Tauri context and, instead of
+`window.location.href = /api/higgsfield/oauth/authorize?via=desktop`
+(which navigates the WebView), does:
+
+  - Fetch the authorize URL from the server with
+    `?format=json` (the new option added to the route).
+    The server still sets the state/PKCE cookies in the
+    response and now also returns the constructed
+    Higgsfield authorize URL as JSON.
+  - Hand that URL to `@tauri-apps/plugin-opener`'s
+    `openUrl()`. This opens the URL in the user's
+    default browser (Edge / Chrome / Firefox / whatever).
+  - The user sees the Higgsfield consent page in their
+    normal browser. Clicking Allow redirects to
+    `mashupforge://oauth/callback?code=...`.
+  - The OS recognizes the `mashupforge://` scheme
+    handler (registered to MashupForge Tauri by the
+    installer) and launches MashupForge with the URL.
+  - The existing deep-link listener in
+    `HiggsfieldConnection.tsx` re-issues the callback
+    fetch in the WebView (so the original state/PKCE
+    cookies are sent) and the OAuth flow completes.
+
+Web (non-Tauri) keeps the 302-redirect behaviour. The
+in-app navigation is correct there.
+
+**2. Load effect now merges localStorage into the store
+   instead of clobbering it.**
+
+`useSettings.loadSettings`, `useImages.loadImages`,
+`useCollections.loadCollections` all now:
+
+  - Read BOTH the localStorage value AND the store value.
+  - Treat localStorage as a *patch* (in-flight changes
+    that didn't reach the store) rather than a replacement.
+  - Merge: store value first, then localStorage fields
+    applied on top. For arrays (images, collections),
+    the merge is a `byId` union with localStorage winning
+    on id collisions.
+  - For empty localStorage values (the v1.2.5 bug
+    artifact), skip the patch and just load from the
+    store as before.
+
+`useIdeas` didn't have a v1.2.5 bug (no `beforeunload`
+listener) but the auto-save `useEffect` that wrote to
+the store was similarly unsafe — gated on both
+`isIdeasLoaded` AND `loadTriggered` for parity.
+
+### Files changed
+
+- `app/api/higgsfield/oauth/authorize/route.ts` —
+  `?format=json` returns `{url, state}` instead of 302.
+- `components/Settings/HiggsfieldConnection.tsx` —
+  `handleConnect` uses `openUrl()` in Tauri.
+- `hooks/useSettings.ts` — load effect merges localStorage
+  into store; defaults applied via `defaultSettings` for
+  type safety.
+- `hooks/useImages.ts` — same merge pattern (byId union).
+- `hooks/useCollections.ts` — same merge pattern.
+- `hooks/useIdeas.ts` — auto-save effect gated on
+  `loadTriggered` (parity with the other lazy hooks).
+- `package.json` / `src-tauri/Cargo.toml` /
+  `src-tauri/tauri.conf.json` — version bump 1.2.7 → 1.2.8.
+
+### Tests
+
+- 234/234 hook + integration tests pass.
+- Typecheck clean.
+
+### Migration for users on v1.2.7
+
+v1.2.7's data-loss fix is still in place (the
+`beforeunload` gate + the empty-array defensive check).
+v1.2.8 additionally fixes the partial-settings
+clobber. If you lost your watermark/creditCap/defaultVideo
+settings in v1.2.5 / v1.2.6 / v1.2.7, the settings are
+likely still in the Tauri store file. The new merge
+load effect will read the store on next launch and
+your settings will reappear.
+
+The bulk data (images, ideas, comparison results,
+collections) is NOT recoverable — those were
+genuinely clobbered by the v1.2.5 bug firing
+multiple times. v1.2.8 prevents further loss.
+
 ## [1.2.7] — 2026-06-09 — Hotfix: data-loss bug in lazy-load hooks
 
 A real regression shipped in v1.2.5 (the lazy-persistence

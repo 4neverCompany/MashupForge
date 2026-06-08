@@ -117,26 +117,53 @@ export function HiggsfieldConnection({
   const safeVideoSlug = (HIGGSFIELD_VIDEO_MODELS.find((m) => m.slug === selectedVideoModel)?.slug) ||
     HIGGSFIELD_DEFAULT_VIDEO_MODEL;
 
-  const handleConnect = () => {
-    // Bounce to /api/higgsfield/oauth/authorize. The route redirects
-    // to the Higgsfield authorize page; the callback comes back to
-    // /api/higgsfield/oauth/callback which redirects to /studio with
-    // ?higgsfield=connected in the URL.
+  const handleConnect = async () => {
+    // V1.2.8: OAuth window now opens in the SYSTEM BROWSER, not
+    // inside the MashupForge WebView. The previous behaviour
+    // (`window.location.href = /api/higgsfield/oauth/authorize`)
+    // navigated the WebView to the Higgsfield consent page, but
+    // the Allow button's `mashupforge://oauth/callback` redirect
+    // couldn't be handled by WebView2 (no `mashupforge://` scheme
+    // registered to WebView2), so the click silently did nothing.
     //
-    // V107.1-OAUTH: in the Tauri desktop app, pass ?via=desktop so the
-    // authorize route returns a `mashupforge://oauth/callback` redirect
-    // URI instead of the HTTPS one. The OS launches the deep link back
-    // into the WebView2 (where the state/PKCE cookies still live),
-    // and the deep-link listener below re-issues the callback fetch in
-    // that cookie context. Without this, the callback URL opens in the
-    // system browser (Tauri's default for external URLs) which has a
-    // different cookie jar and we get `expired_flow`.
+    // The fix: in Tauri, fetch the final authorize URL from the
+    // server (which sets the state/PKCE cookies in the response
+    // and returns the constructed Higgsfield URL as JSON), then
+    // hand that URL to `tauri-plugin-opener`'s `openUrl()` which
+    // opens it in the user's default browser. The system browser
+    // handles the OAuth consent page + the `mashupforge://`
+    // callback redirect, and the OS launches MashupForge back.
+    // The existing deep-link listener below picks up the code.
+    //
+    // Web (non-Tauri) keeps the 302 redirect behaviour — the
+    // in-app navigation is correct there.
     const isTauri =
       typeof window !== 'undefined' &&
       (Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) ||
         Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__));
-    const qs = isTauri ? '?via=desktop' : '';
-    window.location.href = `/api/higgsfield/oauth/authorize${qs}`;
+
+    if (!isTauri) {
+      // Web build: in-app navigation is fine.
+      window.location.href = '/api/higgsfield/oauth/authorize?via=desktop';
+      return;
+    }
+
+    // Tauri build: fetch the URL + open it in the system browser.
+    try {
+      const res = await fetch('/api/higgsfield/oauth/authorize?via=desktop&format=json', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as { url: string };
+      if (!json.url) throw new Error('authorize route did not return a url');
+      // Lazy-import the opener plugin so the web bundle doesn't
+      // pull in Tauri-only modules.
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(json.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to open OAuth window');
+    }
   };
 
   // V107.1-OAUTH: listen for the deep-link event from the Tauri backend
