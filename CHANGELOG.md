@@ -1,5 +1,77 @@
 # Changelog
 
+## [1.2.0] — 2026-06-08 — Camofox Client-Side + Agentic-AI Epic (6 features, 1 release)
+
+### What changed
+
+**d (Desktop / Networking) — camofox client-side**
+- **v1.1.3 camofox CORS + standalone-install** (`feature/v113-camofox-cors`):
+  4-port Camoufox sidecar discovery (9377-9380) so users can run their own
+  Firefox-on-Camoufox install independently of the bundled binary;
+  Next.js CORS proxy at `127.0.0.1:9889` lets the Vercel-Web try-before-install
+  hit the local sidecar; 42 new tests in `src-tauri/tests/camofox_lifecycle.rs`
+  + `lib/camofox/cors-config.ts` + `scripts/camofox-cors-proxy.mjs`.
+- **v1.1.3 trending orchestration** (`feature/orch-trending-hybrid`):
+  new `app/api/trending/results/route.ts` aggregates server-side (SearXNG)
+  and client-side (camofox) results into a unified feed; new Tauri
+  command `camofox_search` in `src-tauri/src/lib.rs` (282 lines) lets the
+  Rust shell drive the sidecar; 35 vitest cases cover the hybrid path.
+
+**v1.2 Agentic-AI Epic (4 layers)**
+- **v1.2 tool registry** (`feature/v12-tool-registry`): 6 Zod-validated tools
+  (`generate_prompt`, `generate_image`, `generate_video`, `persist_asset`,
+  `trending_search`, `critique_prompt`) in `lib/agent-tools/`. Each tool has
+  structured error hierarchy (`lib/agent-tools/errors.ts`) covering retry,
+  refund, rate-limit, hil-required. ~2000 lines of pure-function code with
+  no I/O — the agent-loop layer calls them.
+- **v1.2 provider wrappers** (`feature/v12-provider-wrappers`): CLI/HTTP
+  adapters for Higgsfield (`@higgsfield/cli`), MiniMax (`mmx`), Leonardo
+  HTTP, and MiniMax text + video. Default 60s timeout, retry with backoff.
+  Registry pattern in `lib/providers/registry.ts` so new providers plug in
+  with one line.
+- **v1.2 Director Route 2.0** (`feature/v12-director`): the new
+  `app/api/ai/prompt/route.ts` runs a 6-step Vercel AI SDK `stopWhen` loop
+  with budget tracking (`lib/agent-loop/budget.ts`) and per-step persistence
+  (`lib/agent-loop/persistence.ts`) so each step is recoverable after
+  crash/reload.
+- **v1.2.3 HIL + eval heuristics** (`feature/v12-eval-hil`): **the big one.**
+  Credit-burn protection. Every non-mock `generate_image` / `generate_video`
+  tool call now posts to `/api/ai/confirm` and **pauses** until a verdict
+  comes back. Defaults: auto-approve under $0.10, deny above threshold,
+  fail-closed on 5xx. Director loop gets a `run-context` module-scope
+  singleton (`lib/agent-loop/run-context.ts`) so tools can read
+  runId / totalCostSoFarUsd / budgetUsd without threading them through the
+  AI SDK. Eval heuristics in `lib/agent-eval/`: niche-coverage, camera-angle,
+  anti-ai-look, length-budget + `evalAll()` aggregator. Director loop
+  can call them directly from `critique_prompt` steps.
+
+### Stats
+- 6 features × ~1 feature-branch each, all merged into main.
+- 6 merge commits (no-ff), 1658 total tests, 1644 pass, 14 pre-existing
+  tauri-sqlite env failures (unrelated to v1.2).
+- New code: ~10,500 lines added (lib/agent-tools, lib/agent-loop,
+  lib/agent-eval, lib/providers, lib/camofox, lib/trending-client,
+  lib/camofox-client, app/api/ai/confirm, app/api/ai/prompt, app/api/trending).
+
+### Breaking / noteworthy
+- **`generate_image` / `generate_video` are HIL-gated.** When the agent
+  loop hits them, the next request to `/api/ai/confirm` MUST resolve
+  (auto-approve, manual approve, or deny) or the agent pauses
+  indefinitely. v1.2.4 follow-up will add a UI modal for manual approval
+  — for now auto-approve <$0.10 is the only path.
+- **Director loop uses Vercel AI SDK `stopWhen`.** The agent loop can run
+  for many tool calls per single `/api/ai/prompt` request. Make sure
+  Vercel function timeout is set to 60s+ (already done in `vercel.json`).
+
+### Known limitations
+- v12-MinimaxVideoAdapter.pollTask is a documented placeholder (P-011) —
+  real pollTask lands when mmx's status subcommand ships. The tool returns
+  "in flight" forever for video jobs; v1.2.4 follow-up.
+- HIL UI modal is follow-up; for now default is auto-approve <$0.10.
+- v1.1.3 sub-bump and v1.2.0 were released together as v1.2.0 mega — a
+  future v1.2.1 hotfix can split out the d-networking changes if
+  Cherry-pick is clean.
+
 ## [1.1.2] — 2026-06-07 — single-instance OAuth + camofox-only trending
 
 ### What changed
