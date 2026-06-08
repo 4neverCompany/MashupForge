@@ -98,10 +98,39 @@ export function useSettings() {
       try {
         const storedSettings = localStorage.getItem('mashup_settings');
         if (storedSettings) {
-          const parsed = JSON.parse(storedSettings);
-          await set('mashup_settings', parsed);
-          localStorage.removeItem('mashup_settings');
-          if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, parsed as Partial<UserSettings>)));
+          // V1.2.6-HOTFIX: defensive check for the v1.2.5 data-loss
+          // bug. The unmount/beforeunload flush on useSettings was
+          // writing the merged-defaults state (a small object with
+          // just the default fields) to localStorage in some
+          // scenarios. The next page's load then overwrote the
+          // store with that partial default object, wiping
+          // user-configured settings like API keys and niches.
+          //
+          // If the localStorage value is missing critical
+          // user-configured fields (a sign it's the merged-defaults
+          // artifact rather than a real save), skip the migration
+          // and load from the store instead.
+          let parsed: Partial<UserSettings> | null = null;
+          try {
+            parsed = JSON.parse(storedSettings) as Partial<UserSettings>;
+          } catch {
+            // bad JSON — clear and fall through
+            localStorage.removeItem('mashup_settings');
+          }
+          if (parsed && Object.keys(parsed).length > 0) {
+            await set('mashup_settings', parsed);
+            localStorage.removeItem('mashup_settings');
+            if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, parsed as Partial<UserSettings>)));
+          } else if (parsed !== null) {
+            // empty object — likely the default-settings artifact.
+            // Clear localStorage and fall through to load from
+            // the store so we don't clobber the real data.
+            localStorage.removeItem('mashup_settings');
+            const idbSettings = await get('mashup_settings');
+            if (idbSettings && typeof idbSettings === 'object') {
+              if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>)));
+            }
+          }
         } else {
           const idbSettings = await get('mashup_settings');
           if (idbSettings && typeof idbSettings === 'object') {
@@ -109,8 +138,8 @@ export function useSettings() {
           } else {
             // Fresh install with no saved settings still gets the explicit
             // auto-everywhere map written so the PipelinePanel checkbox grid
-            // shows the active state immediately rather than waiting for the
-            // user's first toggle to materialize the field.
+            // shows the active state immediately rather than waiting for
+            // the user's first toggle to materialize the field.
             if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(prev));
           }
         }
@@ -171,8 +200,17 @@ export function useSettings() {
   // Registered once (when isSettingsLoaded flips true) via empty-ish dep
   // array — settingsRef.current always holds the latest value so the
   // listener never needs to be re-registered.
+  //
+  // V1.2.6-HOTFIX: gate the listener on BOTH isSettingsLoaded AND
+  // loadTriggered. Without loadTriggered, the listener was active
+  // before the real settings had loaded, and the beforeunload flush
+  // wrote the merged-defaults state (a small object with just
+  // defaults) to localStorage. The next page's load then overwrote
+  // the store with that partial default object, wiping user-configured
+  // settings. By requiring loadTriggered=true, we only register the
+  // listener when there's actually a loaded debounce to flush.
   useEffect(() => {
-    if (!isSettingsLoaded) return;
+    if (!isSettingsLoaded || !loadTriggered) return;
     const flush = () => {
       try {
         localStorage.setItem('mashup_settings', JSON.stringify(settingsRef.current));
@@ -180,7 +218,7 @@ export function useSettings() {
     };
     window.addEventListener('beforeunload', flush);
     return () => window.removeEventListener('beforeunload', flush);
-  }, [isSettingsLoaded]);
+  }, [isSettingsLoaded, loadTriggered]);
 
   // Stable identity across renders — useState's setSettings is itself
   // stable, so this useCallback can have an empty dep array. Stable

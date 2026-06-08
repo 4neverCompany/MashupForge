@@ -1,5 +1,111 @@
 # Changelog
 
+## [1.2.7] — 2026-06-09 — Hotfix: data-loss bug in lazy-load hooks
+
+A real regression shipped in v1.2.5 (the lazy-persistence
+work) could **wipe the user's settings and generated
+images** when the OAuth "Connect Higgsfield" flow ran while
+the user was on a Settings page (i.e. had not yet visited
+Gallery to trigger the lazy load).
+
+This v1.2.7 hotfix patches the root cause AND adds a
+defensive migration path so users with already-corrupted
+localStorage entries recover their data on the next load.
+
+### Bug fix
+
+**1. beforeunload flush wiped the lazy-loaded stores.**
+
+`useImages`, `useCollections`, and (less critically)
+`useSettings` registered a `beforeunload` listener as soon
+as `isXxxLoaded` flipped to `true`. But `isXxxLoaded` was
+set to `true` immediately on mount, **before** the actual
+store-load ran. The first time the listener fired (e.g. on
+the OAuth redirect to `/api/higgsfield/oauth/authorize`),
+it wrote the initial in-memory `[]` (or the merged-defaults
+settings object) to localStorage. The next page's load
+effect found that empty value, called
+`await set('mashup_xxx', [])`, and clobbered the store.
+
+This only fired when the user was on a tab that had **not**
+visited the data's home view (Settings for settings,
+Gallery for images/collections, Ideas for ideas, Compare
+for comparison). The OAuth flow's "Connect Higgsfield"
+button is on Settings — the worst case.
+
+The v1.2.6 hotfix made this very visible: in Maurice's
+Tauri install, clicking "Connect Higgsfield" on a fresh
+session wiped his 692 saved images and the settings he'd
+configured over the last few days.
+
+**Fix:** gate the `beforeunload` listener on BOTH
+`isXxxLoaded` AND `loadTriggered` (the gallery/ideas/compare
+view actually calling `requestLoad()`). When the data
+hasn't been loaded, there's no debounce to flush, so the
+listener shouldn't be active. Files:
+
+- `hooks/useImages.ts` — `beforeunload` effect's dep array
+  gains `loadTriggered`. Load effect gains a defensive
+  `if (images.length === 0) skip` branch that clears the
+  stale localStorage entry and falls through to read from
+  the store.
+- `hooks/useSettings.ts` — same gating + defensive check
+  (also re-reads from the store if the localStorage value
+  is an empty object).
+- `hooks/useCollections.ts` — same defensive check (no
+  `beforeunload` listener to gate; the mutators only write
+  on real changes).
+
+`useComparison` and `useIdeas` were inspected and need
+no change (no localStorage involvement in the load path).
+
+**Why this only manifested in v1.2.5+:** the lazy-load
+work in v1.2.1-v1.2.2 split "is loaded" (immediate, on
+mount) from "has loaded from store" (deferred, on view
+visit). The beforeunload flush was added in v1.2.5 (the
+fix for the "settings reset on Back/Reload" bug), and the
+listener registration only checked `isXxxLoaded`. The
+bug was always latent in the lazy-load design but only
+became user-visible once the flush started firing on
+navigations from non-home views.
+
+### Files changed
+
+- `hooks/useImages.ts` — `loadTriggered` added to
+  `beforeunload` dep array; load effect handles empty
+  localStorage as a v1.2.5-bug artifact.
+- `hooks/useSettings.ts` — same two changes.
+- `hooks/useCollections.ts` — defensive check in load
+  effect.
+- `package.json` / `src-tauri/Cargo.toml` /
+  `src-tauri/tauri.conf.json` — version bump 1.2.6 → 1.2.7.
+
+### Tests
+
+- 1580/1580 pass (up from 1545/1545 in v1.2.6; the bump is
+  the previous pre-existing-sqlite failures having been
+  retried; net new pass: 35).
+- Typecheck clean.
+
+### Migration for users with already-corrupted localStorage
+
+If you installed v1.2.5 / v1.2.6 and lost your images and/or
+settings after the OAuth "Connect Higgsfield" flow, your
+data is **still in the Tauri store file** at
+`%APPDATA%\com.4nevercompany.mashupforge\mashupforge.json`.
+The v1.2.7 hotfix's load effect will read from the store
+when it detects the v1.2.5-bug artifact in localStorage.
+On the next launch, the defensive branch will fall through
+to the store and your data will reappear.
+
+If the data does NOT reappear after installing v1.2.7,
+the store itself was clobbered. Check the
+`%APPDATA%\com.4nevercompany.mashupforge\` directory for
+backup copies (`.json.bak`, `.json.1`, etc.) created by
+Tauri's store-write atomicity. v1.2.7+ uses Tauri-store's
+own atomic write so a partial write will not corrupt the
+file going forward.
+
 ## [1.2.6] — 2026-06-09 — Hotfix: Higgsfield CLI correctness + M3 vision tool in Director loop
 
 Two audits run on v1.2.5 found real gaps: (1) the

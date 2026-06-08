@@ -56,9 +56,29 @@ export function useImages() {
         if (storedImages) {
           try {
             const images = JSON.parse(storedImages).map(normalizeOnLoad);
-            await set('mashup_saved_images', images);
-            localStorage.removeItem('mashup_saved_images');
-            if (!cancelled) setSavedImages(images);
+            // V1.2.6-HOTFIX: defensive check for the v1.2.5 data-loss
+            // bug. The unmount/beforeunload flush on useImages was
+            // registered with `isImagesLoaded=true` even when the
+            // user had never visited Gallery (loadTriggered=false),
+            // so the flush wrote the initial in-memory `[]` to
+            // localStorage. The next page's load then overwrote
+            // the store with `[]`, wiping the user's images.
+            //
+            // If the localStorage value is an empty array, treat
+            // it as a bug artifact rather than a real save. Skip
+            // the store-migration (which would clobber real data)
+            // and fall through to load from the store. Also
+            // clear the stale localStorage entry so subsequent
+            // loads don't keep hitting this branch.
+            if (images.length === 0) {
+              localStorage.removeItem('mashup_saved_images');
+              const idbImages = await get('mashup_saved_images');
+              if (idbImages && !cancelled) setSavedImages(idbImages.map(normalizeOnLoad));
+            } else {
+              await set('mashup_saved_images', images);
+              localStorage.removeItem('mashup_saved_images');
+              if (!cancelled) setSavedImages(images);
+            }
           } catch {
             const idbImages = await get('mashup_saved_images');
             if (idbImages && !cancelled) setSavedImages(idbImages.map(normalizeOnLoad));
@@ -95,8 +115,22 @@ export function useImages() {
   // so the badge "resets on reload". Writes synchronously to
   // localStorage; the load path migrates localStorage → IDB on next
   // session start. Mirrors the useSettings beforeunload flush.
+  //
+  // V1.2.6-HOTFIX: gate the listener on BOTH isImagesLoaded AND
+  // loadTriggered. The original code registered the listener as
+  // soon as `isImagesLoaded` flipped to true (which happens
+  // immediately on mount, BEFORE the actual load runs). The
+  // beforeunload handler then wrote the initial in-memory `[]`
+  // state to localStorage on the next page navigation. The
+  // next page's load effect found that empty array and
+  // overwrote the store with `[]`, wiping the user's images.
+  //
+  // By requiring `loadTriggered` to also be true, we only
+  // register the listener when there's actually a loaded
+  // debounce to flush. Users who navigate without ever
+  // visiting Gallery no longer get the bug.
   useEffect(() => {
-    if (!isImagesLoaded) return;
+    if (!isImagesLoaded || !loadTriggered) return;
     const flush = () => {
       try {
         localStorage.setItem(
@@ -107,7 +141,7 @@ export function useImages() {
     };
     window.addEventListener('beforeunload', flush);
     return () => window.removeEventListener('beforeunload', flush);
-  }, [isImagesLoaded]);
+  }, [isImagesLoaded, loadTriggered]);
 
   const saveImage = (img: GeneratedImage) => {
     setSavedImages(prev => {

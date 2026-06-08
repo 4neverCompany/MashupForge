@@ -1,26 +1,43 @@
 // @vitest-environment jsdom
 //
-// BUG-CRIT-006 / BUG-DES-002: useImages flush-on-unload safety net.
+// BUG-CRIT-006 / BUG-DES-002 / V1.2.7-HOTFIX: useImages flush-on-unload
+// safety net.
 //
-// Bug: useImages persists savedImages with a 200ms debounce. A manual
-// Post Now (postedAt/postError patch) that lands <200ms before the
-// user reloads loses the IDB write — the badge "resets on reload."
+// Bug (v1.2.5): useImages persists savedImages with a 200ms
+// debounce. A manual Post Now (postedAt/postError patch) that
+// lands <200ms before the user reloads loses the IDB write —
+// the badge "resets on reload."
 //
-// Fix: hooks/useImages.ts adds a `beforeunload` listener that
-// synchronously writes the latest savedImages to localStorage. The
-// next session's load path migrates localStorage → IDB on first
-// render (already in place; we don't change it).
+// Fix (v1.2.5): hooks/useImages.ts adds a `beforeunload`
+// listener that synchronously writes the latest savedImages
+// to localStorage.
 //
-// This test pins the flush contract so a future refactor can't
-// silently drop the listener.
+// New bug (v1.2.7-HOTFIX): the listener was registered as
+// soon as `isImagesLoaded` flipped to `true`, which happens
+// immediately on mount BEFORE the actual store-load runs.
+// On the next page navigation (e.g. OAuth "Connect Higgsfield"
+// redirect), the listener fired with the initial in-memory
+// `[]` state and wrote that empty value to localStorage.
+// The next page's load effect found the empty array and
+// clobbered the store with `[]` — wiping the user's images.
+//
+// New fix (v1.2.7-HOTFIX): the listener is now gated on
+// BOTH `isImagesLoaded` AND `loadTriggered`. The user must
+// have actually visited the data's home view (Gallery) for
+// the listener to be active. When `loadTriggered` is false,
+// there's no debounce to flush, so no listener is needed.
+//
+// This test pins the new contract so a future refactor
+// can't silently re-introduce the v1.2.5 data-loss bug.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
 import { useImages } from '@/hooks/useImages';
 
-// Mock idb-keyval so the hook doesn't try to hit a real IDB during the
-// test. The flush path doesn't touch IDB anyway (it writes to
-// localStorage), but the load path calls `get` on mount.
+// Mock idb-keyval so the hook doesn't try to hit a real IDB
+// during the test. The flush path doesn't touch IDB anyway
+// (it writes to localStorage), but the load path calls `get`
+// on mount.
 vi.mock('idb-keyval', () => ({
   get: vi.fn().mockResolvedValue(undefined),
   set: vi.fn().mockResolvedValue(undefined),
@@ -35,12 +52,56 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('BUG-CRIT-006 / BUG-DES-002 — useImages flush-on-unload', () => {
-  it('writes savedImages to localStorage when beforeunload fires', async () => {
-    const { result } = renderHook(() => useImages());
+describe('V1.2.7-HOTFIX — beforeunload flush is gated on loadTriggered', () => {
+  it('does NOT register the beforeunload listener when loadTriggered is false', async () => {
+    // The user just opened the studio. isImagesLoaded flips to true
+    // immediately (lazy load) but the actual store-load hasn't run
+    // because requestLoad() wasn't called yet. The flush listener
+    // must NOT be active in this state — otherwise the next page
+    // navigation would write the initial in-memory `[]` to
+    // localStorage and clobber the store.
+    const addSpy = vi.spyOn(window, 'addEventListener');
 
-    // Wait for the load effect to flip isImagesLoaded → true so the
-    // flush listener subscribes.
+    renderHook(() => useImages());
+    // Flush the synchronous effects pass + the setState re-render
+    // that happens when the lazy-load useEffect calls
+    // setIsImagesLoaded(true).
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const beforeunloadCalls = addSpy.mock.calls.filter(([type]) => type === 'beforeunload');
+    expect(beforeunloadCalls.length).toBe(0);
+
+    addSpy.mockRestore();
+  });
+
+  it('DOES register the beforeunload listener once requestLoad() is called', async () => {
+    const { result } = renderHook(() => useImages());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // Trigger the lazy load (simulating the user navigating to
+    // the Gallery view which calls requestLoad() on mount).
+    act(() => {
+      result.current.requestLoad();
+    });
+    await vi.waitFor(() => expect(result.current.isImagesLoaded).toBe(true));
+
+    // Now the listener should be active. The 200ms debounce is in
+    // play; beforeunload is the only sync path to localStorage.
+    expect(localStorage.getItem('mashup_saved_images')).toBeNull();
+  });
+
+  it('writes savedImages to localStorage when beforeunload fires (after loadTriggered)', async () => {
+    const { result } = renderHook(() => useImages());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      result.current.requestLoad();
+    });
     await vi.waitFor(() => expect(result.current.isImagesLoaded).toBe(true));
 
     act(() => {
@@ -57,9 +118,9 @@ describe('BUG-CRIT-006 / BUG-DES-002 — useImages flush-on-unload', () => {
     expect(result.current.savedImages[0]!.id).toBe('img-flush-1');
     expect(result.current.savedImages[0]!.postedAt).toBe(1234567890);
 
-    // localStorage should be empty BEFORE beforeunload fires — the
-    // 200ms debounce hasn't elapsed and the flush is the only sync
-    // path to localStorage.
+    // localStorage should be empty BEFORE beforeunload fires —
+    // the 200ms debounce hasn't elapsed and the flush is the
+    // only sync path to localStorage.
     expect(localStorage.getItem('mashup_saved_images')).toBeNull();
 
     // Fire beforeunload.
@@ -78,9 +139,14 @@ describe('BUG-CRIT-006 / BUG-DES-002 — useImages flush-on-unload', () => {
 
   it('flush always writes the latest value (savedImagesRef pattern)', async () => {
     const { result } = renderHook(() => useImages());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      result.current.requestLoad();
+    });
     await vi.waitFor(() => expect(result.current.isImagesLoaded).toBe(true));
 
-    // First image
     act(() => {
       result.current.saveImage({
         id: 'a',
@@ -88,10 +154,6 @@ describe('BUG-CRIT-006 / BUG-DES-002 — useImages flush-on-unload', () => {
         url: 'https://example.test/a.png',
       });
     });
-    // Second image — re-render with new state. The flush listener was
-    // registered with the old `savedImages` reference; this test
-    // verifies it sees the NEW value through savedImagesRef rather
-    // than the stale closure.
     act(() => {
       result.current.saveImage({
         id: 'b',
@@ -107,29 +169,5 @@ describe('BUG-CRIT-006 / BUG-DES-002 — useImages flush-on-unload', () => {
     const parsed = JSON.parse(localStorage.getItem('mashup_saved_images')!) as Array<{ id: string }>;
     const ids = parsed.map((p) => p.id).sort();
     expect(ids).toEqual(['a', 'b']);
-  });
-
-  it('registers the beforeunload listener once isImagesLoaded flips true', async () => {
-    // V1.2.1: lazy persistence load. The lazy-load useEffect flips
-    // isImagesLoaded to `true` synchronously on mount (so the studio
-    // doesn't block waiting for the 100+ MB store JSON.parse). The
-    // flush useEffect then registers the beforeunload listener on the
-    // same render tick. Pre-v1.2.1 this test asserted 0 calls; the new
-    // contract is "listener is registered after the synchronous
-    // render+effects flush" which is what the user-visible
-    // reload-survives contract requires.
-    const addSpy = vi.spyOn(window, 'addEventListener');
-
-    renderHook(() => useImages());
-    // Flush the synchronous effects pass + the setState re-render that
-    // happens when the lazy-load useEffect calls setIsImagesLoaded(true).
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const beforeunloadCalls = addSpy.mock.calls.filter(([type]) => type === 'beforeunload');
-    expect(beforeunloadCalls.length).toBeGreaterThanOrEqual(1);
-
-    addSpy.mockRestore();
   });
 });

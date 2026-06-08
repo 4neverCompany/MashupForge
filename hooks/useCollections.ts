@@ -27,10 +27,25 @@ export function useCollections(settings: UserSettings) {
       try {
         const storedCollections = localStorage.getItem('mashup_collections');
         if (storedCollections) {
+          // V1.2.6-HOTFIX: defensive check (same pattern as
+          // useImages). The mutators in this file (createCollection,
+          // deleteCollection) write localStorage directly, but they
+          // only fire on real user changes so the in-memory
+          // `[]`-then-non-[] transition is safe. However if the
+          // v1.2.5 unmount-flush bug ever fires on a hook that
+          // imported this one, we still want the load to skip
+          // an empty localStorage value rather than clobber the
+          // store.
           const parsed = JSON.parse(storedCollections);
-          await set('mashup_collections', parsed);
-          localStorage.removeItem('mashup_collections');
-          if (!cancelled) setCollections(parsed);
+          if (Array.isArray(parsed) && parsed.length === 0) {
+            localStorage.removeItem('mashup_collections');
+            const idbCollections = await get('mashup_collections');
+            if (idbCollections && !cancelled) setCollections(idbCollections);
+          } else {
+            await set('mashup_collections', parsed);
+            localStorage.removeItem('mashup_collections');
+            if (!cancelled) setCollections(parsed);
+          }
         } else {
           const idbCollections = await get('mashup_collections');
           if (idbCollections && !cancelled) setCollections(idbCollections);
