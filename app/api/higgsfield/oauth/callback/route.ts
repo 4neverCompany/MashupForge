@@ -32,7 +32,17 @@ const STATE_COOKIE = 'higgsfield-oauth-state';
 const PKCE_COOKIE = 'higgsfield-oauth-pkce';
 
 function redirectUriFor(req: Request): string {
+  // V1.2.10-OAUTH: when the deep-link listener re-issues the
+  // callback in the WebView2 cookie context, it passes
+  // `?via=desktop` so we know to send `mashupforge://oauth/callback`
+  // in the token exchange (matching the redirect_uri used in
+  // /authorize). Without this, the WebView's origin
+  // (`tauri://localhost`) is sent instead, Higgsfield returns
+  // `invalid_grant`, and the user sees the token_exchange error.
   const url = new URL(req.url);
+  if (url.searchParams.get('via') === 'desktop') {
+    return 'mashupforge://oauth/callback';
+  }
   return `${url.origin}/api/higgsfield/oauth/callback`;
 }
 

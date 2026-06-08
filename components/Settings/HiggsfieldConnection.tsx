@@ -20,7 +20,7 @@
  * by the parent SettingsModal.
  */
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Loader2, ExternalLink, Check, X, AlertTriangle, RefreshCcw } from 'lucide-react';
 import {
   HIGGSFIELD_IMAGE_MODELS,
@@ -81,6 +81,13 @@ export function HiggsfieldConnection({
   // re-register by hand.
   const [migrationNeeded, setMigrationNeeded] = useState(false);
   const [resetting, setResetting] = useState(false);
+  // V1.2.10-OAUTH: dedupe deep-link fires by `code`. The Tauri
+  // deep-link plugin can fire the same URL twice (e.g. once on
+  // OS redirect, once on app focus). Without dedup, the second
+  // fire re-issues /callback with a now-used code, Higgsfield
+  // returns `invalid_grant`, and the user sees a stale error
+  // toast even though the first exchange succeeded.
+  const processedCodes = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -203,11 +210,23 @@ export function HiggsfieldConnection({
               window.location.href = '/studio?higgsfield=error&reason=missing_params';
               return;
             }
+            if (processedCodes.current.has(code)) {
+              // V1.2.10-OAUTH: duplicate deep-link fire for a code we
+              // already processed — silently ignore so we don't
+              // override the success redirect with a stale
+              // token_exchange error.
+              return;
+            }
+            processedCodes.current.add(code);
             // Re-issue the callback in the WebView2 cookie context.
             // The server reads the state/PKCE cookies (set in
             // WebView2 during /authorize), matches state, exchanges
             // the code, and redirects to /studio?higgsfield=connected.
-            window.location.href = `/api/higgsfield/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+            // V1.2.10-OAUTH: pass `via=desktop` so the callback route
+            // returns `mashupforge://oauth/callback` (matching the
+            // authorize request) instead of `tauri://localhost/api/...`
+            // which would cause Higgsfield to return `invalid_grant`.
+            window.location.href = `/api/higgsfield/oauth/callback?via=desktop&code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
             return;
           }
         });
