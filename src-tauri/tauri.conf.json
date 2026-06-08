@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "MashupForge",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "identifier": "com.4nevercompany.mashupforge",
   "build": {
     "frontendDist": "../src-tauri/frontend-stub",
@@ -28,7 +28,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' https://cdn.leonardo.ai https://picsum.photos data:; connect-src 'self' ipc: https://ipc.localhost https://cdn.leonardo.ai https://api.minimaxi.chat https://generativelanguage.googleapis.com http://127.0.0.1:9377 http://127.0.0.1:9378 http://127.0.0.1:9379 http://127.0.0.1:9380; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'",
+      "csp": "default-src 'self'; img-src 'self' https://cdn.leonardo.ai https://picsum.photos data:; connect-src 'self' ipc: https://ipc.localhost https://cdn.leonardo.ai https://api.minimaxi.chat https://generativelanguage.googleapis.com http://127.0.0.1:9377 http://127.0.0.1:9378 http://127.0.0.1:9379 http://127.0.0.1:9380 http://127.0.0.1:9889; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'unsafe-inline'",
       "assetProtocol": {
         "enable": true,
         "scope": ["**"]

@@ -38,7 +38,7 @@ const WEB_CSP = [
   // (scripts/camofox-cors-proxy.mjs). Both are loopback so the
   // risk surface is the user's own machine.
   `connect-src 'self' ${CAMOFOX_CONNECT_SRC} https://cdn.leonardo.ai https://api.minimaxi.chat https://generativelanguage.googleapis.com`,
-  `script-src 'self'`,
+  `script-src 'self' 'unsafe-inline'`,
   // frame-src: allow the Higgsfield OAuth iframe-style auth flow
   // (it uses a popup window, not an iframe, but the directive
   // documents the intent for the next agent).

@@ -1,5 +1,67 @@
 # Changelog
 
+## [1.2.4] — 2026-06-08 — Hotfix: CSP allow inline scripts (Next.js hydration)
+
+### Bug fix
+
+**The real cause of the studio hanging on splash for the last 4
+hotfix releases was a Content Security Policy violation, not the
+149 MB `mashupforge.json` store file.** v1.2.0 introduced a CSP
+header in `next.config.ts` (`script-src 'self'`) and the Tauri
+build's `tauri.conf.json` also had `script-src 'self'` (unchanged
+from v1.1.0). Both policies block Next.js's inline `<script>` tags
+that drive React hydration.
+
+When the browser / Tauri webview2 enforces the CSP, it BLOCKS
+the inline scripts with errors like:
+
+  `Executing inline script violates the following Content Security
+   Policy directive 'script-src 'self''. Either the 'unsafe-inline'
+   keyword, a hash ('sha256-...'), or a nonce ('nonce-...') is
+   required to enable inline execution.`
+
+The HTML still renders (the SSR'd loading screen is visible) but
+React never hydrates. Without hydration, no `useEffect` ever runs.
+`useAuth` never reads `localStorage`, never sets `isAuthenticated`,
+and the splash stays forever. The 4 hook-level `isLoaded` flags
+(v1.2.1, v1.2.2) and the auth-only gate (v1.2.3) were all correct
+in their own logic — they were just never called.
+
+### What changed
+- `src-tauri/tauri.conf.json`: added `'unsafe-inline'` to the
+  Tauri webview's `script-src`. The Tauri CSP applies on top of any
+  response headers, so this is the binding CSP for the desktop
+  build.
+- `next.config.ts`: same fix on the WEB_CSP constant used by the
+  Vercel web build's response headers. `'unsafe-inline'` added to
+  `script-src`.
+
+### Why `'unsafe-inline'` is acceptable here
+- The only scripts in the app are the ones Next.js bundles
+  (`/_next/static/chunks/...`) and Next.js's own inline hydration
+  markers. Both are served from our build pipeline, not from any
+  third-party origin.
+- The Tauri build is a single-user desktop app. The XSS threat
+  surface is small (no user-generated content rendered as raw
+  HTML).
+- Alternative — nonces or per-build hashes — would require either
+  Next.js experimental CSP support (not yet stable in Next 16.x)
+  or hand-maintaining a hash list (fragile across Next.js
+  versions). `'unsafe-inline'` is the pragmatic desktop-app fix.
+
+### Verification
+The playwright run on the v1.2.3 install (Tauri launcher's
+Next.js server) showed 8 CSP errors blocking React's inline
+hydration scripts. After this fix, the same test should hydrate
+cleanly. The `isAuthenticated === null` gate in
+`MashupApp` will then resolve in <1s, and the studio renders.
+
+### Stats
+- 2 files changed (2 lines: add `'unsafe-inline'`)
+- 1828/1842 tests pass (same 14 pre-existing tauri-sqlite env
+  failures)
+- Tauri build: ~20 min, then NSIS installer
+
 ## [1.2.3] — 2026-06-08 — Hotfix: studio gate on auth only (not on lazy hook flags)
 
 ### Bug fix
