@@ -17,11 +17,13 @@
  *       Image-to-image / character reference path. `--image` accepts
  *       either a local file path (CLI auto-uploads) or a UUID from
  *       a previous job / upload command.
- *   higgsfield video create <model> --prompt <text> [--start-image <ref>] --json
+ *   higgsfield generate create <model> --prompt <text> [--start-image <ref>] --json
  *       Video generation. Most models are async; the CLI returns
  *       {"status": "queued", "request_id": "..."} in that case.
  *       For video the canonical flag is `--start-image` (per MODELS.md),
- *       not `--image`.
+ *       not `--image`. The v0.1.40 binary has no `video` subcommand
+ *       — image and video both go through `generate create`; the model
+ *       slug is the only discriminator.
  *
  * Auth (v1.2.6 rewrite — was broken in v1.2.5):
  *   The CLI does NOT read a `HIGGSFIELD_API_KEY` env var. Verified by
@@ -280,7 +282,7 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
     const bin = await this.requireBinary();
     const model = opts.model ?? DEFAULT_VIDEO_MODEL;
 
-    const args = ['video', 'create', model, '--json'];
+    const args = ['generate', 'create', model, '--json'];
     pushFlag(args, '--prompt', opts.prompt);
     pushFlag(args, '--duration', opts.durationSec);
     // V1.2.6: video models use --start-image per MODELS.md,

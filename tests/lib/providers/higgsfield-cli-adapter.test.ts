@@ -295,6 +295,36 @@ describe('HiggsfieldCliAdapter.generateVideo — timeout default (spec 60s)', ()
   });
 });
 
+describe('HiggsfieldCliAdapter — T1.1 video argv shape', () => {
+  it('spawns "generate create <model>" (NOT "video create") for video models', async () => {
+    // Regression test for the v1.2.6 → v1.2.9 bug: the adapter
+    // built `args = ['video', 'create', model, '--json']` for video
+    // models. The @higgsfield/cli v0.1.40 binary has no `video`
+    // subcommand — all generations (image + video) go through
+    // `generate create <job_set_type>`. The model slug is the only
+    // discriminator. Without this assertion the bug shipped to
+    // production and CI was green.
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { url: 'https://cdn.higgsfield.ai/clip.mp4', request_id: 'r-vid' },
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    await adapter.generateVideo({ prompt: 'a sunrise', durationSec: 8 });
+    const callArgs = spy.mock.calls[0][0] as CliInvokeOptions<unknown>;
+    // Positive: the verb sequence is generate, create, <model>, --json.
+    expect(callArgs.args[0]).toBe('generate');
+    expect(callArgs.args[1]).toBe('create');
+    expect(callArgs.args[2]).toBe('seedance_2_0'); // DEFAULT_VIDEO_MODEL
+    expect(callArgs.args[3]).toBe('--json');
+    // Negative: 'video' must NOT appear as a top-level arg
+    // (it's the name of the family, not a CLI verb).
+    expect(callArgs.args).not.toContain('video');
+    spy.mockRestore();
+  });
+});
+
 describe('HiggsfieldCliAdapter — V1.2.6 video image reference', () => {
   it('uses --start-image (not --image) when video has imagePath', async () => {
     const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
