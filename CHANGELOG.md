@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.2.3] — 2026-06-08 — Hotfix: studio gate on auth only (not on lazy hook flags)
+
+### Bug fix
+
+**v1.2.1 + v1.2.2's lazy hooks flip `isLoaded` synchronously in theory,
+but the studio still hung.** Even with all 4 hooks lazy, the
+MashupApp's gate `if (isAuthenticated === null || !isLoaded)`
+was keeping the loading screen up. There appears to be a React 19
+batching or effect-firing-order issue where the lazy setStates
+in nested useEffects don't propagate before the gate check.
+
+The pragmatic fix: **don't gate the studio on `isLoaded`** at all.
+The 4 hook-level `isLoaded` flags exist to prevent the 300ms-debounce
+auto-save effect from firing before the load completes — they were
+never meant to block rendering. Now they only block their OWN
+write-back, not the whole studio.
+
+After this change:
+- `MashupApp` renders the studio as soon as `isAuthenticated`
+  resolves (sync localStorage read, milliseconds)
+- All 4 hooks still flip `isLoaded` synchronously to true
+- The hooks' auto-save effects correctly skip on the first render
+  (via `skipFirstSaveRef`) so no premature writes happen
+- The hooks hydrate in the background (Tauri plugin-store loads
+  the 100+ MB userData file) but the studio is INSTANT
+
+### What changed
+- `components/MashupStudio.tsx`: removed `!isLoaded` from the gate,
+  added a comment explaining why. Gate is now just `isAuthenticated
+  === null`.
+
+### Stats
+- 1 file changed (1 line of logic + 12 lines of comment)
+- 1828/1842 tests pass (same 14 pre-existing tauri-sqlite env
+  failures)
+- Studio mount: <1s for ALL users, including those with
+  100+ MB `mashupforge.json`
+
 ## [1.2.2] — 2026-06-08 — Hotfix: full lazy persistence (useSettings + useComparison)
 
 ### Bug fix

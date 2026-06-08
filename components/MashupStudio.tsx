@@ -110,7 +110,20 @@ function MashupApp() {
   const [onboarding, setOnboarding] = useOnboardingState();
   useFirstLaunchAutostart();
 
-  if (isAuthenticated === null || !isLoaded) {
+  // V1.2.3: gate ONLY on auth. The 4 hook-level isLoaded flags
+  // (isSettingsLoaded, isImagesLoaded, isCollectionsLoaded,
+  // isIdeasLoaded) are now lazy in v1.2.1+v1.2.2 and may stay
+  // false for a few seconds while the Tauri plugin-store loads the
+  // userData file. We don't want the studio splash to sit during
+  // that window — render the studio immediately with default/empty
+  // state and let the hooks hydrate in the background. The
+  // background hydration triggers MashupProvider re-renders that
+  // re-render <MainContent> with the real data.
+  //
+  // The gate `isAuthenticated === null` is the only thing that
+  // should block the splash. `isAuthenticated === false` redirects
+  // to login (handled below). `!isLoaded` no longer blocks.
+  if (isAuthenticated === null) {
     return <DesktopLoadingScreen />;
   }
 
