@@ -158,3 +158,112 @@ fn resolve_camofox_port_handles_repeated_calls() {
     // elided by the compiler (no observable side effect to assert).
     thread::sleep(Duration::from_millis(20));
 }
+
+// ---- V1.1.3-CORS: parse_cors_origins env-var tests ----
+//
+// We exercise the CORS-origin parser through the
+// `camofox_test::resolve_camofox_cors_origins_for_test` re-export.
+// The function reads `CAMOFOX_CORS_ORIGINS` from `std::env::var`,
+// so we set/unset the env-var around each test to keep state
+// isolated. Tests are serial (not parallel) because they share a
+// process-wide env-var namespace.
+
+use std::sync::Mutex;
+static CORS_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+const CORS_ENV_KEY: &str = "CAMOFOX_CORS_ORIGINS";
+
+fn with_cors_env<T>(value: Option<&str>, f: impl FnOnce() -> T) -> T {
+    let _guard = CORS_ENV_LOCK.lock().expect("cors env lock poisoned");
+    // Snapshot the existing value so we can restore it.
+    let previous = std::env::var(CORS_ENV_KEY).ok();
+    match value {
+        Some(v) => std::env::set_var(CORS_ENV_KEY, v),
+        None => std::env::remove_var(CORS_ENV_KEY),
+    }
+    let result = f();
+    match previous {
+        Some(v) => std::env::set_var(CORS_ENV_KEY, v),
+        None => std::env::remove_var(CORS_ENV_KEY),
+    }
+    result
+}
+
+#[test]
+fn cors_origins_default_when_unset() {
+    let got = with_cors_env(None, || {
+        app_lib::camofox_test::resolve_camofox_cors_origins_for_test()
+    });
+    // Default whitelist is the 2-origin list declared in
+    // `DEFAULT_CAMOFOX_CORS_ORIGINS`. We don't assert the literal
+    // string (avoids a brittle test that breaks on intentional
+    // changes) — instead we assert the invariants the default
+    // upholds: at least one origin, http/https only, no `*`.
+    assert!(!got.is_empty(), "default whitelist must not be empty");
+    assert!(!got.contains('*'), "default whitelist must not contain '*'");
+    for origin in got.split(',') {
+        let o = origin.trim();
+        assert!(
+            o.starts_with("http://") || o.starts_with("https://"),
+            "default origin '{}' must be http(s)",
+            o
+        );
+    }
+}
+
+#[test]
+fn cors_origins_passes_through_valid_csv() {
+    let got = with_cors_env(Some("http://localhost:3000,https://mashupforge.vercel.app"), || {
+        app_lib::camofox_test::resolve_camofox_cors_origins_for_test()
+    });
+    assert_eq!(got, "http://localhost:3000,https://mashupforge.vercel.app");
+}
+
+#[test]
+fn cors_origins_rejects_wildcard() {
+    let got = with_cors_env(Some("*"), || {
+        app_lib::camofox_test::resolve_camofox_cors_origins_for_test()
+    });
+    // The wildcard alone is filtered out → sanitized list is empty →
+    // we fall back to the default whitelist.
+    assert!(!got.contains('*'), "wildcard must never appear in the forwarded value");
+    assert!(!got.is_empty(), "wildcard-only input must fall back to default");
+    assert!(
+        got.contains("http://") || got.contains("https://"),
+        "fallback default must include http(s) origins"
+    );
+}
+
+#[test]
+fn cors_origins_strips_invalid_schemes() {
+    // file://, ftp://, and the literal "null" origin are not
+    // browser-cors-valid and must be dropped.
+    let got = with_cors_env(
+        Some("http://ok.example,file:///etc/passwd,ftp://nope,https://alsook.example,null"),
+        || app_lib::camofox_test::resolve_camofox_cors_origins_for_test(),
+    );
+    assert!(got.contains("http://ok.example"), "valid origin dropped: {}", got);
+    assert!(got.contains("https://alsook.example"), "valid origin dropped: {}", got);
+    assert!(!got.contains("file://"), "file:// origin leaked through: {}", got);
+    assert!(!got.contains("ftp://"), "ftp:// origin leaked through: {}", got);
+    assert!(!got.contains("null"), "literal 'null' origin leaked through: {}", got);
+}
+
+#[test]
+fn cors_origins_trims_whitespace() {
+    let got = with_cors_env(
+        Some("  http://a.example ,  https://b.example  "),
+        || app_lib::camofox_test::resolve_camofox_cors_origins_for_test(),
+    );
+    assert_eq!(got, "http://a.example,https://b.example");
+}
+
+#[test]
+fn cors_origins_treats_empty_string_as_unset() {
+    let got = with_cors_env(Some(""), || {
+        app_lib::camofox_test::resolve_camofox_cors_origins_for_test()
+    });
+    // Empty string is treated the same as unset → default whitelist.
+    assert!(!got.is_empty());
+    assert!(!got.contains('*'));
+}

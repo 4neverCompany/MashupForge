@@ -64,7 +64,9 @@ for up to 60 seconds before declaring failure.
 | `camofox UNHEALTHY after 60s on port 9377` | Camoufox binary failed to download on first run | Check `camofox.log` for download errors; rerun the app to retry |
 | `camofox crash limit reached — WEB_SEARCH_FALLBACK=true` | 3 crashes in 5 minutes (Camoufox renderer bug on a specific site) | Restart the app; the flag resets on launch |
 | Windows Defender SmartScreen warning on first run | `camofox-browser.cmd` is not code-signed | Click "More info" → "Run anyway" (one-time per machine) |
-| Web build returns search-empty in the studio | camofox is bundled only with the Tauri desktop build, not the Vercel web build | Expected — the web build always uses the DDG/Brave path |
+| Vercel web build returns `CORS error` despite camofox running | `@askjo/camofox-browser@1.11.2` has no CORS support; cross-origin `fetch()` blocked | v1.1.3+: run `node scripts/camofox-cors-proxy.mjs` for the workaround proxy on port 9889, OR install camofox standalone (see `docs/camofox-standalone-install.md`). Upstream PR for native CORS is tracked. |
+| Vercel web build returns `CSP violation` for `127.0.0.1:9377` | MashupForge web-CSP did not permit loopback `connect-src` before v1.1.3 | v1.1.3+ ships a `next.config.ts` `headers()` rule adding `connect-src http://127.0.0.1:9377-9380` + the CORS-proxy port 9889. Verify the deployed CSP at the network tab on a fresh load. |
+| Web build returns search-empty in the studio (Tauri build) | camofox sidecar failed to start; check `logs/camofox.log` for the specific reason | Restart the app — the `WEB_SEARCH_FALLBACK` flag is per-session and resets on launch |
 
 ## What's intentionally NOT in v1.1.0
 
@@ -85,6 +87,44 @@ for up to 60 seconds before declaring failure.
 - **macOS / Linux Tauri builds** — camofox is bundled only in the
   Windows Tauri build (the primary target per `docs/runbook/nsis-release.md`).
   Mac and Linux validation builds use the existing DDG/Brave path.
+
+## v1.1.3 update — CORS-Web-Build & Standalone-Install
+
+> 2026-06-07 — D-Refactor Item 1+2+5+6 (siehe `ROADMAP.md`).
+
+v1.1.3 (Branch `feature/v113-camofox-cors`) ergänzt:
+
+- **`CAMOFOX_CORS_ORIGINS` env-var passthrough** in
+  `src-tauri/src/lib.rs`. Default-Whitelist
+  `http://localhost:3000,https://mashupforge.vercel.app`.
+  Wildcard `*` explizit rejected (Hijack-Risk). v1.11.2
+  ignoriert die env-var noch (Upstream-Pending) — der Wire ist
+  trotzdem drin.
+- **Web-Build CSP** in `next.config.ts` `headers()`-Funktion:
+  `connect-src http://127.0.0.1:9377-9380` + CORS-Proxy-Port
+  9889. Tauri-CSP unverändert.
+- **CORS-Proxy-Workaround** (`scripts/camofox-cors-proxy.mjs`):
+  Stdlib-only Node-Script, listen 127.0.0.1:9889, forwarded
+  zu echtem Sidecar mit `Access-Control-Allow-Origin`. Damit
+  funktioniert Web-Build auch OHNE Upstream-CORS-Support.
+- **Standalone-Install-Guide** (`docs/camofox-standalone-install.md`):
+  npm-Install-Anleitung, 4-Port-Discovery-Snippet, Daemon-Setup
+  pro OS (nssm/launchd/systemd), CORS-Proxy-Hinweis.
+- **TypeScript 4-Port-Discovery** (`lib/camofox/standalone-discovery.ts`):
+  Mirror der Rust `CAMOFOX_PORTS` für Vercel-Web-Route.
+  2-stufiger Probe (no-cors Port-Occupancy + cors camofox-Identity).
+
+Aus v1.1.3-Patch **ausgeschlossen** (Follow-ups für v1.1.4+):
+
+- **Tauri-Command-Bridge `camofox_search`** (D-Item 3) —
+  Frontend ruft `__TAURI_INTERNALS__.invoke('camofox_search', ...)`
+  und Rust proxiet. Tauri-CSP-Workaround entfällt damit.
+- **Hybrid-Trending-Route** (D-Item 4) — `withCamofoxHealth`
+  bleibt Tauri-only, Vercel-Web returnt
+  `{ needsClientSideSearch: true, queries: [...] }`.
+- **Sidecar-Status-UI** (D-Item 6) — "running / not-running /
+  cors-blocked" indicator in Studio. Wartet auf CORS-Status-
+  Event-Channel.
 
 ## References
 
