@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
@@ -844,6 +845,14 @@ fn preflight_resources(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // V1.1.3-ORCH (2026-06-07): register the Tauri commands exposed
+        // to the WebView. Only `camofox_search` for now — the
+        // `withCamofoxHealth` Server-Side helper still uses the
+        // `lib/camofox` TS client for the bulk of the call shape, but
+        // for the CLIENT_SEARCH_REQUIRED hybrid path the WebView runs
+        // its own probe directly through this command (bypasses the
+        // Next.js route's 4-port CORS dance).
+        .invoke_handler(tauri::generate_handler![camofox_search])
         .manage(SidecarState(Mutex::new(None)))
         // CAMOFOX-CAMOUFOX-1.1.0: camofox sidecar state, parallel to
         // the Node sidecar slot. Spawned in `.setup()` below; killed
@@ -1596,6 +1605,270 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
+// ---- V1.1.3-ORCH (2026-06-07): Tauri command — camofox_search ----
+//
+// Exposes a minimal "search camofox and return WebSearchResult[]"
+// entry point to the WebView. Used by the D-orchestration hybrid
+// trending path (`lib/trending-client.ts`) when the Server-Side
+// /api/trending route returns `CLIENT_SEARCH_REQUIRED` — i.e. when
+// the Node sidecar's port-CORS path is blocked, but the WebView
+// itself can still reach the camofox sidecar directly (Tauri-WebView
+// only — the Web build doesn't have this command and falls back to
+// its direct-fetch path in `lib/camofox-client.ts`).
+//
+// Why a Tauri command at all (and not just an HTTP fetch from the
+// WebView)? Two reasons:
+//   1. The Vercel-Web build CAN'T use this command (no Tauri) — the
+//      same helper falls back to a direct fetch with the same
+//      `127.0.0.1:9377-9380` 4-port discovery the Rust boot probe
+//      uses, so the wire is identical. Both code paths return
+//      `WebSearchResult[]` and never throw to the caller.
+//   2. We don't need any new sidecar binary — just the existing
+//      camofox-browser sidecar (already spawned in `.setup()`).
+//
+// The 4-step dance mirrors the TS client's `camofoxSearch()`: open
+// tab → navigate → /links → close. We use std::net::TcpStream
+// (matching the boot-probe pattern in `is_camofox_responding_on`)
+// to avoid pulling in `reqwest`/`ureq` for a few endpoints.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchResult {
+    pub title: String,
+    pub url: String,
+    pub snippet: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CamofoxLink {
+    #[serde(default)]
+    #[allow(dead_code)]
+    r#ref: Option<String>,
+    url: String,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+/// Resolve the camofox port for the Tauri command. Order of
+/// precedence:
+///
+/// 1. The `CAMOFOX_PORT` env-var (set by the .setup() spawn block on
+///    the camofox process). This is the canonical wire and the same
+///    value the child process binds to.
+/// 2. The `CAMOFOX_ACTIVE_PORT` atomic — set after the spawn /
+///    reuse-mode decision. Covers the REUSE case (Hermes agent
+///    already on 9377) where the env-var isn't propagated to us
+///    because we didn't spawn the child.
+/// 3. The default `CAMOFOX_DEFAULT_PORT` (9377) as a last-resort
+///    guess for dev-time use.
+///
+/// Returns `None` if the `WEB_SEARCH_FALLBACK` flag is set (we'd
+/// rather surface "camofox is broken" via the command error than
+/// call into a known-bad instance).
+fn resolve_active_camofox_port_for_command() -> Option<u16> {
+    if WEB_SEARCH_FALLBACK.load(Ordering::Relaxed) {
+        return None;
+    }
+    if let Ok(raw) = std::env::var("CAMOFOX_PORT") {
+        if let Ok(p) = raw.trim().parse::<u16>() {
+            if p > 0 {
+                return Some(p);
+            }
+        }
+    }
+    let atomic = CAMOFOX_ACTIVE_PORT.load(Ordering::Relaxed);
+    if atomic > 0 {
+        return Some(atomic);
+    }
+    Some(CAMOFOX_DEFAULT_PORT)
+}
+
+/// Tiny HTTP helper for talking to the local camofox sidecar.
+/// Mirrors the boot-probe pattern in `is_camofox_responding_on`:
+/// raw TCP, bounded read, no external HTTP dep. Returns the raw
+/// response body (best-effort UTF-8) and the HTTP status line. On
+/// any transport error, returns `Err(message)` so the caller can
+/// surface it via the Tauri command error channel.
+fn camofox_http_post(
+    port: u16,
+    path: &str,
+    body: &str,
+    timeout_ms: u64,
+) -> Result<(u16, String), String> {
+    let addr = format!("127.0.0.1:{}", port)
+        .parse::<std::net::SocketAddr>()
+        .map_err(|e| format!("bad camofox port {}: {}", port, e))?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(500))
+        .map_err(|e| format!("camofox TCP connect :{} failed: {}", port, e))?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(timeout_ms)))
+        .map_err(|e| format!("set_read_timeout: {}", e))?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(2_000)))
+        .map_err(|e| format!("set_write_timeout: {}", e))?;
+    let req = format!(
+        "POST {} HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        path,
+        body.len(),
+        body
+    );
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|e| format!("camofox write: {}", e))?;
+    let mut buf = Vec::with_capacity(8 * 1024);
+    stream
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("camofox read: {}", e))?;
+    let raw = String::from_utf8_lossy(&buf).to_string();
+    // Parse "HTTP/1.x STATUS REASON\r\n..." header section. The
+    // body lives after the first \r\n\r\n.
+    let (head, body_str) = match raw.find("\r\n\r\n") {
+        Some(i) => (raw[..i].to_string(), raw[i + 4..].to_string()),
+        None => (raw.clone(), String::new()),
+    };
+    let status: u16 = head
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(0);
+    Ok((status, body_str))
+}
+
+fn camofox_http_get(
+    port: u16,
+    path: &str,
+    timeout_ms: u64,
+) -> Result<(u16, String), String> {
+    let addr = format!("127.0.0.1:{}", port)
+        .parse::<std::net::SocketAddr>()
+        .map_err(|e| format!("bad camofox port {}: {}", port, e))?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(500))
+        .map_err(|e| format!("camofox TCP connect :{} failed: {}", port, e))?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(timeout_ms)))
+        .map_err(|e| format!("set_read_timeout: {}", e))?;
+    stream
+        .set_write_timeout(Some(Duration::from_millis(2_000)))
+        .map_err(|e| format!("set_write_timeout: {}", e))?;
+    let req = format!(
+        "GET {} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        path
+    );
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|e| format!("camofox write: {}", e))?;
+    let mut buf = Vec::with_capacity(8 * 1024);
+    stream
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("camofox read: {}", e))?;
+    let raw = String::from_utf8_lossy(&buf).to_string();
+    let (head, body_str) = match raw.find("\r\n\r\n") {
+        Some(i) => (raw[..i].to_string(), raw[i + 4..].to_string()),
+        None => (raw.clone(), String::new()),
+    };
+    let status: u16 = head
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(0);
+    Ok((status, body_str))
+}
+
+/// Tauri command: run a single camofox search and return the results
+/// as a typed `WebSearchResult[]`.
+///
+/// This is the WebView's escape hatch for the hybrid trending path
+/// (Server-Side route is unreachable + `x-client-can-search: true`).
+/// Errors are surfaced as `Err(String)` so the WebView helper can
+/// `try/catch` and return `[]` without breaking the user-facing
+/// trending flow.
+#[tauri::command]
+async fn camofox_search(
+    macro_name: String,
+    query: String,
+    count: u32,
+) -> Result<Vec<WebSearchResult>, String> {
+    let port = match resolve_active_camofox_port_for_command() {
+        Some(p) => p,
+        None => return Err("camofox fallback active; refusing to call broken sidecar".into()),
+    };
+    // Bound the count: the TS client clamps 1..=20, so we mirror that
+    // to keep both sides honest.
+    let bounded_count = count.clamp(1, 20) as usize;
+    let user_id = "tauri-cmd";
+    let session_key = format!("tauri-cmd-{}-{}", macro_name, std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0));
+
+    // Step 1: open a tab.
+    let open_body = format!(
+        r#"{{"userId":"{}","sessionKey":"{}"}}"#,
+        user_id, session_key
+    );
+    let (status, body) = camofox_http_post(port, "/tabs", &open_body, 5_000)?;
+    if !(200..300).contains(&status) {
+        return Err(format!("camofox /tabs HTTP {}: {}", status, body));
+    }
+    let parsed: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("camofox /tabs parse: {} (body: {})", e, body))?;
+    let tab_id = parsed
+        .get("tabId")
+        .or_else(|| parsed.get("id"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("camofox /tabs missing tabId: {}", body))?
+        .to_string();
+
+    // Step 2: navigate.
+    let nav_body = format!(
+        r#"{{"userId":"{}","macro":"{}","query":"{}"}}"#,
+        user_id,
+        macro_name.replace('"', r#"\""#),
+        query.replace('"', r#"\""#)
+    );
+    let (status, body) = camofox_http_post(
+        port,
+        &format!("/tabs/{}/navigate", tab_id),
+        &nav_body,
+        20_000,
+    )?;
+    if !(200..300).contains(&status) {
+        return Err(format!("camofox navigate HTTP {}: {}", status, body));
+    }
+
+    // Step 3: fetch links. We re-use the tab for the /links query
+    // because camofox's `navigate` response IS the parsed link list
+    // for HTML-returning macros — but the /links endpoint is the
+    // canonical "give me the list of anchors" call, so we use that.
+    let links_path = format!(
+        "/tabs/{}/links?userId={}",
+        tab_id,
+        user_id
+    );
+    let (status, body) = camofox_http_get(port, &links_path, 10_000)?;
+    if !(200..300).contains(&status) {
+        return Err(format!("camofox /links HTTP {}: {}", status, body));
+    }
+    let links: Vec<CamofoxLink> = serde_json::from_str(&body)
+        .map_err(|e| format!("camofox /links parse: {} (body: {})", e, body))?;
+
+    // Step 4: best-effort close. Swallow the result — the search
+    // already returned its data and leaving a tab open is much less
+    // bad than a 500 to the WebView.
+    let close_path = format!("/tabs/{}?userId={}", tab_id, user_id);
+    let _ = camofox_http_post(port, &close_path, "", 1_000);
+
+    Ok(links
+        .into_iter()
+        .take(bounded_count)
+        .map(|l| WebSearchResult {
+            title: l.text.unwrap_or_default(),
+            url: l.url,
+            snippet: String::new(),
+        })
+        .collect())
+}
+
 // ---- CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): test-helper re-exports ----
 //
 // Integration tests under `src-tauri/tests/` live in a separate crate
@@ -1630,5 +1903,14 @@ pub mod camofox_test {
     // to the default whitelist on empty).
     pub fn resolve_camofox_cors_origins_for_test() -> String {
         super::resolve_camofox_cors_origins()
+    }
+
+    // V1.1.3-ORCH: re-export the helpers the integration test crate
+    // might want to exercise for the new Tauri command. The
+    // `camofox_search` command itself is reachable via
+    // `app_lib::camofox_search` because Tauri commands are
+    // `#[tauri::command]`-decorated free functions (auto-public).
+    pub fn resolve_active_camofox_port_for_command_for_test() -> Option<u16> {
+        super::resolve_active_camofox_port_for_command()
     }
 }
