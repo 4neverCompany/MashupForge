@@ -3,10 +3,10 @@
  *
  * The "Director" pattern from ROADMAP §v1.2.2. Given a
  * brief (niches, genres, ideaConcept, skills) the loop
- * drives a single Vercel AI SDK `generateText` call with
- * the `AGENT_TOOLS` array plugged in and a `stepCountIs(8)`
- * hard cap. The SDK handles the multi-step tool-use loop
- * internally; we wrap it with:
+ * drives a single Vercel AI SDK `ToolLoopAgent` (v6.0.197+)
+ * with the `AGENT_TOOLS` array plugged in and a
+ * `stepCountIs(8)` hard cap. The SDK handles the multi-step
+ * tool-use loop internally; we wrap it with:
  *
  *   - **step logging** — every `onStepFinish` event becomes
  *     one (or more) `Step` records in the run log, so the
@@ -29,13 +29,27 @@
  *     client (or no-op'd on the server). The route can
  *     later fetch the log by `runId` to feed the Replay UI.
  *
+ * v1.2.6 migration note: the previous v1.2.0 implementation
+ * called `generateText({ tools: AGENT_TOOLS, stopWhen: ... })`
+ * directly. v6.0.197 of the Vercel AI SDK ships the new
+ * first-class `ToolLoopAgent` class (https://ai-sdk.dev/docs/
+ * agents/building-agents) which is exactly the pattern we
+ * hand-rolled. We now construct one agent per call (model
+ * resolution is per-request, so the agent instance is too)
+ * and call `agent.generate({ prompt, system, onStepFinish })`
+ * on it. The behaviour is identical to the hand-rolled
+ * version; the code is just declarative now.
+ *
  * The function is the **only** exported entry point; every
  * other module in `lib/agent-loop/` is internal. Tests
  * import the function directly and mock the SDK's
- * `generateText` to assert on the step log.
+ * `ToolLoopAgent.prototype.generate` to assert on the step
+ * log. (Before v1.2.6 the tests mocked `generateText`
+ * directly — the test suite was updated to mock the agent's
+ * `.generate` method instead.)
  */
 import {
-  generateText,
+  ToolLoopAgent,
   stepCountIs,
   type LanguageModel,
   type StopCondition,
@@ -453,6 +467,12 @@ export async function runDirectorLoop(
   // 4. Run the SDK loop. We capture `onStepFinish` events into
   //    the logger; the budget stop condition is wired into
   //    `stopWhen` alongside `stepCountIs(maxSteps)`.
+  //
+  //    v1.2.6: wrap the v6 `ToolLoopAgent` class. The agent is
+  //    a thin container for `model` + `tools` + `stopWhen` +
+  //    `instructions` — everything we configured per-call. The
+  //    `generate()` call below accepts the per-step overrides
+  //    (`system`, `prompt`, `onStepFinish`, `abortSignal`).
   // -----------------------------------------------------------------------
   let truncatedBy: TruncatedBy = 'natural';
   const stepResults: Array<{
@@ -466,12 +486,20 @@ export async function runDirectorLoop(
 
   const start = clock();
   try {
-    const result = await generateText({
+    // Construct a fresh ToolLoopAgent per call. Model resolution
+    // is per-request (different modelId, different model
+    // object), so the agent instance has to be per-call too.
+    // For the tools array, we accept the test override (mock
+    // tools) or the full AGENT_TOOLS barrel.
+    const directorAgent = new ToolLoopAgent({
       model: resolved.model,
       tools: (input._toolsOverride ?? AGENT_TOOLS) as unknown as ToolSet,
+      stopWhen: [stepCountIs(maxSteps), makeBudgetStopCondition(budget)],
+    });
+
+    const result = await directorAgent.generate({
       ...(system ? { system } : {}),
       prompt: userPrompt,
-      stopWhen: [stepCountIs(maxSteps), makeBudgetStopCondition(budget)],
       ...(input.signal ? { abortSignal: input.signal } : {}),
       onStepFinish: async (stepResult) => {
         // Push the raw step into our local accumulator for

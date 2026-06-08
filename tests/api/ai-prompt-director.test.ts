@@ -3,7 +3,7 @@
  *
  * Pins the wire shape that the Studio frontend will consume:
  *   - 400 on missing fields
- *   - 200 on a happy-path Director run (mocked generateText)
+ *   - 200 on a happy-path Director run (mocked ToolLoopAgent)
  *   - 503 when no AI provider is configured
  *   - The 200 body must contain {prompt, steps, cost, runId,
  *     modelId, provider, truncatedBy}
@@ -11,10 +11,12 @@
  *     X-AI-Provider, X-AI-Model
  *
  * The AI SDK is mocked at the `ai` module level so we
- * never hit a real LLM. The mock simulates two
- * `onStepFinish` events (trending_search, generate_prompt)
- * and returns a `text` value that becomes the
- * `finalPrompt`.
+ * never hit a real LLM. v1.2.6: we now mock
+ * `ToolLoopAgent.prototype.generate` (replaces the bare
+ * `generateText` mock from v1.2.0-v1.2.5). The mock
+ * simulates two `onStepFinish` events (trending_search,
+ * generate_prompt) and returns a `text` value that becomes
+ * the `finalPrompt`.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
@@ -26,9 +28,20 @@ const { generateTextMock } = vi.hoisted(() => ({
 
 vi.mock('ai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ai')>();
+  // v1.2.6: stub ToolLoopAgent so the route's
+  // `new ToolLoopAgent(...).generate(...)` chain ends in
+  // our vi.fn(). The class has to be `new`-callable; the
+  // stub ignores all constructor args (model / tools /
+  // stopWhen) because the test never depends on them.
+  class StubToolLoopAgent {
+    constructor(_opts: unknown) {
+      // ignore
+    }
+    generate = generateTextMock;
+  }
   return {
     ...actual,
-    generateText: generateTextMock,
+    ToolLoopAgent: StubToolLoopAgent,
   };
 });
 

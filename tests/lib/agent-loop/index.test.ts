@@ -1,12 +1,14 @@
 /**
  * v1.2 — Director Route 2.0 main loop tests.
  *
- * Unit tests for `runDirectorLoop`. The AI SDK's `generateText`
- * is mocked with `vi.mock` so we can drive the loop
- * deterministically (no network, no real LLM). The mock
- * simulates the SDK's per-step event flow by calling
- * `onStepFinish` with a canned `StepResult`-shaped object
- * and then returning a final `GenerateTextResult`.
+ * Unit tests for `runDirectorLoop`. The AI SDK's
+ * `ToolLoopAgent` class is mocked with `vi.mock` (v1.2.6
+ * migration — previously the bare `generateText` function
+ * was mocked) so we can drive the loop deterministically
+ * (no network, no real LLM). The mock simulates the SDK's
+ * per-step event flow by calling `onStepFinish` with a
+ * canned `StepResult`-shaped object and then returning a
+ * final `GenerateTextResult`.
  *
  * What's tested:
  *   - happy path: 2-step loop (plan, tool_call, tool_result,
@@ -30,11 +32,13 @@ import 'fake-indexeddb/auto';
 // ---------------------------------------------------------------------------
 // Mock the `ai` SDK so the loop can run without a real LLM.
 //
-// The mock records every call to `generateText` and lets the
-// test control what `onStepFinish` sees + what the final
-// `GenerateTextResult` returns. We keep `stepCountIs` and
-// `tool` from the real module so `stopWhen` / `AGENT_TOOLS`
-// still work.
+// v1.2.6: the Director loop now uses the v6 `ToolLoopAgent`
+// class. We mock `ToolLoopAgent.prototype.generate` instead
+// of the bare `generateText` function. The mock records
+// every call to `.generate()` and lets the test control what
+// `onStepFinish` sees + what the final `GenerateTextResult`
+// returns. We keep `stepCountIs` and `tool` from the real
+// module so `stopWhen` / `AGENT_TOOLS` still work.
 //
 // `vi.hoisted` is required so the mock factory (which
 // Vitest hoists to the top of the file) can see the mock
@@ -47,9 +51,22 @@ const { generateTextMock } = vi.hoisted(() => ({
 
 vi.mock('ai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ai')>();
+  // Replace the ToolLoopAgent class with a stub whose
+  // `.generate` is the shared vi.fn() we can assert on.
+  // The class still has to be `new`-callable; the stub
+  // ignores all constructor args (model / tools / stopWhen)
+  // because the test never depends on them.
+  class StubToolLoopAgent {
+    constructor(_opts: unknown) {
+      // ignore — the test doesn't care which tools/model
+      // the loop wires up, only that `.generate` is called
+      // with the expected `prompt` + `onStepFinish`.
+    }
+    generate = generateTextMock;
+  }
   return {
     ...actual,
-    generateText: generateTextMock,
+    ToolLoopAgent: StubToolLoopAgent,
   };
 });
 
@@ -166,7 +183,7 @@ const baseInput: RunDirectorLoopInput = {
   _clockOverride: () => 1700000000000,
   // _toolsOverride omitted on purpose — the loop should
   // work with the real AGENT_TOOLS array (which never
-  // gets called because generateText is mocked).
+  // gets called because ToolLoopAgent.generate is mocked).
 };
 
 beforeEach(() => {
