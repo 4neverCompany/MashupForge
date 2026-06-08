@@ -18,14 +18,16 @@ import {
   generateImageTool,
   generateVideoTool,
   persistAssetTool,
+  m3VisionDescribeTool,
 } from '@/lib/agent-tools';
 
 describe('AGENT_TOOLS — barrel contents', () => {
-  it('contains exactly the 6 documented tools', () => {
-    expect(AGENT_TOOLS).toHaveLength(6);
+  // V1.2.6: 7 tools total (was 6) — m3_vision_describe added.
+  it('contains exactly the 7 documented tools', () => {
+    expect(AGENT_TOOLS).toHaveLength(7);
   });
 
-  it('contains the 6 expected tool references (in any order)', () => {
+  it('contains the 7 expected tool references (in any order)', () => {
     const set = new Set(AGENT_TOOLS);
     expect(set.has(trendingSearchTool)).toBe(true);
     expect(set.has(generatePromptTool)).toBe(true);
@@ -33,6 +35,7 @@ describe('AGENT_TOOLS — barrel contents', () => {
     expect(set.has(generateImageTool)).toBe(true);
     expect(set.has(generateVideoTool)).toBe(true);
     expect(set.has(persistAssetTool)).toBe(true);
+    expect(set.has(m3VisionDescribeTool)).toBe(true);
   });
 });
 
@@ -45,13 +48,14 @@ describe('AGENT_TOOLS — per-tool contract', () => {
     'generate_image',
     'generate_video',
     'persist_asset',
+    'm3_vision_describe',
   ];
 
   it('exposes one description row per tool', () => {
-    expect(docs).toHaveLength(6);
+    expect(docs).toHaveLength(7);
   });
 
-  it('names match the 6 documented tools', () => {
+  it('names match the 7 documented tools', () => {
     const names = docs.map((d) => d.name).sort();
     expect(names).toEqual([...expectedNames].sort());
   });

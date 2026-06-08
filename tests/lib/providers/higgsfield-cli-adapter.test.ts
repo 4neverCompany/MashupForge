@@ -18,6 +18,7 @@ import * as cliUtils from '@/lib/providers/cli-utils';
 import {
   __setSpawnForTests,
   __setLogForTests,
+  type CliInvokeOptions,
 } from '@/lib/providers/cli-utils';
 import { HiggsfieldCliAdapter } from '@/lib/providers/higgsfield/cli-adapter';
 import {
@@ -101,6 +102,13 @@ describe('HiggsfieldCliAdapter.generateImage — happy paths', () => {
     await adapter.generateImage({
       prompt: 'a cat',
       aspectRatio: '16:9',
+      // V1.2.6: --seed / --width / --height / --negative-prompt
+      // are NOT in @higgsfield/cli MODELS.md. We intentionally
+      // do NOT pass them through even when callers set them —
+      // sending them causes the binary to error. The options
+      // are kept on the adapter interface for forward-compat
+      // with providers that DO support them (Leonardo, mmx);
+      // the adapter silently drops them.
       seed: 7,
       width: 1024,
       height: 768,
@@ -111,17 +119,33 @@ describe('HiggsfieldCliAdapter.generateImage — happy paths', () => {
     const [, args] = spawnMock.mock.calls[0] as [string, string[], unknown];
     expect(args).toContain('--prompt');
     expect(args).toContain('a cat');
-    expect(args).toContain('--seed');
-    expect(args).toContain('7');
-    expect(args).toContain('--width');
-    expect(args).toContain('1024');
     expect(args).toContain('--aspect-ratio');
     expect(args).toContain('16:9');
-    expect(args).toContain('--negative-prompt');
-    expect(args).toContain('blurry');
     expect(args).toContain('--image');
     expect(args).toContain('/tmp/ref.png');
     expect(args).toContain('text2image_nano_banana');
+    // Sanity: the dropped flags must NOT appear in argv.
+    expect(args).not.toContain('--seed');
+    expect(args).not.toContain('--width');
+    expect(args).not.toContain('--height');
+    expect(args).not.toContain('--negative-prompt');
+    expect(args).not.toContain('--image-url');
+    expect(args).not.toContain('--image-id');
+  });
+
+  // V1.2.6: referenceImage with id (UUID) should be passed
+  // verbatim via --image, not turned into a URL.
+  it('passes a UUID reference via --image verbatim', async () => {
+    spawnMock.mockReturnValue(
+      makeChild({ stdout: JSON.stringify({ url: 'https://x' }) }) as never,
+    );
+    await adapter.generateImage({
+      prompt: 'a dog',
+      referenceImage: { id: 'prev-job-uuid-1234' },
+    });
+    const [, args] = spawnMock.mock.calls[0] as [string, string[], unknown];
+    expect(args).toContain('--image');
+    expect(args).toContain('prev-job-uuid-1234');
   });
 });
 
@@ -267,6 +291,68 @@ describe('HiggsfieldCliAdapter.generateVideo — timeout default (spec 60s)', ()
     } as never);
     await adapter.generateVideo({ prompt: 'a sunrise', durationSec: 8, timeoutMs: 5000 });
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({ timeoutMs: 5000 }));
+    spy.mockRestore();
+  });
+});
+
+describe('HiggsfieldCliAdapter — V1.2.6 video image reference', () => {
+  it('uses --start-image (not --image) when video has imagePath', async () => {
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { url: 'https://cdn.higgsfield.ai/clip.mp4', request_id: 'r-3' },
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    await adapter.generateVideo({
+      prompt: 'a sunrise',
+      imagePath: '/tmp/start.png',
+    });
+    const callArgs = spy.mock.calls[0][0] as CliInvokeOptions<unknown>;
+    expect(callArgs.args).toContain('--start-image');
+    expect(callArgs.args).toContain('/tmp/start.png');
+    expect(callArgs.args).not.toContain('--image');
+    spy.mockRestore();
+  });
+});
+
+describe('HiggsfieldCliAdapter — V1.2.6 auth via HIGGSFIELD_CREDENTIALS_PATH', () => {
+  it('forwards token via a temp credentials.json when cliToken is set', async () => {
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { url: 'https://x' },
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    const authed = new HiggsfieldCliAdapter({ cliToken: 'test-jwt-abc-123' });
+    await authed.generateImage({ prompt: 'a cat' });
+    const callArgs = spy.mock.calls[0][0] as CliInvokeOptions<unknown>;
+    expect(callArgs.env).toBeDefined();
+    expect(callArgs.env).toHaveProperty('HIGGSFIELD_CREDENTIALS_PATH');
+    // V1.2.5's HIGGSFIELD_API_KEY is the silent-no-op path;
+    // it must NOT be set after v1.2.6.
+    expect(callArgs.env).not.toHaveProperty('HIGGSFIELD_API_KEY');
+    const credPath = (callArgs.env as Record<string, string>).HIGGSFIELD_CREDENTIALS_PATH;
+    // The file must exist and contain the right shape.
+    const fs = await import('node:fs/promises');
+    const contents = JSON.parse(await fs.readFile(credPath, 'utf8'));
+    expect(contents).toEqual({ access_token: 'test-jwt-abc-123' });
+    spy.mockRestore();
+  });
+
+  it('omits env entirely when no cliToken is set (CLI uses its own auth cache)', async () => {
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { url: 'https://x' },
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    const fresh = new HiggsfieldCliAdapter(); // no cliToken
+    await fresh.generateImage({ prompt: 'a cat' });
+    const callArgs = spy.mock.calls[0][0] as CliInvokeOptions<unknown>;
+    expect(callArgs.env).toBeUndefined();
     spy.mockRestore();
   });
 });

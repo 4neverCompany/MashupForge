@@ -1,5 +1,171 @@
 # Changelog
 
+## [1.2.6] — 2026-06-09 — Hotfix: Higgsfield CLI correctness + M3 vision tool in Director loop
+
+Two audits run on v1.2.5 found real gaps: (1) the
+`@higgsfield/cli` adapter shipped in v1.2.5 forwarded a
+non-existent env var and passed six flags that don't exist
+in the binary's actual schema; (2) the "vercel-ai integration
+in MashupForge" was a **text-only** M3 path — M3's vision
+capability was only reachable via the standalone alt-text
+endpoint, not from the Director loop. v1.2.6 fixes both.
+
+### Bug fixes
+
+**1. Higgsfield CLI adapter — env var + flag set were wrong.**
+
+`@higgsfield/cli` v0.1.40 does NOT read a `HIGGSFIELD_API_KEY`
+env var. The correct injection path (verified by string-scanning
+the Windows binary for recognised env-var symbols) is:
+
+  - `HIGGSFIELD_API_URL` — custom API endpoint
+  - `HIGGSFIELD_APP_URL` — custom app URL
+  - `HIGGSFIELD_CREDENTIALS_PATH` — points to a
+    `{"access_token": "<jwt>"}` JSON file. The CLI reads it
+    on every invocation; the JWT is auto-refreshed by the
+    CLI for ~30 days.
+  - `HIGGSFIELD_DEVICE_AUTH_URL`, `HIGGSFIELD_PACKAGE_MANAGER`,
+    `HIGGSFIELD_NO_UPDATE_CHECK`, `HIGGSFIELD_DISABLE_TELEMETRY`,
+    `HIGGSFIELD_INSTALL_METHOD`, `HIGGSFIELD_SENTRY_DSN`,
+    `HIGGSFIELD_TELEMETRY` — telemetry / install toggles.
+
+v1.2.5 was forwarding `HIGGSFIELD_API_KEY` which the binary
+silently ignores. v1.2.6 writes a temp `credentials.json`
+with the right schema and points `HIGGSFIELD_CREDENTIALS_PATH`
+at it. The temp file is auto-cleaned on `process.on('exit')`.
+
+**2. Higgsfield CLI adapter — six flags didn't exist.**
+
+`MODELS.md` (the v0.1.40 CLI's actual schema) shows that
+NONE of the following flags exist on any image or video
+model:
+
+  - `--seed`           (v1.2.5 forwarded it)
+  - `--width`          (v1.2.5 forwarded it)
+  - `--height`         (v1.2.5 forwarded it)
+  - `--negative-prompt` (v1.2.5 forwarded it)
+  - `--image-url`      (v1.2.5 forwarded it; not a real flag)
+  - `--image-id`       (v1.2.5 forwarded it; not a real flag)
+
+The CLI accepts media inputs via a single `--image` flag
+(image models) or `--start-image` flag (video models), where
+the value is either a local file path (auto-uploaded) or a
+UUID from a previous job / `higgsfield upload` command. URLs
+must be downloaded to a temp file first; the adapter now does
+that automatically. v1.2.6 also fixes the v1.2.5 mistake of
+passing `--image` for video (it must be `--start-image`).
+
+The interface fields `seed` / `width` / `height` /
+`negativePrompt` are kept on `GenerateImageOptions` for
+forward-compat with providers that DO support them (Leonardo,
+mmx); the adapter silently drops them. Callers wanting
+negative-prompt semantics should bake the prompt prefix
+(e.g. `AVOID: blurry, oversaturated`) into the main prompt
+text — most nano_banana models honour it.
+
+**3. M3 vision tool — `m3_vision_describe` in Director loop.**
+
+MiniMax-M3 is a text+vision model, but MashupForge's
+Vercel-AI integration calls MiniMax via the OpenAI-compatible
+`/v1/chat/completions` endpoint which is text-only. v1.2.6
+adds a new agent tool `m3_vision_describe` that wraps the
+`mmx` CLI's `vision describe` subcommand. The model can now
+ask M3 to look at a generated image and answer a question
+(consistency check, issue list, alt text). Wired into
+`AGENT_TOOLS` as the 7th tool, so the existing
+plan→draft→critique→image→video→persist flow is unchanged;
+the model opts in to vision feedback by calling
+`m3_vision_describe` explicitly.
+
+**4. Settings UI — `CLI auth status` block + override field collapsed.**
+
+The v1.2.5 "CLI token" input was misleading: forwarding a
+single token doesn't bypass the OAuth flow, it just provides
+a *workspace* token without overwriting the user's personal
+CLI cache. v1.2.6:
+
+  - Adds a `CLI auth status` block that calls
+    `higgsfield auth token` via the new
+    `/api/higgsfield/cli-auth` route and surfaces the
+    cached-auth state (✓ Authenticated via cached creds /
+    ✗ CLI not on PATH / ⚠ Not authenticated, run
+    `higgsfield auth login`).
+  - Collapses the token paste field under a `<details>`
+    labelled "Override CLI token (advanced — for headless / CI
+    use)" with an inline explanation of the
+    `HIGGSFIELD_CREDENTIALS_PATH` mechanism.
+
+### New files
+
+- `lib/agent-tools/m3-vision-describe.ts` — new tool.
+- `tests/lib/agent-tools/m3-vision-describe.test.ts` —
+  9 tests covering happy path, error paths, and registry wiring.
+- `app/api/higgsfield/cli-auth/route.ts` — `GET` endpoint
+  that probes `higgsfield auth token` and returns
+  `{ binaryAvailable, authenticated, tokenPreview, hint }`.
+
+### Files changed
+
+- `lib/providers/higgsfield/cli-adapter.ts` — auth rewrite
+  (HIGGSFIELD_CREDENTIALS_PATH), 6 flag removals, image
+  reference resolver for URL/UUID/path, video uses
+  `--start-image`, new `maybeBuildAuthEnv` and
+  `resolveImageReference` helpers.
+- `lib/agent-tools/schemas.ts` — `zM3VisionDescribeInput`
+  with at-least-one image-source `.refine` constraint.
+- `lib/agent-tools/index.ts` — export M3 vision tool, add
+  to `AGENT_TOOLS` (length 6→7), update `describeAgentTools`.
+- `components/Settings/HiggsfieldConnection.tsx` — new
+  `CliAuthStatusBlock` sub-component, override field
+  collapsed under `<details>`.
+- `tests/lib/providers/higgsfield-cli-adapter.test.ts` —
+  updated argv-construction assertions to the v1.2.6 flag
+  set; new tests for UUID reference, `--start-image`, and
+  `HIGGSFIELD_CREDENTIALS_PATH` injection.
+- `tests/lib/agent-tools/index.test.ts` — count 6→7.
+- `package.json` / `src-tauri/Cargo.toml` /
+  `src-tauri/tauri.conf.json` — version bump 1.2.5 → 1.2.6.
+
+### SDK research (V1.3.0 backlog)
+
+Maurice asked whether Vercel AI SDK has a v2 or better
+alternative. Audit findings:
+
+- Vercel AI SDK is at **v6.0.197** (4 days old, weekly
+  downloads 12M). There is no v2.0 — Vercel has shipped v1
+  through v6 with no major "v2 reset". We're on `^6.0.191`
+  (a 6-minor-version lag in the same major).
+- v6.0+ ships a new `ToolLoopAgent` class — exactly the
+  pattern we hand-rolled in `lib/agent-loop/index.ts` with
+  `generateText({ tools: AGENT_TOOLS, stopWhen: stepCountIs(8) })`.
+- v6.0+ ships a Vercel AI Gateway (`'anthropic/claude-sonnet-4.5'`
+  model strings, no SDK packages needed) which routes to
+  Anthropic / OpenAI / Google / etc. through Vercel-managed
+  infra. Could solve the MiniMax `/v1/responses` →
+  `/v1/chat/completions` workaround we ship in
+  `app/api/ai/prompt/route.ts`.
+- v6.0+ ships `output: Output.object({ schema })` for
+  native structured output — replaces our hand-rolled JSON
+  parsing in the prompt route.
+
+**Recommendation: stay with Vercel AI SDK, upgrade to v6.0.197,
+and migrate the hand-rolled Director loop to the first-class
+`ToolLoopAgent` class in v1.3.0.** No alternative scored
+better: LangChain is heavier and RAG-focused (we don't need
+RAG), LlamaIndex is RAG-only, OpenAI SDK direct is
+provider-locked, and Microsoft.Extensions.AI is .NET-only.
+
+### Tests
+
+- 1366/1366 pass (lib + components + agent-tools + registry).
+- 9 new tests in `tests/lib/agent-tools/m3-vision-describe.test.ts`.
+- 4 new tests in `tests/lib/providers/higgsfield-cli-adapter.test.ts`
+  (UUID reference, `--start-image`, credentials.json auth path,
+  omitted env when no token).
+- 1 updated test in `tests/lib/agent-tools/index.test.ts`
+  (count 6→7).
+- Typecheck clean.
+
 ## [1.2.5] — 2026-06-09 — Hotfix: 4 follow-up bugs from v1.2.4 testing
 
 Four bugs reported by Maurice while testing v1.2.4 with all

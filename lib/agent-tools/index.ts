@@ -28,6 +28,11 @@ import { critiquePromptTool, executeCritiquePrompt, heuristicJudge } from './cri
 import { generateImageTool, executeGenerateImage } from './generate-image';
 import { generateVideoTool, executeGenerateVideo } from './generate-video';
 import { persistAssetTool, executePersistAsset, toGeneratedImage, upsertImage, makeAssetId } from './persist-asset';
+// V1.2.6: M3 vision tool — exposes MiniMax-M3's text+vision INPUT
+// capability to the Director loop. Wired below in the AGENT_TOOLS
+// array; the model decides when to call it after a generate_image
+// (e.g. for a consistency check before persist_asset).
+import { m3VisionDescribeTool, executeM3VisionDescribe } from './m3-vision-describe';
 
 // ---------------------------------------------------------------------------
 // Schemas (re-export so consumers can re-use them in tests / route validation)
@@ -53,6 +58,8 @@ export {
   zAssetRef,
   zPersistAssetInput,
   zPersistAssetOutput,
+  zM3VisionDescribeInput,
+  zM3VisionDescribeOutput,
   zNicheString,
   zGenreString,
   zAngleString,
@@ -92,6 +99,8 @@ export type {
   GenerateVideoOutput,
   PersistAssetInput,
   PersistAssetOutput,
+  M3VisionDescribeInput,
+  M3VisionDescribeOutput,
 } from './schemas';
 
 // ---------------------------------------------------------------------------
@@ -130,6 +139,9 @@ export {
   executeGenerateVideo,
   persistAssetTool,
   executePersistAsset,
+  // V1.2.6
+  m3VisionDescribeTool,
+  executeM3VisionDescribe,
 };
 
 // Pure helpers re-exported for unit tests + non-SDK callers.
@@ -158,6 +170,11 @@ export const AGENT_TOOLS = [
   generateImageTool,
   generateVideoTool,
   persistAssetTool,
+  // V1.2.6: M3 vision — added at the end so the Director loop
+  // still favours the existing 6-step plan→draft→critique→
+  // image/video→persist flow. The model opts in to vision
+  // feedback by calling m3_vision_describe explicitly.
+  m3VisionDescribeTool,
 ] as unknown as Tool[];
 
 // ---------------------------------------------------------------------------
@@ -192,6 +209,7 @@ export function describeAgentTools(): Array<{ name: string; description: string;
       if (t === generateImageTool) return 'generate_image';
       if (t === generateVideoTool) return 'generate_video';
       if (t === persistAssetTool) return 'persist_asset';
+      if (t === m3VisionDescribeTool) return 'm3_vision_describe';
       return 'unknown';
     })();
     return { name, description: desc, hasInputSchema: hasInput, hasOutputSchema: hasOutput };

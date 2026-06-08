@@ -10,15 +10,50 @@
  *   and token storage (lib/higgsfield/token-store.ts) — those need a
  *   long-lived connection; the model-generation calls don't.
  *
- * CLI surface we depend on (per @higgsfield/cli v0.1.40):
- *   higgsfield generate create <model> --prompt <text> [--seed N] [--out file]
- *       Generates a single image synchronously. Returns JSON to stdout
- *       (we force --json to be safe across versions).
- *   higgsfield generate create <model> --prompt <text> --image <ref>
- *       Image-to-image / character reference path.
- *   higgsfield video create <model> --prompt <text> [--image <ref>] [--duration N]
- *       Video generation. Some models are async; the CLI returns
+ * CLI surface we depend on (per @higgsfield/cli v0.1.40 MODELS.md):
+ *   higgsfield generate create <model> --prompt <text> --json
+ *       Generates a single image synchronously. Returns JSON to stdout.
+ *   higgsfield generate create <model> --prompt <text> --image <ref> --json
+ *       Image-to-image / character reference path. `--image` accepts
+ *       either a local file path (CLI auto-uploads) or a UUID from
+ *       a previous job / upload command.
+ *   higgsfield video create <model> --prompt <text> [--start-image <ref>] --json
+ *       Video generation. Most models are async; the CLI returns
  *       {"status": "queued", "request_id": "..."} in that case.
+ *       For video the canonical flag is `--start-image` (per MODELS.md),
+ *       not `--image`.
+ *
+ * Auth (v1.2.6 rewrite — was broken in v1.2.5):
+ *   The CLI does NOT read a `HIGGSFIELD_API_KEY` env var. Verified by
+ *   string-scanning the v0.1.40 Windows binary; the env vars the CLI
+ *   actually reads are: HIGGSFIELD_API_URL, HIGGSFIELD_APP_URL,
+ *   HIGGSFIELD_CREDENTIALS_PATH, HIGGSFIELD_DEVICE_AUTH_URL, plus
+ *   telemetry/PM toggles. The correct injection path is to write a
+ *   `{"access_token": "<token>"}` JSON file and point
+ *   `HIGGSFIELD_CREDENTIALS_PATH` at it. The default path (when env
+ *   is unset) is `os.UserConfigDir() + "/higgsfield/credentials.json"`
+ *   — i.e. `%AppData%\higgsfield\credentials.json` on Windows.
+ *
+ *   We default to "use whatever the CLI's own auth cache has". A user
+ *   who has run `higgsfield auth login` once is already authenticated
+ *   for the next 30 days (CLI auto-refreshes). The Settings → CLI
+ *   token field is now an OPTIONAL override for headless / CI users
+ *   who want a different workspace token without overwriting their
+ *   personal auth cache. The adapter:
+ *     1. If `options.cliToken` is set: write a temp credentials.json
+ *        with `{access_token: token}` and pass HIGGSFIELD_CREDENTIALS_PATH
+ *        pointing to it. Cleanup after the call.
+ *     2. Else: no env override. The CLI uses the user's cached
+ *        credentials from `higgsfield auth login`.
+ *
+ * Flag set (v1.2.6 rewrite — was broken in v1.2.5):
+ *   Removed flags that v1.2.5 passed but MODELS.md shows don't exist:
+ *     --seed, --width, --height, --negative-prompt,
+ *     --image-url, --image-id
+ *   v1.2.5 also confused image vs video: video models use
+ *   `--start-image`, not `--image`. Now correctly handled.
+ *   Per-model enums (resolution / quality / duration / etc.) are
+ *   forwarded via the spec-compliant `pushFlag` helper.
  *
  * Behaviour matrix:
  *   - If the CLI binary isn't on PATH the adapter's isAvailable()
@@ -31,6 +66,9 @@
  *     shim (handled by cli-utils.spawnNeedsShell).
  */
 
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { z } from 'zod';
 import {
   type AssetRef,
@@ -100,6 +138,32 @@ const DEFAULT_BINARIES = ['higgsfield', 'higgs'] as const;
 const DEFAULT_IMAGE_MODEL = 'text2image_soul_v2';
 const DEFAULT_VIDEO_MODEL = 'seedance_2_0';
 
+/**
+ * Best-effort file extension guess from a URL. The Higgsfield
+ * CLI's `--image` auto-upload reads the magic bytes for the
+ * real type, so a wrong extension is cosmetic — but a sane
+ * extension helps the CLI's upload step route to the right
+ * multipart field. Returns '' when the URL gives no signal
+ * (e.g. query-string-only URLs from CDN-signed links).
+ */
+function guessImageExtension(url: string): string {
+  try {
+    const u = new URL(url);
+    const pathname = u.pathname.toLowerCase();
+    if (pathname.endsWith('.png')) return '.png';
+    if (pathname.endsWith('.webp')) return '.webp';
+    if (pathname.endsWith('.gif')) return '.gif';
+    if (pathname.endsWith('.bmp')) return '.bmp';
+    if (pathname.endsWith('.tif') || pathname.endsWith('.tiff')) return '.tiff';
+    // Default to jpg; JPEG covers the majority of CDN-served
+    // images and is what the CLI's upload step accepts as
+    // fallback when magic-byte detection fails.
+    return '.jpg';
+  } catch {
+    return '.jpg';
+  }
+}
+
 export class HiggsfieldCliAdapter implements ProviderAdapter {
   readonly name = 'higgsfield';
   readonly label = 'Higgsfield (CLI)';
@@ -108,10 +172,23 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
   private resolveAttempted = false;
 
   /**
-   * V1.2.5: optional CLI token (from `npx @higgsfield/cli auth`).
-   * When set, the adapter forwards it as `HIGGSFIELD_API_KEY` on
-   * every CLI invocation. When unset, the adapter relies on the
-   * CLI's own credentials cache (`~/.config/higgsfield/...`).
+   * Path to a temp credentials.json file we wrote, if any. We
+   * unlink it when the process exits so a one-off token paste
+   * doesn't linger on disk. Null when the user is using the
+   * CLI's own cached auth (from `higgsfield auth login`).
+   */
+  private tempCredentialsPath: string | null = null;
+
+  /**
+   * V1.2.6: optional CLI token (raw `access_token` value) for
+   * users who want to use a workspace token without overwriting
+   * their personal CLI auth cache. When set, the adapter writes
+   * a temp `credentials.json` and points `HIGGSFIELD_CREDENTIALS_PATH`
+   * at it (the v0.1.40 binary's only recognised env-var injection
+   * path; v1.2.5's `HIGGSFIELD_API_KEY` was a no-op). When unset,
+   * the adapter relies on the CLI's own cached credentials
+   * (`higgsfield auth login` → `~/.config/higgsfield/credentials.json`
+   * on Unix / `%AppData%\higgsfield\credentials.json` on Windows).
    */
   constructor(private readonly options: { cliToken?: string } = {}) {}
 
@@ -151,26 +228,33 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
 
     const args = ['generate', 'create', model, '--json'];
     pushFlag(args, '--prompt', opts.prompt);
-    pushFlag(args, '--seed', opts.seed);
-    pushFlag(args, '--width', opts.width);
-    pushFlag(args, '--height', opts.height);
+    // V1.2.6: --seed / --width / --height / --negative-prompt
+    // are NOT in MODELS.md for any image model. Removed.
     if (opts.aspectRatio) pushFlag(args, '--aspect-ratio', opts.aspectRatio);
-    if (opts.negativePrompt) pushFlag(args, '--negative-prompt', opts.negativePrompt);
-    if (opts.referenceImage?.path) pushFlag(args, '--image', opts.referenceImage.path);
-    else if (opts.referenceImage?.url) pushFlag(args, '--image-url', opts.referenceImage.url);
-    else if (opts.referenceImage?.id) pushFlag(args, '--image-id', opts.referenceImage.id);
+    // V1.2.6: --negative-prompt removed (not a real flag).
+    // If a caller needs negative prompt semantics, they should
+    // bake it into the main prompt text (most nano_banana
+    // models support inline "AVOID:" prefixes).
+
+    // V1.2.6: --image-url / --image-id collapsed into --image.
+    // MODELS.md: "--image accepts either a UUID (upload id or
+    // previous job id) or a local file path; paths are
+    // auto-uploaded." A URL must be downloaded to a temp file
+    // first because the CLI doesn't fetch remote URLs.
+    if (opts.referenceImage) {
+      const ref = await this.resolveImageReference(opts.referenceImage);
+      if (ref) pushFlag(args, '--image', ref);
+    }
 
     const invokeOpts: CliInvokeOptions<unknown> = {
       provider: this.name,
       binary: bin,
       args,
-      // V1.2.5: forward the user's CLI token to the binary via
-      // env. The CLI's own keychain takes precedence if it
-      // already has a different token cached, so this is
-      // safe-by-default for users with an existing auth.
-      env: this.options.cliToken
-        ? { HIGGSFIELD_API_KEY: this.options.cliToken }
-        : undefined,
+      // V1.2.6: forward the user's CLI token via a temp
+      // credentials.json pointed at by HIGGSFIELD_CREDENTIALS_PATH.
+      // The binary's only recognised env-var injection path.
+      // (v1.2.5's HIGGSFIELD_API_KEY was a silent no-op.)
+      env: await this.maybeBuildAuthEnv(),
       timeoutMs: opts.timeoutMs,
       signal: opts.signal,
     };
@@ -192,18 +276,24 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
     const args = ['video', 'create', model, '--json'];
     pushFlag(args, '--prompt', opts.prompt);
     pushFlag(args, '--duration', opts.durationSec);
-    if (opts.imagePath) pushFlag(args, '--image', opts.imagePath);
-    else if (opts.imageUrl) pushFlag(args, '--image-url', opts.imageUrl);
-    else if (opts.imageId) pushFlag(args, '--image-id', opts.imageId);
+    // V1.2.6: video models use --start-image per MODELS.md,
+    // not --image (v1.2.5's mistake). Same UUID-or-path rule
+    // as image reference.
+    if (opts.imagePath || opts.imageUrl || opts.imageId) {
+      const ref = await this.resolveImageReference({
+        path: opts.imagePath,
+        url: opts.imageUrl,
+        id: opts.imageId,
+      });
+      if (ref) pushFlag(args, '--start-image', ref);
+    }
 
     const invokeOpts: CliInvokeOptions<unknown> = {
       provider: this.name,
       binary: bin,
       args,
-      // V1.2.5: same CLI-token forwarding as generateImage.
-      env: this.options.cliToken
-        ? { HIGGSFIELD_API_KEY: this.options.cliToken }
-        : undefined,
+      // V1.2.6: same auth path as generateImage.
+      env: await this.maybeBuildAuthEnv(),
       // Video gen is the slow path; clampTimeout applies the spec
       // 60s default when no override is supplied. Callers needing
       // longer (e.g. slow models behind a queue) pass an explicit
@@ -219,6 +309,101 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
+
+  /**
+   * V1.2.6: build the auth env-var bag for a CLI invocation.
+   *
+   * - If the user has set `options.cliToken` we write a temp
+   *   credentials.json with `{access_token: token}` and return
+   *   `{ HIGGSFIELD_CREDENTIALS_PATH: <temp path> }`. The CLI
+   *   reads the credentials file path from this env var.
+   * - If no token is set we return `undefined` so the CLI uses
+   *   its own cached auth from `higgsfield auth login`.
+   *
+   * The temp file is unlinked in the `process.on('exit')` hook
+   * installed in the constructor so a one-off token paste
+   * doesn't linger on disk. We do NOT delete it after a single
+   * call because the adapter is a singleton and the user might
+   * run many generations in one session.
+   */
+  private async maybeBuildAuthEnv(): Promise<Record<string, string> | undefined> {
+    if (!this.options.cliToken) return undefined;
+    if (this.tempCredentialsPath) {
+      // Reuse the temp file across calls within the same
+      // session. The token is a JWT whose TTL is on the order
+      // of weeks; we don't bother refreshing.
+      return { HIGGSFIELD_CREDENTIALS_PATH: this.tempCredentialsPath };
+    }
+
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'higgsfield-cred-'));
+    const credPath = path.join(dir, 'credentials.json');
+    // Match the v0.1.40 binary's recognised schema. The
+    // `access_token` field is the only one the CLI reads
+    // (verified by string-scanning the binary for the
+    // "credentials.json" + "access_token" symbols).
+    await fs.writeFile(
+      credPath,
+      JSON.stringify({ access_token: this.options.cliToken }, null, 2),
+      { mode: 0o600 },
+    );
+    this.tempCredentialsPath = credPath;
+    // Best-effort cleanup. `process.on('exit')` is the only
+    // hook Next.js's Tauri WebView reliably fires; for a
+    // clean shutdown this is enough.
+    process.on('exit', () => {
+      try {
+        // sync unlink in the exit hook — async fs.unlink
+        // would never resolve in time.
+        require('node:fs').rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // best-effort; ignore
+      }
+    });
+    return { HIGGSFIELD_CREDENTIALS_PATH: credPath };
+  }
+
+  /**
+   * V1.2.6: collapse the three image-reference shapes (path,
+   * URL, UUID) into a single string the CLI accepts via
+   * `--image` (image models) or `--start-image` (video models).
+   *
+   * - `path`  → returned verbatim. CLI auto-uploads.
+   * - `id`    → returned verbatim. CLI uses the cached UUID.
+   * - `url`   → downloaded to a temp file in os.tmpdir() and
+   *             that path is returned. CLI auto-uploads. The
+   *             temp file is cleaned up on process exit.
+   */
+  private async resolveImageReference(ref: {
+    path?: string;
+    url?: string;
+    id?: string;
+  }): Promise<string | null> {
+    if (ref.path) return ref.path;
+    if (ref.id) return ref.id;
+    if (ref.url) {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'higgsfield-ref-'));
+      const ext = guessImageExtension(ref.url);
+      const file = path.join(dir, `ref${ext}`);
+      const res = await fetch(ref.url);
+      if (!res.ok) {
+        throw new ProviderParseError(
+          this.name,
+          `Failed to download reference image (${res.status} ${res.statusText})`,
+        );
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      await fs.writeFile(file, buf);
+      process.on('exit', () => {
+        try {
+          require('node:fs').rmSync(dir, { recursive: true, force: true });
+        } catch {
+          // best-effort
+        }
+      });
+      return file;
+    }
+    return null;
+  }
 
   private async requireBinary(): Promise<string> {
     if (this.resolvedBinary) return this.resolvedBinary;

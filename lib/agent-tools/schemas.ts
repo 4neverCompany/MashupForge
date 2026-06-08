@@ -450,3 +450,94 @@ export const zPersistAssetOutput = z.object({
     .describe('Unix epoch ms when the asset was written to storage.'),
 });
 export type PersistAssetOutput = z.infer<typeof zPersistAssetOutput>;
+
+// ---------------------------------------------------------------------------
+// 7. m3_vision_describe (V1.2.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * V1.2.6: MiniMax-M3 vision describe — image INPUT, text OUTPUT.
+ *
+ * M3 is a text+vision model (per the MiniMax-M3 announcement,
+ * 2026-06-01). MashupForge's primary text-AI path
+ * (`app/api/ai/prompt`) uses the OpenAI-compatible chat
+ * completions endpoint which is text-only. This tool exposes
+ * M3's vision capability through the `mmx` CLI's
+ * `vision describe` subcommand, letting the Director loop
+ * (which runs over the Vercel AI SDK `generateText` agent
+ * loop) ask M3 to describe / score a generated image.
+ *
+ * Use case in the Director loop:
+ *   1. `generate_image` returns an `AssetRef` with a URL/path.
+ *   2. `m3_vision_describe` asks M3 "is this image consistent
+ *      with the original concept? Score 0-1 and list issues."
+ *   3. The critique result is fed back into `critique_prompt`
+ *      and the loop iterates.
+ *
+ * The mmx CLI is the production path for M3 in MashupForge
+ * (per the v1.2.0 mmx-cli-integration brief). It calls
+ * `mmx vision describe` which handles auth + the actual
+ * multimodal request. This tool is a thin Zod-validated
+ * wrapper around the existing `describeImage()` function in
+ * `lib/mmx-client.ts`.
+ */
+export const zM3VisionDescribeInput = z
+  .object({
+    /**
+     * Where to read the image from. Exactly one of the three
+     * fields must be present. The `url` and `id` cases are
+     * pre-resolved by the CLI binary to a local file before
+     * the call.
+     */
+    imagePath: z
+      .string()
+      .min(1)
+      .max(1000)
+      .optional()
+      .describe('Absolute local path to the image file.'),
+    imageUrl: z
+      .string()
+      .url()
+      .max(2000)
+      .optional()
+      .describe('HTTPS URL of the image. The mmx CLI downloads it.'),
+    imageId: z
+      .string()
+      .min(1)
+      .max(120)
+      .optional()
+      .describe('MashupForge-internal asset id; mmx resolves it to a local path.'),
+    /**
+     * Question to ask about the image. Defaults to a generic
+     * description when omitted. The model is multimodal but
+     * the call is text-only output, so the prompt should be
+     * phrased as a question or a checklist.
+     */
+    prompt: z
+      .string()
+      .min(1)
+      .max(800)
+      .default('Describe this image in detail. Note any obvious visual issues (clipping, NSFW, off-style).')
+      .describe('What to ask about the image. Free-form question or checklist.'),
+  })
+  .refine(
+    (v) => Boolean(v.imagePath) || Boolean(v.imageUrl) || Boolean(v.imageId),
+    { message: 'at least one of imagePath / imageUrl / imageId is required' },
+  );
+export type M3VisionDescribeInput = z.infer<typeof zM3VisionDescribeInput>;
+
+export const zM3VisionDescribeOutput = z.object({
+  description: z
+    .string()
+    .min(1)
+    .max(8000)
+    .describe("M3's textual answer. May be a description, a critique, or a 0-1 score depending on the prompt."),
+  /** Wall-clock duration the mmx CLI reported. */
+  durationMs: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe('Generation duration in ms (for budget tracking).'),
+});
+export type M3VisionDescribeOutput = z.infer<typeof zM3VisionDescribeOutput>;

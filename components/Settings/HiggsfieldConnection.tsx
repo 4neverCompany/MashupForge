@@ -473,6 +473,9 @@ export function HiggsfieldConnection({
         </>
       )}
 
+      {/* CLI auth status (V1.2.6) */}
+      <CliAuthStatusBlock />
+
       {/* CLI hint — power users can `npx @higgsfield/cli` for the full 35-model catalog */}
       <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3">
         <div className="flex items-center gap-2 text-[11px] font-medium text-white/50">
@@ -489,36 +492,149 @@ export function HiggsfieldConnection({
             docs <ExternalLink className="h-3 w-3" />
           </a>
         </div>
-        {/* V1.2.5: paste a CLI token to bypass OAuth entirely. The
-            Director loop passes the token as `HIGGSFIELD_API_KEY`
-            to the @higgsfield/cli binary on every call. Cleared by
-            emptying the field and saving. */}
+        {/* V1.2.6: the token field is now an ADVANCED OVERRIDE for
+            headless / CI users who want to use a workspace token
+            without overwriting their personal CLI auth cache. Most
+            users should leave it empty and rely on the cached
+            `higgsfield auth login` credentials above. */}
         {onSaveCliToken && (
-          <div className="mt-3 flex items-center gap-2">
-            <input
-              type="password"
-              defaultValue={cliToken ?? ''}
-              placeholder="higgsfield-cli-token (paste from `higgs auth`)..."
-              autoComplete="off"
-              spellCheck={false}
-              disabled={saving}
-              onBlur={(e) => {
-                const next = e.target.value.trim();
-                if (next !== (cliToken ?? '')) onSaveCliToken(next);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-              }}
-              className="flex-1 rounded border border-white/10 bg-black/30 px-2.5 py-1 font-mono text-[11px] text-white placeholder-white/30 focus:border-emerald-400/60 focus:outline-none disabled:opacity-50"
-            />
-            {cliToken && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-300">
-                <Check className="h-3 w-3" />
-                CLI token set
-              </span>
-            )}
-          </div>
+          <details className="mt-3 group">
+            <summary className="cursor-pointer text-[10px] text-white/40 transition hover:text-white/70">
+              Override CLI token (advanced — for headless / CI use)
+            </summary>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="password"
+                defaultValue={cliToken ?? ''}
+                placeholder="paste token (optional override)…"
+                autoComplete="off"
+                spellCheck={false}
+                disabled={saving}
+                onBlur={(e) => {
+                  const next = e.target.value.trim();
+                  if (next !== (cliToken ?? '')) onSaveCliToken(next);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
+                className="flex-1 rounded border border-white/10 bg-black/30 px-2.5 py-1 font-mono text-[11px] text-white placeholder-white/30 focus:border-emerald-400/60 focus:outline-none disabled:opacity-50"
+              />
+              {cliToken && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-300">
+                  <Check className="h-3 w-3" />
+                  Override set
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-[10px] leading-relaxed text-white/30">
+              Written to a temp <code>credentials.json</code> at request time and pointed at via
+              <code className="ml-1">HIGGSFIELD_CREDENTIALS_PATH</code>. Auto-cleaned on app exit.
+              Most users should leave this empty and let the cached CLI auth handle it.
+            </p>
+          </details>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// V1.2.6: CLI auth status block
+// ---------------------------------------------------------------------------
+
+interface CliAuthStatus {
+  binaryAvailable: boolean;
+  authenticated: boolean;
+  tokenPreview?: string;
+  hint: string;
+}
+
+function CliAuthStatusBlock() {
+  const [status, setStatus] = useState<CliAuthStatus | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const check = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/higgsfield/cli-auth', { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = (await res.json()) as CliAuthStatus;
+      setStatus(json);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'CLI auth check failed');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Probe on mount so the user sees the cached-auth state without
+  // having to click. The probe is cheap (3s timeout, single spawn)
+  // and only fires once per Settings-panel mount.
+  useEffect(() => {
+    queueMicrotask(() => {
+      void check();
+    });
+  }, [check]);
+
+  return (
+    <div className="rounded-lg border border-white/5 bg-white/[0.02] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-[11px] font-medium text-white/50">
+            <span>CLI auth (recommended for power users):</span>
+            <a
+              href="https://higgsfield.ai/cli"
+              target="_blank"
+              rel="noreferrer"
+              className="text-white/40 hover:text-white/70"
+              title="How to install @higgsfield/cli"
+            >
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+          <div className="mt-1.5 text-[11px]">
+            {loading && !status ? (
+              <span className="inline-flex items-center gap-1.5 text-white/40">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Probing <code className="font-mono">higgsfield auth token</code>…
+              </span>
+            ) : error ? (
+              <span className="text-rose-300">Check failed: {error}</span>
+            ) : status && !status.binaryAvailable ? (
+              <span className="text-white/40">
+                CLI not on PATH. <code className="font-mono">npm i -g @higgsfield/cli</code> then <code className="font-mono">higgsfield auth login</code>.
+              </span>
+            ) : status && status.authenticated ? (
+              <span className="inline-flex items-center gap-1.5 text-emerald-300">
+                <Check className="h-3 w-3" />
+                Authenticated via cached CLI creds
+                {status.tokenPreview && (
+                  <code className="ml-1 font-mono text-[10px] text-white/40">
+                    ({status.tokenPreview})
+                  </code>
+                )}
+              </span>
+            ) : status ? (
+              <span className="text-amber-300">
+                CLI installed but not authenticated. Run <code className="font-mono">higgsfield auth login</code> in a terminal.
+              </span>
+            ) : null}
+          </div>
+          {status?.hint && (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-white/30">{status.hint}</p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={check}
+          disabled={loading}
+          className="shrink-0 inline-flex items-center gap-1 rounded border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-medium text-white/70 transition hover:bg-white/10 disabled:opacity-50"
+        >
+          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCcw className="h-3 w-3" />}
+          Recheck
+        </button>
       </div>
     </div>
   );
