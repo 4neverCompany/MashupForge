@@ -66,6 +66,16 @@ export function useSettings() {
   const [settings, setSettings] = useState<UserSettings>(defaultSettings);
   const [isSettingsLoaded, setIsSettingsLoaded] = useState(false);
   const [saveState, setSaveState] = useState<SettingsSaveState>({ kind: 'idle' });
+  // V1.2.1: lazy load — see useImages.ts for the full rationale. The
+  // Tauri plugin-store eagerly JSON.parse's the whole mashupforge.json
+  // on first get(), so even reading just `mashup_settings` blocks the
+  // studio mount for 30+ seconds when the file is 100+ MB. The studio
+  // renders with defaultSettings until the load fires; the MainContent
+  // view-change useEffect calls `requestSettingsLoad()` immediately so
+  // the user only sees a brief "default state" before their actual
+  // settings hydrate. AI generations, schedules, etc. use the loaded
+  // settings as soon as they arrive (the hooks re-render).
+  const [loadTriggered, setLoadTriggered] = useState(false);
 
   // Always-current ref used by the beforeunload flush below. Mirrored
   // via useEffect so the ref is up-to-date by the time the handler
@@ -79,6 +89,11 @@ export function useSettings() {
   // corrupted/non-object value left over from the pre-fix race that could
   // have written `undefined` into the store.
   useEffect(() => {
+    if (!loadTriggered) {
+      setIsSettingsLoaded(true);
+      return;
+    }
+    let cancelled = false;
     const loadSettings = async () => {
       try {
         const storedSettings = localStorage.getItem('mashup_settings');
@@ -86,27 +101,28 @@ export function useSettings() {
           const parsed = JSON.parse(storedSettings);
           await set('mashup_settings', parsed);
           localStorage.removeItem('mashup_settings');
-          setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, parsed as Partial<UserSettings>)));
+          if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, parsed as Partial<UserSettings>)));
         } else {
           const idbSettings = await get('mashup_settings');
           if (idbSettings && typeof idbSettings === 'object') {
-            setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>)));
+            if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>)));
           } else {
             // Fresh install with no saved settings still gets the explicit
             // auto-everywhere map written so the PipelinePanel checkbox grid
             // shows the active state immediately rather than waiting for the
             // user's first toggle to materialize the field.
-            setSettings(prev => applyV040AutoApproveMigration(prev));
+            if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(prev));
           }
         }
       } catch {
         // silent — settings fall back to defaults
       } finally {
-        setIsSettingsLoaded(true);
+        if (!cancelled) setIsSettingsLoaded(true);
       }
     };
     loadSettings();
-  }, []);
+    return () => { cancelled = true; };
+  }, [loadTriggered]);
 
   // PROP-010: persist after every committed state change, debounced 300ms.
   // Debounce prevents an IDB write on every keystroke in text fields while
@@ -187,5 +203,5 @@ export function useSettings() {
     });
   }, []);
 
-  return { settings, updateSettings, clearSettings, isSettingsLoaded, saveState };
+  return { settings, updateSettings, clearSettings, isSettingsLoaded, saveState, requestLoad: () => setLoadTriggered(true) };
 }

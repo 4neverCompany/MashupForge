@@ -49,22 +49,30 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState('');
   const [comparisonError, setComparisonError] = useState<string | null>(null);
+  // V1.2.1: lazy load — see useImages.ts for the full rationale.
+  const [loadTriggered, setLoadTriggered] = useState(false);
 
   const clearComparisonError = () => setComparisonError(null);
 
   useEffect(() => {
+    if (!loadTriggered) {
+      setIsComparisonLoaded(true);
+      return;
+    }
+    let cancelled = false;
     const load = async () => {
       try {
         const idbComparisonResults = await get('mashup_comparison_results');
-        if (idbComparisonResults) setComparisonResults(idbComparisonResults);
+        if (idbComparisonResults && !cancelled) setComparisonResults(idbComparisonResults);
       } catch {
-        // silent — comparison results remain empty, loaded flag still set
+        // silent — comparison results remain empty
       } finally {
-        setIsComparisonLoaded(true);
+        if (!cancelled) setIsComparisonLoaded(true);
       }
     };
     load();
-  }, []);
+    return () => { cancelled = true; };
+  }, [loadTriggered]);
 
   useEffect(() => {
     if (isComparisonLoaded) {
@@ -492,5 +500,8 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
     comparisonProgress: progress,
     comparisonError,
     clearComparisonError,
+    // V1.2.1: lazy load — see useImages.ts. Fired by the Compare view
+    // mount in MainContent.tsx.
+    requestLoad: () => setLoadTriggered(true),
   };
 }

@@ -246,21 +246,34 @@ export function MainContent() {
   // actual `get()` when the user navigates to the view that needs
   // the data. The data hydrates with a brief "Loading..." state per
   // view instead of a 30+ second hang on the studio splash.
+  //
+  // V1.2.1 hotfix #2: settings load is fired on mount (NOT gated on
+  // a view change) because every view needs settings. The studio
+  // renders with defaultSettings for a few seconds while the load
+  // runs, then the user's real settings hydrate. For Maurice's 149
+  // MB store this is a 30s "default state" but the app is usable
+  // the whole time — the studio is INSTANT, settings appear when
+  // they're ready.
   const {
     requestImagesLoad,
     requestCollectionsLoad,
     requestIdeasLoad,
+    requestSettingsLoad,
+    requestComparisonLoad,
   } = useMashup();
   useEffect(() => {
-    // Studio (the default view) does NOT trigger a load — the studio
-    // renders images via `images` (not `savedImages`) and doesn't need
-    // the persisted store. Gallery does need savedImages + collections;
-    // ideas needs the persisted ideas list.
+    // Fire settings load on mount (no view gate). The studio renders
+    // with defaults; settings hydrate in the background.
+    requestSettingsLoad();
+  }, [requestSettingsLoad]);
+  useEffect(() => {
     if (view === 'gallery') {
       requestImagesLoad();
       requestCollectionsLoad();
     } else if (view === 'ideas') {
       requestIdeasLoad();
+    } else if (view === 'compare') {
+      requestComparisonLoad();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);

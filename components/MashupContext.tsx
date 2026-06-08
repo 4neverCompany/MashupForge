@@ -63,7 +63,7 @@ export function MashupProvider({ children }: { children: ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Core hooks — order matters for dependencies
-  const { settings, updateSettings, clearSettings, isSettingsLoaded, saveState: settingsSaveState } = useSettings();
+  const { settings, updateSettings, clearSettings, isSettingsLoaded, saveState: settingsSaveState, requestLoad: requestSettingsLoad } = useSettings();
 
   const imagesHook = useImages();
   const {
@@ -118,6 +118,7 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     deleteComparisonResult,
     comparisonError,
     clearComparisonError,
+    requestLoad: requestComparisonLoad,
   } = comparisonHook;
 
   const ideasHook = useIdeas();
@@ -549,9 +550,15 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     // V1.2.1: lazy load triggers. The Gallery/Collections/Ideas views
     // call these on mount so the persistence layer doesn't eagerly
     // JSON.parse a 100+ MB mashupforge.json at studio mount time.
+    // Settings load is fired by MainContent on mount (right after
+    // studio renders) so the user sees their real settings within a
+    // few seconds; the studio itself mounts instantly with default
+    // settings, then their actual settings hydrate.
     requestImagesLoad,
     requestCollectionsLoad,
     requestIdeasLoad,
+    requestSettingsLoad,
+    requestComparisonLoad,
     isSidebarOpen,
     setIsSidebarOpen,
     pipelineEnabled: pipelineHook.pipelineEnabled,

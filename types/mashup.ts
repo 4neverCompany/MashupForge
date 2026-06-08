@@ -1161,6 +1161,8 @@ export interface MashupContextType {
   requestImagesLoad: () => void;
   requestCollectionsLoad: () => void;
   requestIdeasLoad: () => void;
+  requestSettingsLoad: () => void;
+  requestComparisonLoad: () => void;
   pipelineEnabled: boolean;
   pipelineRunning: boolean;
   pipelineQueue: Idea[];

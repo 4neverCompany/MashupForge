@@ -1,5 +1,65 @@
 # Changelog
 
+## [1.2.2] — 2026-06-08 — Hotfix: full lazy persistence (useSettings + useComparison)
+
+### Bug fix
+
+**v1.2.1 only deferred 3 of 5 persistence-loading hooks.** The
+Tauri plugin-store eagerly JSON.parse's the entire `mashupforge.json`
+on the FIRST `get(key)` call. v1.2.1 made `useImages`,
+`useCollections`, `useIdeas` lazy — but `useSettings` and
+`useComparison` still fired `get('mashup_settings')` / `get('mashup_comparison_results')`
+on studio mount. The studio mount chain still triggered the
+100+ MB JSON.parse and hung for 30+ seconds on Maurice's machine
+(149 MB `mashupforge.json`).
+
+### What changed
+- `hooks/useSettings.ts`: same lazy pattern as the v1.2.1 hooks.
+  `isSettingsLoaded` flips true synchronously; `get('mashup_settings')`
+  only fires when `requestSettingsLoad()` is called.
+- `hooks/useComparison.ts`: same lazy pattern. `get('mashup_comparison_results')`
+  only fires when `requestComparisonLoad()` is called (Compare view
+  mount).
+- `components/MashupContext.tsx` + `types/mashup.ts`: pass through
+  the two new `requestSettingsLoad` / `requestComparisonLoad` functions.
+- `components/MainContent.tsx`: fires `requestSettingsLoad()` on
+  MainContent mount (right after the studio renders) so the user
+  sees their actual settings within a few seconds. The studio itself
+  mounts INSTANTLY with default settings. The `view === 'compare'`
+  branch fires `requestComparisonLoad()`.
+
+### Order of operations on the studio mount
+1. `useSettings` mount → `isSettingsLoaded=true` instantly, no I/O
+2. `useImages` mount → same
+3. `useCollections` mount → same
+4. `useImageGeneration` mount → no persistence I/O
+5. `useComparison` mount → `isComparisonLoaded=true` instantly, no I/O
+6. `useIdeas` mount → same
+7. `useSocial` / `usePipeline` mount → no persistence I/O
+8. Studio renders, splash disappears
+9. `MainContent` useEffect fires `requestSettingsLoad()` → the
+   Tauri plugin-store loads the file (~30s on 149 MB stores, ~0.1s
+   on empty stores). Settings hydrate; user sees their real config.
+10. User clicks Gallery → `requestImagesLoad()` → already in memory,
+    fast. Or 30s if this is the first navigation.
+11. User clicks Ideas → same pattern.
+
+### Stats
+- 2 hooks + 1 context + 1 type + 1 view-dispatcher changed
+- 1828/1842 tests pass (same 14 pre-existing tauri-sqlite env
+  failures as v1.2.0 + v1.2.1)
+- New code: ~30 lines net (lazy pattern + integration)
+
+### Why this still doesn't fix the underlying bloat
+The 149 MB `mashupforge.json` is still 149 MB. v1.2.2's lazy load
+buys the studio mount; once the user navigates to Gallery (or any
+view that triggers a load), the file is JSON.parse'd and the
+relevant data hydrates. The right long-term fix is **sharding the
+store** (separate `settings.json` / `images.json` / `comparisons.json` /
+`ideas.json` / `collections.json`) or moving to `tauri-plugin-sql`
+(already a dep) for bulk data. v1.2.3 follow-up: implement sharded
+store with one file per top-level key.
+
 ## [1.2.1] — 2026-06-08 — Hotfix: lazy persistence load (studio mount hang)
 
 ### Bug fix
