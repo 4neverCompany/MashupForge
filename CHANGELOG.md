@@ -1,5 +1,53 @@
 # Changelog
 
+## [1.2.9] — 2026-06-09 — Hotfix: handleResetAndRetry uses the same Tauri-aware path as handleConnect
+
+The v1.2.8 OAuth-in-system-browser fix only patched
+`handleConnect`. The "Reset OAuth client" button
+(handler `handleResetAndRetry`) still used the old
+`window.location.href = /api/higgsfield/oauth/authorize?via=desktop`
+which navigates the WebView — same root cause as the
+v1.2.8 bug, just a different code path. Reset did
+"work" at the API level (the `/reset-client` POST
+cleared the cached `HIGGSFIELD_OAUTH_CLIENT_ID`)
+but the subsequent re-entry into the OAuth flow
+loaded the consent page in the WebView, where the
+`mashupforge://` callback redirect silently failed.
+
+### Bug fix
+
+`handleResetAndRetry` now mirrors `handleConnect`:
+in Tauri, fetch the URL from the server with
+`?format=json` and hand it to
+`@tauri-apps/plugin-opener`'s `openUrl()` so the
+post-reset connect opens in the user's system
+browser. Web (non-Tauri) keeps the 302-redirect
+behaviour.
+
+### Files changed
+
+- `components/Settings/HiggsfieldConnection.tsx` —
+  `handleResetAndRetry` uses `openUrl()` on Tauri.
+- `package.json` / `src-tauri/Cargo.toml` /
+  `src-tauri/tauri.conf.json` — version bump 1.2.8 → 1.2.9.
+
+### Tests
+
+- Typecheck clean (the change is a copy of the
+  v1.2.8 `handleConnect` flow which is already covered
+  by manual testing).
+
+### Note on the current 429 rate limit
+
+Maurice hit a Higgsfield-side HTTP 429
+(`too_many_requests`) on the token-exchange endpoint
+during v1.2.8 testing. This is **not a MashupForge
+bug** — it's Higgsfield's OAuth server throttling
+repeated client registrations + token exchanges. The
+fix is to wait for the rate-limit window to clear
+(typically 5–15 min) before retrying. No code
+change can bypass a server-side rate limit.
+
 ## [1.2.8] — 2026-06-09 — Hotfix: OAuth in system browser + load-side merge fix
 
 Two follow-ups to v1.2.7:

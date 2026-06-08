@@ -253,16 +253,31 @@ export function HiggsfieldConnection({
       const res = await fetch('/api/higgsfield/oauth/reset-client', { method: 'POST' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setMigrationNeeded(false);
-      // Re-enter the connect flow with ?via=desktop (the in-Tauri
-      // detection is the same helper as handleConnect, but we set
-      // it explicitly to be defensive in case the Tauri global is
-      // not yet wired up at the moment the user clicks Reset).
+      // V1.2.9: route the post-reset connect through the same
+      // Tauri-aware path as `handleConnect`. The previous
+      // `window.location.href = /api/higgsfield/oauth/authorize?via=desktop`
+      // navigated the WebView to the Higgsfield consent page,
+      // and the `mashupforge://` callback redirect silently
+      // failed (same v1.2.8 bug as the regular connect flow).
       const isTauri =
         typeof window !== 'undefined' &&
         (Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) ||
           Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__));
-      const qs = isTauri ? '?via=desktop' : '';
-      window.location.href = `/api/higgsfield/oauth/authorize${qs}`;
+
+      if (!isTauri) {
+        window.location.href = '/api/higgsfield/oauth/authorize?via=desktop';
+        return;
+      }
+
+      const authRes = await fetch('/api/higgsfield/oauth/authorize?via=desktop&format=json', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      if (!authRes.ok) throw new Error(`HTTP ${authRes.status}`);
+      const authJson = (await authRes.json()) as { url: string };
+      if (!authJson.url) throw new Error('authorize route did not return a url');
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(authJson.url);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Reset failed');
       setResetting(false);
