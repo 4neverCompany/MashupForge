@@ -22,6 +22,7 @@ import {
   __registerFactory,
   __resetRegistry,
   BUILTIN_PROVIDER_IDS,
+  setProviderRuntimeConfig,
 } from '@/lib/providers/registry';
 import {
   ProviderError,
@@ -210,5 +211,24 @@ describe('registry.__registerFactory', () => {
     __registerFactory('higgsfield', Swap);
     const after = getProvider('higgsfield');
     expect(after).not.toBe(before);
+  });
+});
+
+describe('registry.setProviderRuntimeConfig (V1.2.5)', () => {
+  it('forces a fresh Higgsfield adapter instance on the next getProvider() call', () => {
+    const before = getProvider('higgsfield');
+    setProviderRuntimeConfig({ higgsfieldCliToken: 'hfg_test_token_123' });
+    const after = getProvider('higgsfield');
+    expect(after).not.toBe(before);
+    // Same provider id, same label — only the internal
+    // cliToken option should have changed.
+    expect(after.name).toBe('higgsfield');
+  });
+
+  it('leaves non-higgsfield singleton cache untouched', () => {
+    const leoBefore = getProvider('leonardo');
+    setProviderRuntimeConfig({ higgsfieldCliToken: 'hfg_test_token_456' });
+    const leoAfter = getProvider('leonardo');
+    expect(leoAfter).toBe(leoBefore);
   });
 });

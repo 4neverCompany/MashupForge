@@ -1,5 +1,105 @@
 # Changelog
 
+## [1.2.5] — 2026-06-09 — Hotfix: 4 follow-up bugs from v1.2.4 testing
+
+Four bugs reported by Maurice while testing v1.2.4 with all
+6 v1.2.0 features in his Tauri install. v1.2.4 itself works
+(CSP unblocks hydration); v1.2.5 patches the rough edges
+that v1.2.4 exposed once the studio actually loads.
+
+### Bug fixes
+
+**1. Higgsfield OAuth web-flow hangs.** Maurice (poweruser)
+already has `@higgsfield/cli` installed and authenticated
+locally. The v1.1.2 OAuth web flow stalls on the Allow/Deny
+consent screen (browser cookie partition, deep-link flake),
+and spamming the button creates duplicate auth attempts that
+collide with the single-instance plugin.
+v1.2.5 adds a **CLI token entry field** in Settings →
+HiggsfieldConnection. The token is stored in
+`localStorage.mashup_settings.higgsfieldCliToken`, threaded
+through `/api/ai/prompt` to the server, and forwarded to
+`@higgsfield/cli` as `HIGGSFIELD_API_KEY` env. The OAuth
+flow stays as the default for new users; powerusers can
+skip it entirely.
+
+**2. Personal settings reset on Back/Reload.** `useSettings`
+debounces saves by 300 ms to coalesce rapid updates from
+the Settings modal. SPA navigation (`router.back()`) and
+hard reload unmount the modal before the debounce fires,
+losing the in-flight changes. v1.2.5 adds a **synchronous
+`localStorage.setItem` flush in the unmount cleanup** so
+Back/Reload no longer lose unsaved input. The 300 ms
+debounce stays for the live edit case.
+
+**3. "No trending data found" error in pipeline.**
+`useIdeaProcessor.fetchTrendingContext` was calling
+`/api/trending` directly. In Maurice's Tauri install the
+Server-Side camofox sidecar is UNHEALTHY (camoufox-js
+bundling issue → sidecar crashes 60 s after spawn), so
+the route returns an empty `summary` and the pipeline
+errors out. v1.2.5 swaps the direct call for the
+existing `fetchTrendingHybrid` orchestrator from
+`lib/trending-client.ts`, which falls back to
+client-side `camofox_search` (Tauri command) when the
+route returns `CLIENT_SEARCH_REQUIRED`. The hybrid path
+was already implemented in v1.2.0; this hotfix just
+reaches it from the pipeline.
+
+**4. AI does not use enabled skills for image-prompt
+generation.** `useIdeaProcessor.streamAIToString` was
+passing the AI options without `activeSkills`, so the
+server's `buildSkillSystemBlock` had nothing to inject
+even though the user had skills enabled in Settings
+→ AI Engine. v1.2.5 threads `activeSkills:
+s.activeSkills ?? []` into the call, so the skill
+bodies from `docs/research/higgsfield-skills/` actually
+reach the system prompt.
+
+### Files changed
+
+- `hooks/useIdeaProcessor.ts` — fix #3 (hybrid trending),
+  fix #4 (activeSkills), V1.2.5 hotfix comment block.
+- `hooks/useSettings.ts` — fix #2 (synchronous localStorage
+  flush on unmount).
+- `types/mashup.ts` — add `higgsfieldCliToken?: string`
+  to `UserSettings`.
+- `components/Settings/HiggsfieldConnection.tsx` — fix
+  #1 (CLI token entry field, password input, onBlur save,
+  "CLI token set" indicator).
+- `lib/aiClient.ts` — add `higgsfieldCliToken` to
+  `StreamAIOptions`; forward to body.
+- `lib/providers/higgsfield/cli-adapter.ts` — accept
+  `cliToken` in constructor; forward as
+  `HIGGSFIELD_API_KEY` env to the CLI binary on every
+  `generateImage` / `generateVideo` invocation.
+- `lib/providers/registry.ts` — add
+  `setProviderRuntimeConfig({ higgsfieldCliToken })` so
+  the Director loop's `getProvider('higgsfield')` rebuilds
+  the adapter with the latest token.
+- `app/api/ai/prompt/route.ts` — read `higgsfieldCliToken`
+  from body, call `setProviderRuntimeConfig` before the
+  Director loop runs.
+- `package.json` / `src-tauri/Cargo.toml` /
+  `src-tauri/tauri.conf.json` — version bump 1.2.4 → 1.2.5.
+
+### Deferred to v1.2.6
+
+- **Skill UI for manually adding custom skills** — current
+  Settings → AI Engine only toggles the bundled skills in
+  `docs/research/higgsfield-skills/`. Maurice wants a
+  `+ Add skill` button to author custom skill content.
+  Deferred: requires new `customSkills` field in
+  `UserSettings`, new body field, server-side merge in
+  `buildSkillSystemBlock`, full add/edit/remove UI, and
+  tests. Real feature, not a hotfix.
+- **Vercel-AI tool-call verification** — Maurice asked
+  whether the AI provider `vercel-ai` can call MashupForge
+  tools via the Studio. v1.2.0 Director Route 2.0 +
+  `lib/agent-tools/index.ts` + Vercel AI SDK
+  `stopWhen: stepCountIs(8)` is wired; needs end-to-end
+  verification once v1.2.5 is in Maurice's hands.
+
 ## [1.2.4] — 2026-06-08 — Hotfix: CSP allow inline scripts (Next.js hydration)
 
 ### Bug fix

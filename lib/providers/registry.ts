@@ -52,8 +52,24 @@ export type BuiltinProviderId = (typeof BUILTIN_PROVIDER_IDS)[number];
 
 type AdapterCtor = new (...args: any[]) => ProviderAdapter;
 
+/**
+ * V1.2.5: optional runtime config for adapters that need per-user
+ * credentials (Higgsfield CLI token). Updated by the Director on
+ * each generation cycle so the latest settings.activeSkills /
+ * settings.higgsfieldCliToken flow through without re-creating
+ * the singleton adapter.
+ */
+let _runtimeConfig: { higgsfieldCliToken?: string } = {};
+
+export function setProviderRuntimeConfig(cfg: { higgsfieldCliToken?: string }): void {
+  _runtimeConfig = cfg;
+  // Force the higgsfield singleton to rebuild on the next
+  // getProvider() call so the new token takes effect.
+  _instances.delete('higgsfield');
+}
+
 const FACTORIES: Record<string, () => ProviderAdapter> = {
-  higgsfield: () => new HiggsfieldCliAdapter(),
+  higgsfield: () => new HiggsfieldCliAdapter({ cliToken: _runtimeConfig.higgsfieldCliToken }),
   mmx: () => new MmxCliAdapter(),
   leonardo: () => new LeonardoHttpAdapter(),
   'minimax-text': () => new MinimaxTextAdapter(),

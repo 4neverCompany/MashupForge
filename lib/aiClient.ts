@@ -120,6 +120,16 @@ export interface StreamAIOptions {
    * the model. Unknown names are silently ignored.
    */
   activeSkills?: string[];
+
+  /**
+   * V1.2.5: optional Higgsfield CLI token entered in Settings
+   * → HiggsfieldConnection → "Higgsfield CLI token". When set,
+   * the server forwards it to the @higgsfield/cli binary as
+   * `HIGGSFIELD_API_KEY`, bypassing the OAuth web flow. The
+   * CLI is the production path for power-users; the OAuth
+   * flow remains the default for new users.
+   */
+  higgsfieldCliToken?: string;
 }
 
 /**
@@ -174,6 +184,10 @@ export async function* streamAI(
       // (they build the system prompt server-side from their own
       // state), but vercel-ai honors it.
       activeSkills: options?.activeSkills,
+      // V1.2.5: forward the user's CLI token (if any) to the
+      // server. The route plumbs it into the provider registry
+      // before the next `getProvider('higgsfield')` call.
+      higgsfieldCliToken: options?.higgsfieldCliToken,
     }),
     signal: options?.signal,
   });

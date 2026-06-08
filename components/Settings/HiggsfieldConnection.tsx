@@ -46,6 +46,10 @@ interface HiggsfieldConnectionProps {
   selectedVideoModel: HiggsfieldVideoModelSlug;
   onSelectImageModel: (slug: HiggsfieldImageModelSlug) => void;
   onSelectVideoModel: (slug: HiggsfieldVideoModelSlug) => void;
+  /** V1.2.5: power-user CLI-token entry. When set, the Director
+   *  loop prefers `@higgsfield/cli` over the OAuth web flow. */
+  cliToken?: string;
+  onSaveCliToken?: (token: string) => void;
   saving?: boolean;
   /**
    * Triggered when the connection state changes so the parent can
@@ -59,6 +63,8 @@ export function HiggsfieldConnection({
   selectedVideoModel,
   onSelectImageModel,
   onSelectVideoModel,
+  cliToken,
+  onSaveCliToken,
   saving,
   onConnectionChange,
 }: HiggsfieldConnectionProps) {
@@ -483,6 +489,36 @@ export function HiggsfieldConnection({
             docs <ExternalLink className="h-3 w-3" />
           </a>
         </div>
+        {/* V1.2.5: paste a CLI token to bypass OAuth entirely. The
+            Director loop passes the token as `HIGGSFIELD_API_KEY`
+            to the @higgsfield/cli binary on every call. Cleared by
+            emptying the field and saving. */}
+        {onSaveCliToken && (
+          <div className="mt-3 flex items-center gap-2">
+            <input
+              type="password"
+              defaultValue={cliToken ?? ''}
+              placeholder="higgsfield-cli-token (paste from `higgs auth`)..."
+              autoComplete="off"
+              spellCheck={false}
+              disabled={saving}
+              onBlur={(e) => {
+                const next = e.target.value.trim();
+                if (next !== (cliToken ?? '')) onSaveCliToken(next);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+              className="flex-1 rounded border border-white/10 bg-black/30 px-2.5 py-1 font-mono text-[11px] text-white placeholder-white/30 focus:border-emerald-400/60 focus:outline-none disabled:opacity-50"
+            />
+            {cliToken && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-300">
+                <Check className="h-3 w-3" />
+                CLI token set
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

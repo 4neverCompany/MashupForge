@@ -1594,6 +1594,10 @@ export function SettingsModal({
                     onSelectVideoModel={(slug) =>
                       updateSettings({ defaultHiggsfieldVideoModel: slug })
                     }
+                    cliToken={settings.higgsfieldCliToken}
+                    onSaveCliToken={(token) =>
+                      updateSettings({ higgsfieldCliToken: token })
+                    }
                     onConnectionChange={(connected) =>
                       updateSettings({ higgsfieldConnected: connected })
                     }

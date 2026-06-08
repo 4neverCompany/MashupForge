@@ -148,7 +148,20 @@ export function useSettings() {
         }),
       );
     }, 300);
-    return () => clearTimeout(timer);
+    // V1.2.5-HOTFIX: when the component unmounts BEFORE the 300ms
+    // debounce fires, write the latest value synchronously to
+    // localStorage. The next session's load path migrates
+    // localStorage → IDB. Without this, "Back" / client-side
+    // navigation inside the SPA loses unsaved changes because
+    // `beforeunload` doesn't fire on Next.js soft route changes.
+    // Hard reload still goes through `beforeunload`; this
+    // cleanup covers the soft-nav case.
+    return () => {
+      clearTimeout(timer);
+      try {
+        localStorage.setItem('mashup_settings', JSON.stringify(settingsRef.current));
+      } catch { /* storage quota — silent */ }
+    };
   }, [settings, isSettingsLoaded]);
 
   // Flush-on-unload safety net for the 300ms debounce window. Writes

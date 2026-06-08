@@ -323,7 +323,20 @@ export async function POST(req: Request): Promise<Response> {
     });
   }
 
-  const { message, mode, systemPrompt, niches, genres, model } = body || {};
+  const { message, mode, systemPrompt, niches, genres, model, higgsfieldCliToken } = body || {};
+
+  // V1.2.5: thread the user's Higgsfield CLI token (entered
+  // in Settings → HiggsfieldConnection) into the provider
+  // registry so the next `getProvider('higgsfield')` builds
+  // a fresh adapter that forwards it as `HIGGSFIELD_API_KEY`
+  // to the @higgsfield/cli binary. We accept any string
+  // and let the CLI decide; an invalid token surfaces as a
+  // 401 from the binary, which the error mapper already
+  // turns into a clean `ProviderAuthError`.
+  if (typeof higgsfieldCliToken === 'string') {
+    const { setProviderRuntimeConfig } = await import('@/lib/providers/registry');
+    setProviderRuntimeConfig({ higgsfieldCliToken });
+  }
 
   // V1.2.2-DIRECTOR: short-circuit to the Director loop
   // when the caller sets `mode: 'director'`. The other

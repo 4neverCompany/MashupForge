@@ -108,6 +108,14 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
   private resolveAttempted = false;
 
   /**
+   * V1.2.5: optional CLI token (from `npx @higgsfield/cli auth`).
+   * When set, the adapter forwards it as `HIGGSFIELD_API_KEY` on
+   * every CLI invocation. When unset, the adapter relies on the
+   * CLI's own credentials cache (`~/.config/higgsfield/...`).
+   */
+  constructor(private readonly options: { cliToken?: string } = {}) {}
+
+  /**
    * Probe for the CLI binary. We try `higgsfield` first, then `higgs`
    * (both are exported by @higgsfield/cli). The result is cached
    * after the first successful probe so the hot path stays O(1).
@@ -156,6 +164,13 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
       provider: this.name,
       binary: bin,
       args,
+      // V1.2.5: forward the user's CLI token to the binary via
+      // env. The CLI's own keychain takes precedence if it
+      // already has a different token cached, so this is
+      // safe-by-default for users with an existing auth.
+      env: this.options.cliToken
+        ? { HIGGSFIELD_API_KEY: this.options.cliToken }
+        : undefined,
       timeoutMs: opts.timeoutMs,
       signal: opts.signal,
     };
@@ -185,6 +200,10 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
       provider: this.name,
       binary: bin,
       args,
+      // V1.2.5: same CLI-token forwarding as generateImage.
+      env: this.options.cliToken
+        ? { HIGGSFIELD_API_KEY: this.options.cliToken }
+        : undefined,
       // Video gen is the slow path; clampTimeout applies the spec
       // 60s default when no override is supplied. Callers needing
       // longer (e.g. slow models behind a queue) pass an explicit

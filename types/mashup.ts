@@ -297,6 +297,11 @@ export interface UserSettings {
    */
   defaultHiggsfieldImageModel?: string;
   defaultHiggsfieldVideoModel?: string;
+  /** V1.2.5: power-user CLI-token entry. Set this if you have a
+   *  Higgsfield API key from `npx @higgsfield/cli auth` and don't
+   *  want to go through the OAuth web flow. The Director loop
+   *  prefers CLI tokens over OAuth when both are present. */
+  higgsfieldCliToken?: string;
   /** Cached connection state for the Settings panel. */
   higgsfieldConnected?: boolean;
   defaultAnimationDuration?: 3 | 5 | 10;
