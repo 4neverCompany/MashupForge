@@ -40,6 +40,18 @@
 // If the user wants the full idea pipeline, they should stay on the pi
 // or nca provider. This route prioritises predictable streaming with
 // zero subprocess management.
+//
+// V1.2.2 — DIRECTOR MODE
+//   `mode: 'director'` switches this route to the new Director
+//   agent loop (`lib/agent-loop/`). Unlike the other modes
+//   (which stream text deltas), the Director mode returns a
+//   single JSON object with the final prompt, the
+//   chronological step log, and the total cost — the same
+//   shape the Replay UI (v1.2 backlog) needs to render
+//   step-by-step reasoning. The body shape stays the same
+//   for the streaming modes, so existing callers
+//   (lib/aiClient.ts, the Studio's mode switcher) keep
+//   working untouched.
 
 import { streamText } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
@@ -52,6 +64,11 @@ import {
   getDefaultTextModelForProvider,
   type TextGenParams,
 } from '@/lib/text-model-catalog';
+// V1.2.2-DIRECTOR: lazy-imported inside `handleDirectorMode`
+// so the streaming-mode tests (which mock `ai` with a
+// narrow `streamText` shape) don't transitively pull in
+// `lib/agent-loop` (which imports `tool` from `ai`).
+// Type-only import is fine — it has no runtime cost.
 
 // Both the AI SDK provider clients and any future Node-only deps demand
 // the Node runtime — edge stripped fetch agents the SDK relies on.
@@ -71,7 +88,12 @@ type AiMode =
   | 'caption'
   | 'tag'
   | 'negative-prompt'
-  | 'collection-info';
+  | 'collection-info'
+  // V1.2.2-DIRECTOR: new non-streaming mode that drives
+  // the multi-step tool-use loop and returns a JSON
+  // {prompt, steps, cost, ...} envelope. See
+  // lib/agent-loop/index.ts.
+  | 'director';
 
 // Same directives as the pi route. Duplicated rather than imported because
 // the pi module's `MODE_DIRECTIVES` is private to its file and the brief
@@ -94,6 +116,13 @@ const MODE_DIRECTIVES: Record<AiMode, string> = {
     'Generate the most effective negative prompt to eliminate visual artifacts and low-quality output. Return ONLY the negative prompt text.',
   'collection-info':
     'Generate rich collection metadata. Return ONLY valid JSON.',
+  // V1.2.2-DIRECTOR: the system prompt is built by
+  // `lib/agent-loop/plan.ts` (it embeds the 6-step plan
+  // + niche/genre orientation). The mode-directive here
+  // is intentionally minimal — the loop owns the role
+  // definition, the route just routes to the loop.
+  director:
+    'You are the Director agent of MashupForge. Operate the multi-step plan as described in your system prompt.',
 };
 
 function directiveFor(mode: unknown): string | null {
@@ -295,6 +324,18 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const { message, mode, systemPrompt, niches, genres, model } = body || {};
+
+  // V1.2.2-DIRECTOR: short-circuit to the Director loop
+  // when the caller sets `mode: 'director'`. The other
+  // fields are not required — the loop reads its own
+  // context from `niches` / `genres` / `ideaConcept` /
+  // `skillContext` and returns a single JSON envelope
+  // instead of an SSE stream. The streaming path
+  // below is unchanged.
+  if (mode === 'director') {
+    return handleDirectorMode(body);
+  }
+
   if (typeof message !== 'string' || !message.trim()) {
     return new Response(JSON.stringify({ error: 'message is required' }), {
       status: 400,
@@ -554,4 +595,170 @@ export async function POST(req: Request): Promise<Response> {
       'X-AI-Model': provider.modelId,
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// V1.2.2-DIRECTOR: Director mode handler.
+//
+// Returns a single JSON envelope instead of an SSE stream. The
+// envelope shape mirrors `RunDirectorLoopResult` (see
+// lib/agent-loop/index.ts) plus a `prompt` alias for the final
+// draft so existing callers that only read `prompt` keep
+// working.
+//
+// Request body:
+//   {
+//     "mode": "director",
+//     "ideaConcept": "Darth Vader in Iron Man suit",
+//     "niches": ["Multiverse Crossovers", "Mythic Legends"],
+//     "genres": ["Noir & Gritty", "Vibrant & Neon"],
+//     "skillContext": [{ "name": "framing:camera-angles" }],
+//     "userId": "ai-route",
+//     "model": "MiniMax-M3"            // optional
+//     "maxSteps": 8                    // optional
+//     "budgetUsd": 0.50                // optional
+//   }
+//
+// Response body (200):
+//   {
+//     "prompt": "<final prompt draft>",
+//     "steps": [ Step, ... ],
+//     "cost": 0.0234,
+//     "runId": "run_...",
+//     "modelId": "MiniMax-M3",
+//     "provider": "minimax",
+//     "truncatedBy": "natural" | "budget" | "step_limit" | "error"
+//   }
+//
+// Error responses:
+//   - 400: missing or invalid required fields
+//   - 503: no AI provider configured
+//   - 500: unexpected error (with a sanitised message)
+// ---------------------------------------------------------------------------
+async function handleDirectorMode(body: Record<string, unknown>): Promise<Response> {
+  const { ideaConcept, niches, genres, skillContext, userId, model } = body;
+
+  if (typeof ideaConcept !== 'string' || !ideaConcept.trim()) {
+    return new Response(
+      JSON.stringify({ error: 'ideaConcept is required for director mode' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+  if (!Array.isArray(niches) || niches.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'niches is required for director mode (1-6 items)' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
+  const cleanNiches = sanitizeStringArray(niches);
+  const cleanGenres = sanitizeStringArray(genres);
+
+  if (cleanNiches.length === 0) {
+    return new Response(
+      JSON.stringify({ error: 'niches must contain at least one non-empty string' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
+  // Optional skillContext — narrow safely (route-level
+  // validation mirrors lib/agent-loop's own Zod schema).
+  let safeSkillContext: { name: string; version?: string }[] | undefined;
+  if (Array.isArray(skillContext)) {
+    safeSkillContext = skillContext
+      .filter(
+        (s): s is { name: string; version?: string } =>
+          typeof s === 'object'
+          && s !== null
+          && typeof (s as { name?: unknown }).name === 'string'
+          && ((s as { name: string }).name.length > 0),
+      )
+      .map((s) => {
+        const v = (s as { version?: unknown }).version;
+        return {
+          name: (s as { name: string }).name,
+          ...(typeof v === 'string' && v.length > 0 ? { version: v } : {}),
+        };
+      });
+  }
+
+  const safeUserId =
+    typeof userId === 'string' && userId.length > 0
+      ? userId.slice(0, 120)
+      : 'ai-route';
+
+  const modelOverride = typeof model === 'string' && model.length > 0 ? model : undefined;
+
+  // Optional maxSteps / budgetUsd. Both are passed through
+  // verbatim to the loop; its own Zod schema rejects
+  // nonsense values.
+  let maxSteps: number | undefined;
+  if (typeof body.maxSteps === 'number' && Number.isFinite(body.maxSteps)) {
+    maxSteps = body.maxSteps;
+  }
+  let budgetUsd: number | undefined;
+  if (typeof body.budgetUsd === 'number' && Number.isFinite(body.budgetUsd)) {
+    budgetUsd = body.budgetUsd;
+  }
+
+  try {
+    // Lazy import: keeps the streaming-mode test mocks
+    // (which only stub `streamText`) from failing on the
+    // missing `tool` export.
+    const { runDirectorLoop } = await import('@/lib/agent-loop');
+    const result = await runDirectorLoop({
+      niches: cleanNiches,
+      genres: cleanGenres,
+      ideaConcept: ideaConcept.trim(),
+      ...(safeSkillContext ? { skillContext: safeSkillContext } : {}),
+      userId: safeUserId,
+      ...(modelOverride ? { modelId: modelOverride } : {}),
+      ...(maxSteps !== undefined ? { maxSteps } : {}),
+      ...(budgetUsd !== undefined ? { budgetUsd } : {}),
+    });
+
+    // Map "no provider configured" to a 503 so the
+    // client can show a clear setup CTA. Every other
+    // error (budget, step limit, network) is a 200 with
+    // truncatedBy set — the loop already captured the
+    // best-effort final prompt in those cases.
+    if (result.provider === 'unknown' && result.truncatedBy === 'error') {
+      return new Response(
+        JSON.stringify({
+          error:
+            'No AI provider configured. Set MINIMAX_API_KEY (preferred) or OPENAI_API_KEY.',
+        }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        prompt: result.finalPrompt,
+        steps: result.steps,
+        cost: result.totalCost,
+        runId: result.runId,
+        modelId: result.modelId,
+        provider: result.provider,
+        truncatedBy: result.truncatedBy,
+      }),
+      {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          // Replay-UI hint: the client can re-fetch the
+          // run by id (lib/agent-loop/persistence.ts) to
+          // render the step log later.
+          'X-Director-Run-Id': result.runId,
+          'X-AI-Provider': result.provider,
+          'X-AI-Model': result.modelId,
+        },
+      },
+    );
+  } catch (e: unknown) {
+    return new Response(
+      JSON.stringify({ error: getErrorMessage(e) || 'Director loop error' }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
 }
