@@ -9,20 +9,28 @@ import { type Idea } from '../types/mashup';
 export function useIdeas() {
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [isIdeasLoaded, setIsIdeasLoaded] = useState(false);
+  // V1.2.1: lazy load — see useImages.ts for the full rationale.
+  const [loadTriggered, setLoadTriggered] = useState(false);
 
   useEffect(() => {
+    if (!loadTriggered) {
+      setIsIdeasLoaded(true);
+      return;
+    }
+    let cancelled = false;
     const load = async () => {
       try {
         const idbIdeas = await get('mashup_ideas');
-        if (idbIdeas) setIdeas(idbIdeas);
+        if (idbIdeas && !cancelled) setIdeas(idbIdeas);
       } catch {
-        // silent — ideas remain empty, loaded flag still set
+        // silent — ideas remain empty
       } finally {
-        setIsIdeasLoaded(true);
+        if (!cancelled) setIsIdeasLoaded(true);
       }
     };
     load();
-  }, []);
+    return () => { cancelled = true; };
+  }, [loadTriggered]);
 
   useEffect(() => {
     if (isIdeasLoaded) {
@@ -56,9 +64,10 @@ export function useIdeas() {
   return {
     ideas,
     addIdea,
+    clearIdeas,
     updateIdeaStatus,
     deleteIdea,
-    clearIdeas,
     isIdeasLoaded,
+    requestLoad: () => setLoadTriggered(true),
   };
 }

@@ -20,6 +20,15 @@ function normalizeOnLoad(img: GeneratedImage): GeneratedImage {
 export function useImages() {
   const [savedImages, setSavedImages] = useState<GeneratedImage[]>([]);
   const [isImagesLoaded, setIsImagesLoaded] = useState(false);
+  // V1.2.1: lazy load. Studio mount is cheap (no I/O). The Gallery view
+  // calls `requestLoad()` on mount; the actual `get('mashup_saved_images')`
+  // JSON.parse happens then. For users with a 100+ MB store file (e.g. 692
+  // saved images, 256 comparison results), the studio mount was hanging
+  // for 30+ seconds because the Tauri plugin-store eagerly loaded the
+  // whole file. The studio never needs images at mount time — the default
+  // view is 'studio' (no images rendered) — so deferring the load is
+  // safe. See PITFALLS.md "v1.2.1 persistence bloat".
+  const [loadTriggered, setLoadTriggered] = useState(false);
   // V105.1-REACT-19: was `savedImagesRef.current = savedImages` during
   // render (refs). Moved into a useEffect so the ref mirrors state
   // after the commit phase instead of mid-render.
@@ -28,7 +37,19 @@ export function useImages() {
     savedImagesRef.current = savedImages;
   }, [savedImages]);
 
+  // V1.2.1: studio mount is no longer blocked by image I/O. isLoaded
+  // flips to true immediately; the actual data load is gated on the
+  // Gallery view calling requestLoad().
   useEffect(() => {
+    if (!loadTriggered) {
+      // Studio mount: signal "not loaded yet" so the splash stays
+      // visible? Actually no — the studio can render with empty state.
+      // We set isImagesLoaded=true so isLoaded (in MashupContext) is
+      // not stuck on this. The Gallery view re-triggers the load.
+      setIsImagesLoaded(true);
+      return;
+    }
+    let cancelled = false;
     const loadImages = async () => {
       try {
         const storedImages = localStorage.getItem('mashup_saved_images');
@@ -37,23 +58,24 @@ export function useImages() {
             const images = JSON.parse(storedImages).map(normalizeOnLoad);
             await set('mashup_saved_images', images);
             localStorage.removeItem('mashup_saved_images');
-            setSavedImages(images);
+            if (!cancelled) setSavedImages(images);
           } catch {
             const idbImages = await get('mashup_saved_images');
-            if (idbImages) setSavedImages(idbImages.map(normalizeOnLoad));
+            if (idbImages && !cancelled) setSavedImages(idbImages.map(normalizeOnLoad));
           }
         } else {
           const idbImages = await get('mashup_saved_images');
-          if (idbImages) setSavedImages(idbImages.map(normalizeOnLoad));
+          if (idbImages && !cancelled) setSavedImages(idbImages.map(normalizeOnLoad));
         }
       } catch {
-        // silent — savedImages remains empty, isImagesLoaded still fires
+        // silent — savedImages remains empty
       } finally {
-        setIsImagesLoaded(true);
+        if (!cancelled) setIsImagesLoaded(true);
       }
     };
     loadImages();
-  }, []);
+    return () => { cancelled = true; };
+  }, [loadTriggered]);
 
   // PROP-020: single debounced IDB write coalesces rapid mutations
   // (bulk tag-select, approveAll, carousel-group delete) into one write
@@ -144,5 +166,8 @@ export function useImages() {
     updateSavedImageCollectionId,
     clearCollectionFromImages,
     isImagesLoaded,
+    // V1.2.1: trigger the actual persistence load. Called by the
+    // Gallery view on mount. Studio mount no longer blocks on this.
+    requestLoad: () => setLoadTriggered(true),
   };
 }

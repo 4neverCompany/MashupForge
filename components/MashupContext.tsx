@@ -77,6 +77,7 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     updateSavedImageCollectionId,
     clearCollectionFromImages,
     isImagesLoaded,
+    requestLoad: requestImagesLoad,
   } = imagesHook;
 
   const collectionsHook = useCollections(settings);
@@ -86,6 +87,7 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     deleteCollection,
     autoGenerateCollectionInfo,
     isCollectionsLoaded,
+    requestLoad: requestCollectionsLoad,
   } = collectionsHook;
 
   const generationHook = useImageGeneration({ settings, updateImageTags });
@@ -119,7 +121,15 @@ export function MashupProvider({ children }: { children: ReactNode }) {
   } = comparisonHook;
 
   const ideasHook = useIdeas();
-  const { ideas, addIdea, updateIdeaStatus, deleteIdea, clearIdeas } = ideasHook;
+  const {
+    ideas,
+    addIdea,
+    updateIdeaStatus,
+    deleteIdea,
+    clearIdeas,
+    isIdeasLoaded,
+    requestLoad: requestIdeasLoad,
+  } = ideasHook;
 
   const socialHook = useSocial({ settings, saveImage, setImages });
   const { generatePostContent } = socialHook;
@@ -536,6 +546,12 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     updateIdeaStatus,
     deleteIdea,
     clearIdeas,
+    // V1.2.1: lazy load triggers. The Gallery/Collections/Ideas views
+    // call these on mount so the persistence layer doesn't eagerly
+    // JSON.parse a 100+ MB mashupforge.json at studio mount time.
+    requestImagesLoad,
+    requestCollectionsLoad,
+    requestIdeasLoad,
     isSidebarOpen,
     setIsSidebarOpen,
     pipelineEnabled: pipelineHook.pipelineEnabled,

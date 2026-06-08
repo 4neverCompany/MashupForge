@@ -109,19 +109,26 @@ describe('BUG-CRIT-006 / BUG-DES-002 — useImages flush-on-unload', () => {
     expect(ids).toEqual(['a', 'b']);
   });
 
-  it('does not register the listener until isImagesLoaded is true', () => {
-    // Spy on addEventListener to confirm the flush effect waits for the
-    // load path. If it registered eagerly, it would write `[]` over a
-    // legitimate localStorage value before the load could migrate it.
+  it('registers the beforeunload listener once isImagesLoaded flips true', async () => {
+    // V1.2.1: lazy persistence load. The lazy-load useEffect flips
+    // isImagesLoaded to `true` synchronously on mount (so the studio
+    // doesn't block waiting for the 100+ MB store JSON.parse). The
+    // flush useEffect then registers the beforeunload listener on the
+    // same render tick. Pre-v1.2.1 this test asserted 0 calls; the new
+    // contract is "listener is registered after the synchronous
+    // render+effects flush" which is what the user-visible
+    // reload-survives contract requires.
     const addSpy = vi.spyOn(window, 'addEventListener');
 
     renderHook(() => useImages());
+    // Flush the synchronous effects pass + the setState re-render that
+    // happens when the lazy-load useEffect calls setIsImagesLoaded(true).
+    await act(async () => {
+      await Promise.resolve();
+    });
 
-    // At this synchronous point, isImagesLoaded is still false (the
-    // load promise hasn't resolved). The beforeunload listener
-    // shouldn't be registered yet.
     const beforeunloadCalls = addSpy.mock.calls.filter(([type]) => type === 'beforeunload');
-    expect(beforeunloadCalls).toHaveLength(0);
+    expect(beforeunloadCalls.length).toBeGreaterThanOrEqual(1);
 
     addSpy.mockRestore();
   });

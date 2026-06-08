@@ -238,6 +238,33 @@ export function MainContent() {
   const [hasApiKey, setHasApiKey] = useState(true);
   const [isAutoTagging, setIsAutoTagging] = useState(false);
 
+  // V1.2.1: lazy persistence load. The Tauri plugin-store eagerly
+  // JSON.parse's the whole mashupforge.json on first `get()`, which
+  // hangs studio mount for users with 100+ MB stores (692 saved images,
+  // 256 comparison results, 28 carousel groups, etc.). Instead, the
+  // hooks return isLoaded=true immediately; this effect fires the
+  // actual `get()` when the user navigates to the view that needs
+  // the data. The data hydrates with a brief "Loading..." state per
+  // view instead of a 30+ second hang on the studio splash.
+  const {
+    requestImagesLoad,
+    requestCollectionsLoad,
+    requestIdeasLoad,
+  } = useMashup();
+  useEffect(() => {
+    // Studio (the default view) does NOT trigger a load — the studio
+    // renders images via `images` (not `savedImages`) and doesn't need
+    // the persisted store. Gallery does need savedImages + collections;
+    // ideas needs the persisted ideas list.
+    if (view === 'gallery') {
+      requestImagesLoad();
+      requestCollectionsLoad();
+    } else if (view === 'ideas') {
+      requestIdeasLoad();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
   const checkApiKey = async () => {
     const w = window as typeof window & { aistudio?: { hasSelectedApiKey(): Promise<boolean>; openSelectKey(): Promise<void> } };
     if (typeof window !== 'undefined' && w.aistudio) {

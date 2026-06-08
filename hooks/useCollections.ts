@@ -10,8 +10,19 @@ import { streamAIToString } from '@/lib/aiClient';
 export function useCollections(settings: UserSettings) {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [isCollectionsLoaded, setIsCollectionsLoaded] = useState(false);
+  // V1.2.1: lazy load — see useImages.ts for the full rationale.
+  // The Tauri plugin-store eagerly loads the whole mashupforge.json,
+  // which can be 100+ MB for users with many saved images/comparisons.
+  // Studio mount doesn't need collections, so defer the load to the
+  // Collections view via `requestLoad()`.
+  const [loadTriggered, setLoadTriggered] = useState(false);
 
   useEffect(() => {
+    if (!loadTriggered) {
+      setIsCollectionsLoaded(true);
+      return;
+    }
+    let cancelled = false;
     const loadCollections = async () => {
       try {
         const storedCollections = localStorage.getItem('mashup_collections');
@@ -19,19 +30,20 @@ export function useCollections(settings: UserSettings) {
           const parsed = JSON.parse(storedCollections);
           await set('mashup_collections', parsed);
           localStorage.removeItem('mashup_collections');
-          setCollections(parsed);
+          if (!cancelled) setCollections(parsed);
         } else {
           const idbCollections = await get('mashup_collections');
-          if (idbCollections) setCollections(idbCollections);
+          if (idbCollections && !cancelled) setCollections(idbCollections);
         }
       } catch {
-        // silent — collections remain empty, loaded flag still set
+        // silent — collections remain empty
       } finally {
-        setIsCollectionsLoaded(true);
+        if (!cancelled) setIsCollectionsLoaded(true);
       }
     };
     loadCollections();
-  }, []);
+    return () => { cancelled = true; };
+  }, [loadTriggered]);
 
   const autoGenerateCollectionInfo = async (
     sampleImages: GeneratedImage[] | string[],
@@ -130,6 +142,7 @@ Return a JSON object with "name" and "description" keys.`,
     deleteCollection,
     autoGenerateCollectionInfo,
     isCollectionsLoaded,
+    requestLoad: () => setLoadTriggered(true),
   };
 }
 

@@ -1,5 +1,56 @@
 # Changelog
 
+## [1.2.1] — 2026-06-08 — Hotfix: lazy persistence load (studio mount hang)
+
+### Bug fix
+
+**`mashupforge.json` store JSON.parse was blocking studio mount for users
+with large galleries.** The Tauri plugin-store eagerly loads the entire
+`mashupforge.json` file on the first `get(key)` call. For users with
+many saved images + comparison runs + carousel groups, the file can
+grow to 100+ MB. `JSON.parse` of a 100+ MB file inside a `useEffect` on
+the studio mount path meant the studio splash sat at "Loading studio…"
+for 30+ seconds. v1.2.0 worked fine on a fresh install with empty data
+but was unusable for anyone who had used v1.1.x extensively.
+
+### What changed
+- `hooks/useImages.ts`, `useCollections.ts`, `useIdeas.ts`: each hook
+  now returns `isLoaded=true` **immediately** and exposes a
+  `requestLoad()` trigger. The actual `get('mashup_saved_images')` (etc.)
+  only fires when the consumer calls `requestLoad()`.
+- `components/MainContent.tsx`: a `useEffect([view])` fires the
+  appropriate `requestLoad()` when the user navigates to `gallery` or
+  `ideas`. The default `studio` view **does not** trigger any load, so
+  the studio splash is gone in <1s even for users with 100+ MB stores.
+- `components/MashupContext.tsx` + `types/mashup.ts`: pass through the
+  three new `request*Load` functions on the context.
+- `tests/integration/useImages-flush.test.tsx`: updated the
+  "does not register the listener" test — the new contract is
+  "listener is registered after the synchronous render+effects flush
+  on mount" (which is when `isImagesLoaded` flips true synchronously
+  via the lazy-load useEffect, instead of after an async `get()`).
+  Pre-v1.2.1 the listener was registered late, after the persistence
+  I/O resolved.
+
+### Stats
+- 4 hooks + 2 components + 1 type + 1 test file changed
+- 1828 / 1842 tests pass (the same 14 pre-existing tauri-sqlite env
+  failures from v1.2.0 — unrelated to this fix)
+- New code: ~80 lines net (lazy load + useEffect re-wiring + 1 test)
+- No new files, no API surface changes, no DB migration
+
+### User-facing behavior
+- Studio mount: instant (was: 30+ seconds for users with bloated stores)
+- Open Gallery: brief "Loading…" badge while savedImages hydrates
+- Open Ideas: same brief load
+- After first load, subsequent navigations are instant (in-memory cache)
+
+### Rollback plan
+- Revert the 4 hook + 2 component + 1 type changes. The `request*Load`
+  functions can be no-ops (or absent — keep the API but return early
+  on the call). No data migration needed because the store keys +
+  load logic are unchanged.
+
 ## [1.2.0] — 2026-06-08 — Camofox Client-Side + Agentic-AI Epic (6 features, 1 release)
 
 ### What changed

@@ -1152,6 +1152,15 @@ export interface MashupContextType {
   clearIdeas: () => void;
   isSidebarOpen: boolean;
   setIsSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  // V1.2.1: lazy load triggers — see hooks/useImages.ts for the full
+  // rationale. The Gallery/Collections/Ideas views call these on mount
+  // so the Tauri plugin-store doesn't eagerly JSON.parse a 100+ MB
+  // mashupforge.json at studio mount time. Studio mount sets isLoaded
+  // immediately; the actual data hydrates when the user navigates to
+  // the relevant view.
+  requestImagesLoad: () => void;
+  requestCollectionsLoad: () => void;
+  requestIdeasLoad: () => void;
   pipelineEnabled: boolean;
   pipelineRunning: boolean;
   pipelineQueue: Idea[];
