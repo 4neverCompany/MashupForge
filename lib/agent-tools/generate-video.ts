@@ -27,6 +27,8 @@ import {
   getHiggsfieldVideoModel,
   type HiggsfieldVideoModelSlug,
 } from '@/lib/higgsfield/models';
+import { requireApproval } from '@/lib/agent-loop/hil';
+import { currentRunContext, bumpStepCounter } from '@/lib/agent-loop/run-context';
 
 // ---------------------------------------------------------------------------
 // Provider dispatcher
@@ -148,7 +150,33 @@ export async function executeGenerateVideo(
 
     validateSettingsForModel(input);
 
+    // v1.2.3 HIL guard: video calls are the most expensive
+    // (~0.30 USD per call), so we ALWAYS gate on user
+    // approval, even for the mock provider. The endpoint
+    // auto-approves $0 mock calls in tests; the test env
+    // bypasses HTTP entirely.
     const provider: ProviderKind = opts.providerOverride ?? detectProvider(input.model);
+    if (provider !== 'mock') {
+      const ctx = currentRunContext();
+      if (ctx) {
+        const stepId = `${ctx.runId}::video::${bumpStepCounter()}`;
+        await requireApproval({
+          runId: ctx.runId,
+          stepId,
+          toolName: 'generate_video',
+          estimatedCostUsd: 0.30,
+          totalCostSoFarUsd: ctx.totalCostUsd,
+          budgetUsd: ctx.budgetUsd,
+          prompt: input.prompt,
+          model: input.model,
+          settings: input.settings as Record<string, unknown> | undefined,
+          ...(ctx.autoApproveBelowUsd !== undefined
+            ? { autoApproveBelowUsd: ctx.autoApproveBelowUsd }
+            : {}),
+        });
+      }
+    }
+
     let output: GenerateVideoOutput;
     switch (provider) {
       case 'mock':

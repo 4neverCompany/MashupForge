@@ -40,6 +40,8 @@ import {
   getHiggsfieldImageModel,
   type HiggsfieldImageModelSlug,
 } from '@/lib/higgsfield/models';
+import { requireApproval } from '@/lib/agent-loop/hil';
+import { currentRunContext, bumpStepCounter } from '@/lib/agent-loop/run-context';
 
 // ---------------------------------------------------------------------------
 // Provider dispatcher
@@ -205,7 +207,32 @@ export async function executeGenerateImage(
 
     validateSettingsForModel(input);
 
+    // v1.2.3 HIL guard: pause before any non-mock image generation
+    // and ask /api/ai/confirm for approval. The endpoint
+    // auto-approves small costs and the mock provider; the test
+    // environment bypasses the HTTP call entirely. This is the
+    // credit-burn safety net.
     const provider: ProviderKind = opts.providerOverride ?? detectProvider(input.model);
+    if (provider !== 'mock') {
+      const ctx = currentRunContext();
+      if (ctx) {
+        const stepId = `${ctx.runId}::image::${bumpStepCounter()}`;
+        await requireApproval({
+          runId: ctx.runId,
+          stepId,
+          toolName: 'generate_image',
+          estimatedCostUsd: 0.04,
+          totalCostSoFarUsd: ctx.totalCostUsd,
+          budgetUsd: ctx.budgetUsd,
+          prompt: input.prompt,
+          model: input.model,
+          settings: input.settings as Record<string, unknown> | undefined,
+          ...(ctx.autoApproveBelowUsd !== undefined
+            ? { autoApproveBelowUsd: ctx.autoApproveBelowUsd }
+            : {}),
+        });
+      }
+    }
     let output: GenerateImageOutput;
     switch (provider) {
       case 'mock':
