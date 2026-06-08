@@ -366,6 +366,18 @@ export async function runDirectorLoop(
   const budget = new BudgetTracker(budgetLimit);
   const runId = input._runIdOverride ?? makeRunId(clock);
 
+  // v1.2.3 HIL: set the run context BEFORE any tool call so
+  // `generate_image` / `generate_video` can read it. Cleared
+  // in the `finally` so a thrown tool error doesn't leave
+  // stale state in the module-scope slot for the NEXT run.
+  const { enterRunContext, exitRunContext, addToTotalCost } = await import('./run-context');
+  enterRunContext({
+    runId,
+    stepCounter: 0,
+    totalCostUsd: 0,
+    budgetUsd: budgetLimit,
+  });
+
   // -----------------------------------------------------------------------
   // 1. Resolve the model. If no provider is configured, return an
   //    `error` result so the route can map it to a 503.
@@ -389,6 +401,9 @@ export async function runDirectorLoop(
       timestamp: clock(),
     });
     input.onStep?.(errStep);
+    // v1.2.3 HIL: early-return path doesn't hit the
+    // outer try/finally, so clear the run context here.
+    exitRunContext();
     return {
       runId,
       finalPrompt: '',
@@ -530,6 +545,11 @@ export async function runDirectorLoop(
         // BudgetExceededError when the cap is hit — the
         // SDK propagates the throw to our outer try/catch.
         budget.record(stepCost);
+        // v1.2.3 HIL: mirror the running cost into the
+        // run-context so a tool's HIL guard can compute
+        // "projected total after this call" without
+        // reaching back into the budget tracker.
+        addToTotalCost(stepCost);
       },
     });
 
@@ -603,6 +623,13 @@ export async function runDirectorLoop(
       start,
       finish: clock(),
     });
+  } finally {
+    // v1.2.3 HIL: clear the run context so the next call to
+    // `runDirectorLoop` doesn't see this run's leftover
+    // runId / cost. Order matters: clear BEFORE returning
+    // so the route layer's response object is the LAST
+    // thing the caller sees.
+    exitRunContext();
   }
 }
 
