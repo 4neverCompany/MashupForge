@@ -116,6 +116,80 @@ New tool: `job_lookup` (11th in `AGENT_TOOLS`).
   images (fire-and-forget virality/cost calls didn't regress it)
 
 ---
+
+### 🎬 Highlights
+
+
+> v1.4.4 was tagged but never published — the Tauri Windows build failed
+> six times in a row. v1.4.5 ships everything v1.4.4 promised, plus the
+> fixes that make those features actually work.
+
+#### 🎬 Highlights
+
+### Local image storage, backups & restore actually work now
+
+The v1.4.4 mega-release added file-per-image persistence, automatic
+backups, and export/import/restore — but shipped the JavaScript side
+without registering the Tauri `fs` plugin on the Rust side. Every disk
+operation silently did nothing. v1.4.5 registers the plugin with
+properly scoped permissions, so:
+
+- Generated images are saved to
+  `%APPDATA%\com.4nevercompany.mashupforge\images\generated\` and
+  survive CDN URL expiry.
+- Auto-backups land in **`Documents\MashupForge Backups`** — the real
+  Documents folder. (The v1.4.4 code pointed at a phantom
+  `AppData\Roaming\Documents` directory that never existed.)
+- The Higgsfield OAuth salt backup now reads the correct `config.json`
+  location, so encrypted tokens can be recovered after a reinstall.
+- Locally stored images render in the gallery via the Tauri asset
+  protocol (CSP updated accordingly).
+
+### Build & CI pipeline restored
+
+- Fixed the Turbopack build break that killed all six v1.4.4 build
+  attempts (a client component pulled `node:fs` into the browser
+  bundle via the Higgsfield skill loader — now a Server Action).
+- CI no longer depends on the removed `package-lock.json`
+  (`bun.lock` is the single lockfile).
+- Restored the jsdom test environment: a lockfile drift had silently
+  prevented 6 test files from running at all.
+- `release.sh` now refuses to cut a release when there are no real
+  commits since the last tag (8 of the previous 10 releases were empty
+  version bumps that each burned ~20 min of CI).
+
+#### 🔧 Breaking changes
+
+none
+
+#### 📋 Migration notes
+
+No action required. Note: if you clicked "Export images" or expected
+auto-backups on v1.4.x before this release, none were ever written —
+the first real backup appears in `Documents\MashupForge Backups` after
+updating.
+
+#### 🧪 Test summary
+
+- 1968/1982 vitest pass (14 known `tauri-sqlite` native-binding
+  failures, pre-existing and non-gating)
+- `tsc --noEmit` clean, `next build` green, all routes < 300 KB
+  gzipped first-load JS
+- `cargo check` clean with the new `tauri-plugin-fs`
+
+---
+## [1.4.5] — 2026-06-09
+
+### Fixed
+- **deps:** restore jsdom dependency resolution; jsdom into devDependencies
+- **ci:** stop depending on the deleted package-lock.json
+- **backup:** real Documents folder, correct config.json path, version from package.json
+- **desktop:** register tauri-plugin-fs + asset: CSP for local image display
+- **build:** load Higgsfield skill content via Server Action, not client import
+
+### Tests
+- **images:** pin the v1.4.4 unconditional-flush contract
+
 ## [1.4.4] — 2026-06-09
 
 ### Fixed
