@@ -386,6 +386,54 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
     };
   }
 
+  /**
+   * V1.3: get the current status of a single async generation job.
+   * Wraps `higgsfield generate get <job_id> --json`. Returns the
+   * raw job record so the caller can inspect status, result_url,
+   * error, etc. The tool layer normalises the shape.
+   */
+  async getJobStatus(jobId: string): Promise<unknown> {
+    if (!jobId) {
+      throw new ProviderParseError(this.name, 'getJobStatus requires a non-empty jobId');
+    }
+    const bin = await this.requireBinary();
+    const args = ['generate', 'get', jobId, '--json'];
+
+    const invokeOpts: CliInvokeOptions<unknown> = {
+      provider: this.name,
+      binary: bin,
+      args,
+      env: await this.maybeBuildAuthEnv(),
+      timeoutMs: clampTimeout(undefined),
+    };
+    const result = await this.runWithErrorMapping(invokeOpts, z.unknown());
+    return result;
+  }
+
+  /**
+   * V1.3: list recent generation jobs. Wraps
+   * `higgsfield generate list [--image|--video|--text] --size N --json`.
+   * Returns an array of job records.
+   */
+  async listJobs(opts: { mediaType?: 'image' | 'video' | 'text'; size?: number } = {}): Promise<unknown> {
+    const bin = await this.requireBinary();
+    const args = ['generate', 'list', '--json'];
+    if (opts.mediaType) {
+      args.push(`--${opts.mediaType}`);
+    }
+    args.push('--size', String(opts.size ?? 20));
+
+    const invokeOpts: CliInvokeOptions<unknown> = {
+      provider: this.name,
+      binary: bin,
+      args,
+      env: await this.maybeBuildAuthEnv(),
+      timeoutMs: clampTimeout(undefined),
+    };
+    const result = await this.runWithErrorMapping(invokeOpts, z.unknown());
+    return result;
+  }
+
   // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
