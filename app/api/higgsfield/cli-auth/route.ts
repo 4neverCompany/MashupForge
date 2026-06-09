@@ -19,6 +19,11 @@ import { NextResponse } from 'next/server';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+// V1.4.5-CLI-SPAWN: shared Windows .cmd/.bat shim detection. Node 20.12+ /
+// 22 throws EINVAL when spawning a .cmd without `shell: true`
+// (CVE-2024-27980 hardening) — without this, the route reported
+// "not authenticated" even though the CLI was installed and logged in.
+import { spawnNeedsShell } from '@/lib/providers/cli-utils';
 
 const CLI_BINARIES = ['higgsfield', 'higgs'] as const;
 
@@ -38,8 +43,13 @@ function pathSep(): string {
  * Returns the absolute path of the binary if found, null otherwise.
  */
 function findBinary(name: string): string | null {
+  // V1.4.5-CLI-SPAWN: `.ps1` removed from the candidate list. A .ps1 is
+  // not directly executable — neither via plain spawn nor via
+  // `shell: true` (cmd.exe doesn't run PowerShell scripts); it would
+  // need an explicit `powershell -File <path>` wrapper. Preferring it
+  // could only ever produce a false "not authenticated".
   const exts = process.platform === 'win32'
-    ? ['.cmd', '.bat', '.ps1', '.exe', '']
+    ? ['.cmd', '.bat', '.exe', '']
     : [''];
   // V1.4.4: prefer the user's globally-installed @higgsfield/cli
   // (lives at %USERPROFILE%\AppData\Roaming\npm on Windows). The
@@ -70,8 +80,18 @@ function findBinary(name: string): string | null {
 
 function runCliAuthCheck(bin: string): Promise<{ ok: boolean; tokenPreview?: string; stderr?: string }> {
   return new Promise((resolve) => {
-    const child = spawn(bin, ['auth', 'token'], {
+    // V1.4.5-CLI-SPAWN: .cmd/.bat shims need `shell: true` on Node
+    // 20.12+ (EINVAL otherwise). The args here are static literals
+    // ('auth', 'token'), so shell interpretation of the argv is not
+    // an injection concern in THIS route. Never pass user input
+    // through this spawn without going through cliInvoke's escaping.
+    const useShell = spawnNeedsShell(bin);
+    // With shell:true Node builds `cmd /c <file> <args>` by plain string
+    // join — a bin path containing spaces (C:\Users\First Last\…) breaks
+    // unless quoted.
+    const child = spawn(useShell ? `"${bin}"` : bin, ['auth', 'token'], {
       stdio: ['ignore', 'pipe', 'pipe'],
+      shell: useShell,
       windowsHide: true,
       env: {
         ...process.env,
