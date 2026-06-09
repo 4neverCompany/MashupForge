@@ -6,6 +6,17 @@ export interface GeneratedImage {
   id: string;
   base64?: string;
   url?: string;
+  /**
+   * Filename (relative to `%APPDATA%\com.4nevercompany.mashupforge\images\generated\`)
+   * of the local copy of this image on disk. Set by `useImageGeneration`
+   * right after a successful generation; falls back to `url` when absent.
+   *
+   * Having the file on disk makes the image survive the Higgsfield CDN
+   * URL expiring, makes the metadata store (mashupforge.json) tiny,
+   * and means corruption of one image can't take down the whole
+   * library — see lib/images/storage.ts.
+   */
+  localPath?: string;
   prompt: string;
   imageId?: string;
   savedAt?: number;
@@ -304,6 +315,29 @@ export interface UserSettings {
    */
   defaultHiggsfieldImageModel?: string;
   defaultHiggsfieldVideoModel?: string;
+  /**
+   * V1.4.0: opt-in toggle. When false (the default), the pipeline
+   * uses Leonardo only — the existing workflow is preserved. When
+   * true, the hook round-robins through `higgsfieldImageModels` and
+   * generates one Higgsfield image per idea in parallel with the
+   * Leonardo one. The user gets both, picks the best.
+   */
+  higgsfieldEnabled?: boolean;
+  /**
+   * V1.4.0: which Higgsfield image models the user wants to exercise
+   * (slug list, e.g. `['nano_banana_2', 'flux_2', 'gpt_image_2']`).
+   * The pipeline round-robins through this list. Defaults to
+   * `['nano_banana_2']` when `higgsfieldEnabled` is true but no
+   * list is set.
+   */
+  higgsfieldImageModels?: string[];
+  /**
+   * V1.4.0: unified model id (e.g. `higgsfield:nano_banana_2`,
+   * `nano-banana-2`). When set, takes precedence over both
+   * `defaultHiggsfieldImageModel` and `defaultLeonardoModel`.
+   * Populated by `pickDefaultImageModel` in lib/image-models.ts.
+   */
+  defaultImageModel?: string;
   /** V1.2.5: power-user CLI-token entry. Set this if you have a
    *  Higgsfield API key from `npx @higgsfield/cli auth` and don't
    *  want to go through the OAuth web flow. The Director loop
@@ -1109,6 +1143,7 @@ export interface MashupContextType {
   view: ViewType;
   setView: (view: ViewType) => void;
   images: GeneratedImage[];
+  setImages: React.Dispatch<React.SetStateAction<GeneratedImage[]>>;
   savedImages: GeneratedImage[];
   collections: Collection[];
   isGenerating: boolean;

@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useImageSrc } from '@/hooks/useImageSrc';
 import { motion } from 'motion/react';
 import {
   Bookmark,
@@ -155,6 +156,11 @@ export function GalleryCard({
     };
   }, [collectionOpen]);
 
+  // V1.3.4: resolve the local-file path (if any) to a webview-
+  // loadable URL. Falls back to the CDN url / base64 inside the
+  // hook itself. `resolvedSrc` is what `<LazyImg src=...>` reads.
+  const resolvedSrc = useImageSrc(img);
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -289,13 +295,37 @@ export function GalleryCard({
               <ImageOff className="w-8 h-8 text-zinc-700" />
             </div>
             <LazyImg
-              src={img.url || `data:image/jpeg;base64,${img.base64}`}
+              src={resolvedSrc || `data:image/jpeg;base64,${img.base64}`}
               alt={img.prompt}
               className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
               referrerPolicy="no-referrer"
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
           </>
+        )}
+
+        {/* Gap 2: provider badge — top-right, permanent at z-5 so action buttons
+            (z-30, hover-only) appear above it. Shows Higgsfield in cyan,
+            MiniMax in purple, Leonardo in gold so the user can see at a glance
+            which backend produced each image. */}
+        {img.modelInfo?.provider && (
+          <div className="absolute top-2 right-2 z-[5] pointer-events-none select-none">
+            <span
+              className={`inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide backdrop-blur-md rounded-full border ${
+                img.modelInfo.provider === 'higgsfield'
+                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                  : img.modelInfo.provider === 'minimax' || img.modelInfo.provider === 'mmx'
+                  ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                  : 'bg-[#c5a062]/20 text-[#c5a062] border-[#c5a062]/40'
+              }`}
+            >
+              {img.modelInfo.provider === 'higgsfield'
+                ? 'Higgsfield'
+                : img.modelInfo.provider === 'minimax' || img.modelInfo.provider === 'mmx'
+                ? 'MiniMax'
+                : 'Leonardo'}
+            </span>
+          </div>
         )}
 
         {/* QOL-FE01: collection membership badge — bottom-left, above model chips. */}

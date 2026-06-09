@@ -54,6 +54,19 @@ interface RequestBody {
   soulId?: unknown;
   seed?: unknown;
   referenceImageUrl?: unknown;
+  /**
+   * V1.3.6-CLI-TOKEN: Higgsfield CLI token (set in Settings →
+   * HiggsfieldConnection). When provided, the server uses the CLI
+   * binary path via `HiggsfieldCliAdapter` instead of the OAuth
+   * MCP path. This is the path that works for users who couldn't
+   * get the OAuth flow working — they paste a CLI token and the
+   * server uses it directly.
+   *
+   * Pattern lifted from /api/ai/prompt/route.ts (V1.2.5) — the
+   * client passes the token in the body on every request, the
+   * server threads it into the provider registry.
+   */
+  higgsfieldCliToken?: unknown;
 }
 
 function asString(v: unknown): string | undefined {
@@ -115,8 +128,63 @@ export async function POST(req: Request): Promise<Response> {
       { status: 400 },
     );
   }
+  const referenceImageUrl = asString(body.referenceImageUrl);
+  const seed = asInt(body.seed);
 
-  // Auth: require a connected account.
+  // Auth: prefer CLI token (V1.3.6-CLI-TOKEN) over OAuth. The CLI
+  // token is what the user sets in Settings → HiggsfieldConnection
+  // when the OAuth flow doesn't work for them (browser doesn't
+  // hand off the deep link, or the user doesn't want to do OAuth).
+  // When a CLI token is present, we use the Higgsfield CLI binary
+  // path (HiggsfieldCliAdapter.generateImage) which writes the
+  // token to a temp credentials.json for the @higgsfield/cli call.
+  //
+  // The CLI token path is the one that actually WORKS for the
+  // most users — OAuth requires browser-OS-WebView2 dance that
+  // keeps failing in Tauri; the CLI token is just an API key.
+  const cliToken = asString(body.higgsfieldCliToken);
+  if (cliToken) {
+    try {
+      const { setProviderRuntimeConfig, getProvider } = await import('@/lib/providers/registry');
+      setProviderRuntimeConfig({ higgsfieldCliToken: cliToken });
+      const adapter = getProvider('higgsfield');
+      const ref = await adapter.generateImage({
+        prompt,
+        model: modelSlug,
+        aspectRatio: aspectRatio,
+        ...(resolution ? { extra: { resolution } } : {}),
+        ...(referenceImageUrl ? { referenceImage: { url: referenceImageUrl } } : {}),
+        ...(seed !== undefined ? { seed } : {}),
+      });
+      if (ref.kind === 'image' && ref.url) {
+        return NextResponse.json({
+          completed: true,
+          imageUrl: ref.url,
+          requestId: ref.jobId,
+          model: modelSlug,
+          enhancedPrompt: prompt,
+        });
+      }
+      if (ref.kind === 'job' && ref.jobId) {
+        return NextResponse.json({
+          completed: false,
+          requestId: ref.jobId,
+          model: modelSlug,
+        });
+      }
+      return NextResponse.json(
+        { error: 'Higgsfield CLI returned no asset URL or job id' },
+        { status: 502 },
+      );
+    } catch (e) {
+      return NextResponse.json(
+        { error: `Higgsfield CLI call failed: ${getErrorMessage(e)}` },
+        { status: 502 },
+      );
+    }
+  }
+
+  // No CLI token — fall back to OAuth.
   const clientId = readDesktopConfigValue('HIGGSFIELD_OAUTH_CLIENT_ID');
   if (!clientId) {
     return NextResponse.json(
@@ -149,12 +217,6 @@ export async function POST(req: Request): Promise<Response> {
   }
   const soulId = asString(body.soulId);
   if (soulId) toolArgs.soul_id = soulId;
-  const seed = asInt(body.seed);
-  if (seed !== undefined) toolArgs.seed = seed;
-  const referenceImageUrl = asString(body.referenceImageUrl);
-  if (referenceImageUrl) {
-    toolArgs.input_images = [{ type: 'image_url', image_url: referenceImageUrl }];
-  }
 
   try {
     const result = await callHiggsfieldTool({

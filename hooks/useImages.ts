@@ -134,32 +134,40 @@ export function useImages() {
   // localStorage; the load path migrates localStorage → IDB on next
   // session start. Mirrors the useSettings beforeunload flush.
   //
-  // V1.2.6-HOTFIX: gate the listener on BOTH isImagesLoaded AND
-  // loadTriggered. The original code registered the listener as
-  // soon as `isImagesLoaded` flipped to true (which happens
-  // immediately on mount, BEFORE the actual load runs). The
-  // beforeunload handler then wrote the initial in-memory `[]`
-  // state to localStorage on the next page navigation. The
-  // next page's load effect found that empty array and
-  // overwrote the store with `[]`, wiping the user's images.
+  // V1.4.4-DATALOSS-FIX: the v1.2.6-HOTFIX gated this listener on
+  // `loadTriggered` to avoid the v1.2.5 bug (writing the initial
+  // in-memory `[]` on first navigation). But the gate ALSO killed
+  // the safety net for the common case: user generates an image in
+  // Studio (no Gallery visit), then closes the app within 200ms —
+  // the 200ms debounced IDB write never fires, the flush listener
+  // isn't registered, the image is lost. The user sees it once,
+  // closes, reopens, gone.
   //
-  // By requiring `loadTriggered` to also be true, we only
-  // register the listener when there's actually a loaded
-  // debounce to flush. Users who navigate without ever
-  // visiting Gallery no longer get the bug.
+  // The correct fix: always register the listener, but the flush
+  // function REFUSES to write an empty array. This combines both
+  // safety nets:
+  //   - Empty state doesn't pollute localStorage (v1.2.5 protection)
+  //   - Any non-empty state is preserved on shutdown (v1.4.4 fix)
   useEffect(() => {
-    if (!isImagesLoaded || !loadTriggered) return;
     const flush = () => {
+      const data = savedImagesRef.current
+      // CRITICAL: never write an empty array. The original v1.2.5
+      // data-loss bug was caused by writing the initial in-memory
+      // `[]` to localStorage on first navigation; the next page's
+      // load then overwrote the store with that `[]`, wiping the
+      // user's images. The empty-array short-circuit is what makes
+      // it safe to register this listener unconditionally.
+      if (data.length === 0) return
       try {
         localStorage.setItem(
           'mashup_saved_images',
-          JSON.stringify(savedImagesRef.current),
-        );
+          JSON.stringify(data),
+        )
       } catch { /* storage quota — silent */ }
     };
     window.addEventListener('beforeunload', flush);
     return () => window.removeEventListener('beforeunload', flush);
-  }, [isImagesLoaded, loadTriggered]);
+  }, []);
 
   const saveImage = (img: GeneratedImage) => {
     setSavedImages(prev => {

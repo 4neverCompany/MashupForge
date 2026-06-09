@@ -89,6 +89,15 @@ export function HiggsfieldConnection({
   // toast even though the first exchange succeeded.
   const processedCodes = useRef(new Set<string>());
 
+  // V1.3.6-CLI-TOKEN: the user might be connected via a CLI token
+  // (set in Settings, not via OAuth). If so, we treat the user as
+  // connected even if the OAuth status endpoint returns false —
+  // the OAuth status only knows about the OAuth-issued access
+  // token, not about CLI tokens that the user pasted in. The
+  // server routes accept `higgsfieldCliToken` in the request body
+  // and thread it into the provider registry (see V1.2.5 pattern
+  // in /api/ai/prompt/route.ts), so generation works without
+  // ever going through the OAuth flow.
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -96,13 +105,23 @@ export function HiggsfieldConnection({
       const res = await fetch('/api/higgsfield/oauth/status', { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as HiggsfieldStatus;
-      setStatus(json);
+      // CLI-token users are connected even if the OAuth endpoint
+      // says otherwise — the OAuth endpoint can only see OAuth
+      // tokens stored in IDB; CLI tokens live in settings.
+      setStatus({ ...json, connected: json.connected || !!cliToken });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load Higgsfield status');
+      // If the OAuth status check fails (e.g. the endpoint can't
+      // reach IDB), still treat the user as connected if they
+      // have a CLI token set — that's a valid auth path.
+      if (cliToken) {
+        setStatus({ connected: true });
+      } else {
+        setError(e instanceof Error ? e.message : 'Failed to load Higgsfield status');
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [cliToken]);
 
   useEffect(() => {
     // Defer the initial fetch to a microtask so `setLoading(true)` inside
@@ -179,6 +198,115 @@ export function HiggsfieldConnection({
   // because the state/PKCE cookies were set in WebView2 but the
   // callback URL is opened in the system browser by Tauri's default
   // external-URL handling.
+  // V1.3.3-OAUTH: complete the OAuth round-trip from the deep-link
+  // listener via fetch() (not window.location.href). This is the
+  // fix for the bug where clicking Allow on the consent page would
+  // cause a full page reload and drop in-memory state (watermark
+  // upload, studio generations). The server's /callback route
+  // returns JSON when `?format=json`; we update the connection card
+  // in place and surface errors via the existing migration/error UI.
+  const completeOAuthFlow = useCallback(
+    async (args: { code?: string; state?: string; errorParam?: string }) => {
+      try {
+        if (args.errorParam) {
+          setError(`Higgsfield connect failed (${args.errorParam})`)
+          return
+        }
+        if (!args.code || !args.state) {
+          setError('Higgsfield connect failed (missing_params)')
+          return
+        }
+        const res = await fetch(
+          `/api/higgsfield/oauth/callback?via=desktop&format=json&code=${encodeURIComponent(args.code)}&state=${encodeURIComponent(args.state)}`,
+          { cache: 'no-store' },
+        )
+        const json = (await res.json().catch(() => ({}))) as {
+          ok?: boolean
+          reason?: string
+          detail?: string
+          email?: string
+          name?: string
+          orgId?: string
+        }
+        if (!res.ok || !json.ok) {
+          const reason = json.reason || 'unknown'
+          const detail = json.detail || ''
+          const msg = `Higgsfield connect failed (${reason})${detail ? `: ${detail.slice(0, 120)}` : ''}`
+          setError(msg)
+          const isTauri =
+            typeof window !== 'undefined' &&
+            (Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) ||
+              Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__))
+          const detailLower = detail.toLowerCase()
+          const isRedirectUriMismatch =
+            reason === 'invalid_request' ||
+            detailLower.includes('redirect_uri') ||
+            detailLower.includes('redirect uri') ||
+            detailLower.includes('pre-registered')
+          if (isTauri && isRedirectUriMismatch) setMigrationNeeded(true)
+          return
+        }
+        await refresh()
+        onConnectionChange?.(true)
+      } catch (e) {
+        setError(
+          `Higgsfield connect failed (network): ${e instanceof Error ? e.message : 'unknown'}`,
+        )
+      }
+    },
+    [refresh, onConnectionChange],
+  )
+
+  // V1.3.6-OAUTH: extract a `processCallbackUrl` helper so the
+  // listener and the `getCurrent()` drain share one code path. The
+  // helper does the actual callback fetch (via JSON, not navigation)
+  // and dedupes by `code` so the listener's later fire for the
+  // same URL is a no-op.
+  const processCallbackUrl = useCallback(
+    async (raw: string) => {
+      const url = new URL(raw.replace(/^mashupforge:/, 'https://mashupforge.invalid:'))
+      const code = url.searchParams.get('code')
+      const state = url.searchParams.get('state')
+      const errorParam = url.searchParams.get('error')
+      if (errorParam) {
+        void completeOAuthFlow({ errorParam })
+        return
+      }
+      if (!code || !state) {
+        void completeOAuthFlow({ errorParam: 'missing_params' })
+        return
+      }
+      if (processedCodes.current.has(code)) {
+        // V1.2.10-OAUTH: duplicate deep-link fire for a code we
+        // already processed — silently ignore so we don't override
+        // the success redirect with a stale token_exchange error.
+        return
+      }
+      processedCodes.current.add(code)
+      void completeOAuthFlow({ code, state })
+    },
+    [completeOAuthFlow],
+  )
+
+  // V1.3.6-OAUTH: deep-link handling rewritten to use fetch() (not
+  // window.location.href) and to ALSO call getCurrent() on mount.
+  //
+  // The previous v1.2.10 implementation did `window.location.href =
+  // /studio?higgsfield=...` on every callback, which reloaded the
+  // app, lost in-memory state, and was the original cause of the
+  // user's complaint. v1.3.3 attempted to fix it but the patch
+  // never landed in the file (verified: git show 40b6aa6 shows the
+  // old `window.location.href` still present).
+  //
+  // Two new problems we now also address:
+  //   1. `getCurrent()` on mount — if a deep link arrived BEFORE
+  //      the listener was attached (race during Tauri startup /
+  //      Next.js hydration), the URL is still retrievable via
+  //      `getCurrent()` from the deep-link plugin. The listener
+  //      alone misses those.
+  //   2. The error path previously did a full navigation; we now
+  //      surface errors via setError() (no reload, in-memory state
+  //      preserved).
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const tauriInternals = (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
@@ -186,64 +314,50 @@ export function HiggsfieldConnection({
     let unlisten: (() => void) | undefined;
     void (async () => {
       try {
-        // Lazy-import the event API to avoid pulling Tauri internals
-        // into the web bundle's type graph. The dynamic import is a
-        // 1-line shim that the bundler tree-shakes out for the web
-        // build.
+        // Lazy-import the event + deep-link APIs to avoid pulling
+        // Tauri internals into the web bundle's type graph. The
+        // dynamic import is a 1-line shim that the bundler
+        // tree-shakes out for the web build.
         const { listen } = await import('@tauri-apps/api/event');
+        const { getCurrent } = await import('@tauri-apps/plugin-deep-link');
+        // V1.3.6-OAUTH: drain any URL that arrived before the
+        // listener was attached. Tauri's `getCurrent()` returns
+        // the launching URL (or the last URL the app was activated
+        // with) so we can process it without waiting for a fresh
+        // event. Without this, a fast click on "Allow" (where
+        // the OS activates the app via deep link while the
+        // WebView2 is still hydrating) loses the auth code.
+        try {
+          const initial = await getCurrent();
+          if (initial && initial.length > 0) {
+            for (const raw of initial) {
+              if (raw.startsWith('mashupforge://oauth/callback')) {
+                void processCallbackUrl(raw);
+              }
+            }
+          }
+        } catch {
+          /* getCurrent can throw on web — ignore */
+        }
         unlisten = await listen<string[]>('deep-link', (event) => {
           const urls = (event.payload as string[]) || [];
           for (const raw of urls) {
             if (!raw.startsWith('mashupforge://oauth/callback')) continue;
-            // Parse the callback URL and re-issue the callback in the
-            // WebView2 cookie context. Use a same-origin path so the
-            // state/PKCE cookies (set during /authorize) are sent.
-            const url = new URL(raw.replace(/^mashupforge:/, 'https://mashupforge.invalid:'));
-            const code = url.searchParams.get('code');
-            const state = url.searchParams.get('state');
-            const errorParam = url.searchParams.get('error');
-            if (errorParam) {
-              window.location.href = `/studio?higgsfield=error&reason=${encodeURIComponent(errorParam)}`;
-              return;
-            }
-            if (!code || !state) {
-              window.location.href = '/studio?higgsfield=error&reason=missing_params';
-              return;
-            }
-            if (processedCodes.current.has(code)) {
-              // V1.2.10-OAUTH: duplicate deep-link fire for a code we
-              // already processed — silently ignore so we don't
-              // override the success redirect with a stale
-              // token_exchange error.
-              return;
-            }
-            processedCodes.current.add(code);
-            // Re-issue the callback in the WebView2 cookie context.
-            // The server reads the state/PKCE cookies (set in
-            // WebView2 during /authorize), matches state, exchanges
-            // the code, and redirects to /studio?higgsfield=connected.
-            // V1.2.10-OAUTH: pass `via=desktop` so the callback route
-            // returns `mashupforge://oauth/callback` (matching the
-            // authorize request) instead of `tauri://localhost/api/...`
-            // which would cause Higgsfield to return `invalid_grant`.
-            window.location.href = `/api/higgsfield/oauth/callback?via=desktop&code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
-            return;
+            void processCallbackUrl(raw);
           }
         });
       } catch (e) {
-        // Tauri internals present but the event API isn't reachable.
-        // Fall back gracefully — the user will still see the original
-        // expired_flow error and we can debug from the tauri.log.
-        console.error('deep-link listen failed', e);
+        setError(
+          `Failed to register OAuth deep-link listener: ${e instanceof Error ? e.message : 'unknown'}`,
+        );
       }
     })();
     return () => {
-      try {
-        unlisten?.();
-      } catch {
-        // ignore
-      }
+      if (unlisten) unlisten();
     };
+    // processCallbackUrl is stable for the lifetime of the
+    // component (reads from refs and stable setters only).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleDisconnect = async () => {

@@ -20,9 +20,11 @@ import {
   LEONARDO_MODELS,
   getLeonardoDimensions,
 } from '../types/mashup';
+import { pickDefaultImageModel, pickHiggsfieldModelForCycle, getImageModel, type ImageProvider } from '../lib/image-models';
+import { persistImageToDisk } from '../lib/images/storage';
 
 function getModelName(id: string): string {
-  return LEONARDO_MODELS.find(m => m.id === id)?.name || id;
+  return getImageModel(id)?.name || id;
 }
 
 interface GeneratedItem {
@@ -401,6 +403,14 @@ interface HiggsfieldImageParams {
   submodel?: 'pro' | 'flex' | 'max';
   referenceImageUrl?: string;
   seed?: number;
+  /**
+   * V1.4.0: optional CLI token from settings. When present, the
+   * server route uses the CLI binary path (HiggsfieldCliAdapter)
+   * instead of the OAuth MCP path. With `useImageGeneration` now
+   * auto-picking Higgsfield, this is the common case for pipeline
+   * runs.
+   */
+  higgsfieldCliToken?: string;
 }
 
 interface HiggsfieldImageResult extends LeonardoSuccess {
@@ -421,6 +431,10 @@ async function submitHiggsfieldImage(params: HiggsfieldImageParams): Promise<Hig
       // route includes it only when the model is flux_2.
       referenceImageUrl: params.referenceImageUrl,
       seed: params.seed,
+      // V1.4.0: forward the user's CLI token so the server uses the
+      // CLI binary path. Without this, the route tries OAuth and
+      // returns 401 for users who never went through the OAuth flow.
+      higgsfieldCliToken: params.higgsfieldCliToken,
     }),
   });
   if (!res.ok) {
@@ -1014,12 +1028,27 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
       for (let i = 0; i < itemsToGenerate.length; i++) {
         const item = itemsToGenerate[i];
 
-        const selectedModel = options?.leonardoModel || settings.defaultLeonardoModel;
-        const modelName = getModelName(selectedModel);
+        // V1.4.0: use the unified model registry. Leonardo is the
+        // default; Higgsfield is opt-in (when `higgsfieldEnabled`
+        // is true) and round-robins through `higgsfieldImageModels`
+        // so multiple Higgsfield models are used across a run.
+        // See `lib/image-models.ts` for the full selection rules.
+        const unifiedModel = pickDefaultImageModel({
+          defaultImageModel: settings.defaultImageModel,
+          defaultHiggsfieldImageModel: settings.defaultHiggsfieldImageModel,
+          defaultLeonardoModel: settings.defaultLeonardoModel,
+          higgsfieldEnabled: settings.higgsfieldEnabled,
+          higgsfieldImageModels: settings.higgsfieldImageModels,
+        })
+        // Caller can override (e.g. the ManualGenerationPanel passes
+        // its own chosen model id).
+        const overrideId = options?.leonardoModel
+        const selectedModel = overrideId ?? unifiedModel.id
+        const modelName = unifiedModel.name
 
         // Ask pi to rewrite the prompt AND pick model-aware parameters
         // (best aspect ratio, best style, smart negative prompt) before
-        // sending it to Leonardo. Skipped when options.skipEnhance is set.
+        // sending it to the provider. Skipped when options.skipEnhance is set.
         setProgress(`Optimizing prompt for ${modelName}...`);
         const enhancement = options?.skipEnhance
           ? { prompt: item.prompt }
@@ -1083,9 +1112,15 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
           // skip Leonardo entirely (no styleIds, no quality, no moderation
           // retry — MiniMax surfaces filter rejections via the route's
           // structured error). All other models stay on the Leonardo path.
-          const modelConfig = LEONARDO_MODELS.find(m => m.id === selectedModel);
-          const imageProvider =
-            options?.imageProvider || modelConfig?.provider || 'leonardo';
+          // V1.4.0: provider comes from the unified registry, not just
+          // `LEONARDO_MODELS`. The caller can still override via
+          // `options.imageProvider` (e.g. the ManualGenerationPanel
+          // uses this to force Higgsfield for a manual run).
+          const unifiedSelected = getImageModel(selectedModel);
+          const imageProvider: ImageProvider =
+            (options?.imageProvider as ImageProvider | undefined) ||
+            unifiedSelected?.provider ||
+            'leonardo';
 
           const sharedWidth = enhanced.leonardo.width ?? fallbackDims.width;
           const sharedHeight = enhanced.leonardo.height ?? fallbackDims.height;
@@ -1153,6 +1188,12 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
               );
             }
             const hfSpec = getModelSpec(selectedModel);
+            // V1.4.0: pull the CLI token from settings so the server
+            // route uses the CLI binary path. `higgsfieldCliToken`
+            // is the user-pasted override; the OAuth status route
+            // covers the OAuth path. Either way the request now
+            // succeeds end-to-end.
+            const cliToken = settings.higgsfieldCliToken;
             const hf = await submitHiggsfieldImage({
               prompt: enhanced.prompt,
               modelId: selectedModel,
@@ -1161,6 +1202,7 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
               resolution: enhanced.higgsfield.resolution,
               quality: enhanced.higgsfield.quality,
               seed: enhanced.higgsfield.seed,
+              higgsfieldCliToken: cliToken,
             });
             success = { url: hf.url };
             activePrompt = enhanced.prompt;
@@ -1229,9 +1271,30 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             finalUrl = await applyWatermark(finalUrl, settings.watermark, settings.channelName);
           }
           const generatedTags = await ensureTags(activePrompt, item.tags);
+          // V1.3.4: download the generated image to the local
+          // images\generated folder right after the watermark step.
+          // The CDN URL is temporary (typically 24-72h) — having a
+          // real file on disk means the gallery survives URL expiry,
+          // the metadata JSON stays small (no embedded base64), and
+          // one bad byte can't take down the whole library. The
+          // download is fire-and-forget; if it fails we still keep
+          // `finalUrl` so the CDN fallback works until expiry.
+          const newImageId = `img-${Date.now()}-${i}`;
+          const savedAt = Date.now();
+          let localPath: string | undefined;
+          if (finalUrl) {
+            try {
+              const { persistImageToDisk } = await import('@/lib/images/storage');
+              const persisted = await persistImageToDisk(finalUrl, newImageId, savedAt);
+              if (persisted) localPath = persisted;
+            } catch {
+              /* non-fatal: the CDN url is still in `finalUrl` */
+            }
+          }
           setImages(prev => prev.map(img => img.id === placeholders[i].id ? {
-            id: `img-${Date.now()}-${i}`,
+            id: newImageId,
             url: finalUrl,
+            localPath,
             prompt: activePrompt,
             tags: generatedTags,
             imageId: success.imageId,
@@ -1248,6 +1311,124 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
           } : img));
           if (retried) {
             setLastError(null);
+          }
+
+          // V1.4.0-REWORK: Higgsfield add-on path. The primary
+          // generation above just produced a Leonardo image (the
+          // existing workflow, unchanged). If the user has opted
+          // into Higgsfield (`higgsfieldEnabled: true`), generate
+          // one Higgsfield variant of the same idea IN PARALLEL so
+          // the user gets both. Multiple Higgsfield models are
+          // exercised by round-robin through `higgsfieldImageModels`.
+          //
+          // The Higgsfield variant uses the model-specific skill
+          // (e.g. banana-pro-director for nano_banana_2) — the
+          // skill content is injected via `activeSkills` into the
+          // prompt enhancement call, and the CLI does its own
+          // model-side prompt enhancement on top.
+          if (settings.higgsfieldEnabled) {
+            const hfModel = pickHiggsfieldModelForCycle(
+              i,
+              settings.higgsfieldImageModels,
+            );
+            const hfSkillNames = hfModel.skillBinding
+              ? [
+                  'cinema-world-builder',
+                  hfModel.skillBinding.skillName,
+                ].filter((n, idx, arr) => arr.indexOf(n) === idx)
+              : ['cinema-world-builder'];
+            const hfPlaceholderId = `img-${Date.now()}-${i}-hf-${hfModel.apiModelId}`;
+            setImages(prev => [
+              {
+                id: hfPlaceholderId,
+                prompt: item.prompt,
+                status: 'generating' as const,
+                tags: generatedTags,
+                modelInfo: {
+                  provider: 'higgsfield',
+                  modelId: hfModel.id,
+                  modelName: hfModel.name,
+                },
+              } as GeneratedImage,
+              ...prev,
+            ]);
+            // Fire-and-forget — the primary path's success/failure
+            // is what gates the pipeline. The user gets a parallel
+            // Higgsfield image added to the gallery.
+            void (async () => {
+              try {
+                // Gap 4: show both the Leonardo and Higgsfield models so
+                // the user can see what's running side-by-side.
+                setProgress(`Leonardo (${selectedModel}) + Higgsfield (${hfModel.apiModelId}): ${item.prompt.slice(0, 50)}…`);
+                const cliToken = settings.higgsfieldCliToken;
+                // Gap 1: inject the model-specific skill content into the
+                // prompt enhancement call via activeSkills. The LLM reframes
+                // the prompt using the model's optimal structure (SLCT for
+                // Nano Banana via banana-pro-director, MCSLA for the rest
+                // via cinema-world-builder).
+                const mergedSkills = [
+                  ...(settings.activeSkills ?? []),
+                  ...hfSkillNames,
+                ].filter((n, idx, arr) => arr.indexOf(n) === idx);
+                const hfEnhancedPrompt = await streamAIToString(
+                  `Rewrite this image prompt optimized for the ${hfModel.name} model. Return only the rewritten prompt, no explanation.\n\n${item.prompt}`,
+                  {
+                    mode: 'enhance',
+                    provider: settings.activeAiAgent,
+                    model: settings.activeTextModel,
+                    activeSkills: mergedSkills,
+                  },
+                ).catch(() => item.prompt);
+                const hfSpec = getModelSpec(hfModel.id);
+                const hf = await submitHiggsfieldImage({
+                  prompt: hfEnhancedPrompt,
+                  modelId: hfModel.id,
+                  apiName: hfSpec?.apiName || hfModel.apiModelId,
+                  aspectRatio: currentAspectRatio,
+                  resolution: hfModel.resolutions?.[0] as '1k' | '2k' | '4k' | undefined,
+                  quality: undefined,
+                  seed: undefined,
+                  higgsfieldCliToken: cliToken,
+                });
+                // Persist to disk (v1.3.4 image storage) and update
+                // the gallery entry.
+                const persistedFilename = await persistImageToDisk(
+                  hf.url,
+                  hfPlaceholderId,
+                  Date.now(),
+                ).catch(() => null);
+                setImages(prev => prev.map(img =>
+                  img.id === hfPlaceholderId
+                    ? {
+                        ...img,
+                        url: hf.url,
+                        localPath: persistedFilename ?? undefined,
+                        status: 'ready' as const,
+                        prompt: hf.enhancedPrompt || item.prompt,
+                      }
+                    : img
+                ));
+              } catch (hfErr) {
+                // Gap 3: surface auth failures with actionable instructions.
+                // Any other failure is surfaced verbatim so the user can
+                // diagnose. Status is 'error' (not 'ready') so GalleryCard's
+                // error overlay actually shows.
+                const rawHfMsg = hfErr instanceof Error ? hfErr.message : 'Higgsfield failed';
+                const isAuthError =
+                  rawHfMsg.includes('401') ||
+                  rawHfMsg.toLowerCase().includes('not connected') ||
+                  rawHfMsg.toLowerCase().includes('not configured') ||
+                  rawHfMsg.toLowerCase().includes('unauthorized');
+                const hfErrMsg = isAuthError
+                  ? `${rawHfMsg} — Run \`higgsfield auth login\` in a terminal to authenticate the CLI, or set the Higgsfield CLI token in Settings → AI Engine.`
+                  : rawHfMsg;
+                setImages(prev => prev.map(img =>
+                  img.id === hfPlaceholderId
+                    ? { ...img, status: 'error' as const, error: hfErrMsg }
+                    : img
+                ));
+              }
+            })();
           }
         } catch (imgError: unknown) {
           // Don't leave the placeholder stuck on 'generating'. Flip it

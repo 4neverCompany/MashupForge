@@ -48,9 +48,11 @@ import { CreditBudgetSettings } from './Settings/CreditBudgetSettings';
 import {
   HIGGSFIELD_DEFAULT_IMAGE_MODEL,
   HIGGSFIELD_DEFAULT_VIDEO_MODEL,
+  HIGGSFIELD_IMAGE_MODELS,
   type HiggsfieldImageModelSlug,
   type HiggsfieldVideoModelSlug,
 } from '@/lib/higgsfield/models';
+import { getImageModel } from '@/lib/image-models';
 
 /**
  * V082: runtime type guard for the `modelInfo` field returned by
@@ -1436,6 +1438,66 @@ export function SettingsModal({
 
           <div className="space-y-4 pt-4 border-t border-zinc-800">
             <h4 className="text-lg font-medium text-white mb-2">Image Generation Settings</h4>
+
+            {/* V1.4.0: Higgsfield add-on toggle. The user keeps their
+                existing Leonardo workflow; toggling this on adds a
+                parallel Higgsfield generation per idea. Multiple
+                Higgsfield models are exercised via the multi-select
+                below. */}
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+                <input
+                  type="checkbox"
+                  checked={!!settings.higgsfieldEnabled}
+                  onChange={(e) => updateSettings({ higgsfieldEnabled: e.target.checked })}
+                  className="h-4 w-4 rounded border-zinc-700 bg-zinc-950 text-[#c5a062] focus:ring-[#c5a062]/30"
+                />
+                <span>Also generate with Higgsfield (in addition to Leonardo)</span>
+              </label>
+              <p className="text-[10px] text-zinc-600 ml-6">
+                Opt-in add-on. Your existing Leonardo workflow stays the primary path. When enabled, one Higgsfield
+                variant per idea is generated in parallel using the models selected below. Round-robin across
+                multiple models so you see different aesthetic per run.
+              </p>
+            </div>
+
+            {settings.higgsfieldEnabled && (
+              <div className="space-y-2 ml-6 p-3 rounded border border-zinc-800/60 bg-zinc-950/40">
+                <label className="block text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+                  Higgsfield Models (one image per idea, round-robin)
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {HIGGSFIELD_IMAGE_MODELS.map((m) => {
+                    const enabled = settings.higgsfieldImageModels ?? ['nano_banana_2']
+                    const isChecked = enabled.includes(m.slug)
+                    const unified = getImageModel(`higgsfield:${m.slug}`)
+                    return (
+                      <label key={m.slug} className="flex items-start gap-2 text-[11px] text-zinc-300">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...enabled, m.slug]
+                              : enabled.filter((s) => s !== m.slug)
+                            updateSettings({ higgsfieldImageModels: next })
+                          }}
+                          className="mt-0.5 h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-950 text-[#c5a062] focus:ring-[#c5a062]/30"
+                        />
+                        <span>
+                          <span className="font-medium">{m.displayName}</span>
+                          {unified?.skillBinding && (
+                            <span className="block text-[10px] text-zinc-600 mt-0.5">
+                              skill: {unified.skillBinding.skillName} · {unified.skillBinding.blurb}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">

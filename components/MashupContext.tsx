@@ -80,6 +80,39 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     requestLoad: requestImagesLoad,
   } = imagesHook;
 
+  // V1.4.3-IMAGE-RECOVERY: on cold start, if the gallery is empty
+  // but the v1.3.2 backup field has entries, restore them. The NSIS
+  // uninstaller wipes %APPDATA% on reinstall, so the user lost their
+  // gallery despite the backup module writing to `mashup_saved_images_backup`
+  // in the same JSON blob. This migration is idempotent (a flag
+  // prevents re-runs) and tries to download each backup URL to disk
+  // so future reinstalls survive via the v1.3.4 file-per-image
+  // storage.
+  useEffect(() => {
+    if (!isImagesLoaded) return
+    if (savedImages.length > 0) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { restoreFromJsonBackupField } = await import('@/lib/backup/recovery')
+        const report = await restoreFromJsonBackupField()
+        if (cancelled) return
+        if (report.restored > 0) {
+          // Re-trigger the images load so the gallery shows the
+          // restored images.
+          if (typeof requestImagesLoad === 'function') {
+            requestImagesLoad()
+          }
+        }
+      } catch {
+        // Non-fatal — the user can still manually restore from
+        // Settings → Image Backup → Restore.
+      }
+    })()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isImagesLoaded])
+
   const collectionsHook = useCollections(settings);
   const {
     collections,
@@ -505,6 +538,7 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     view,
     setView,
     images,
+    setImages,
     savedImages,
     collections,
     isGenerating,

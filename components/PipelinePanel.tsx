@@ -28,6 +28,8 @@ import { ActiveIdeaCard } from './pipeline/ActiveIdeaCard';
 import { ApprovalQueue } from './pipeline/ApprovalQueue';
 import { WeekProgressMeter } from './pipeline/WeekProgressMeter';
 import { STAGES } from './pipeline/stages';
+import { ManualGenerationPanel } from './Studio/ManualGenerationPanel';
+import { type GeneratedImage } from '@/types/mashup';
 
 type PipelinePlatform = 'instagram' | 'pinterest' | 'twitter' | 'discord';
 
@@ -75,6 +77,7 @@ export function PipelinePanel() {
     settings,
     updateSettings,
     images,
+    setImages,
     savedImages,
     approveScheduledPost,
     rejectScheduledPost,
@@ -234,6 +237,28 @@ export function PipelinePanel() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
+      {/* V1.3.5: Manual generation panel — unified UI for ALL providers
+          (Higgsfield, Leonardo, MiniMax) with provider/model picker,
+          aspect ratio, resolution, prompt, and per-provider dispatch.
+          Rendered prominently at the top of the Studio so users can
+          generate content with any provider without going through
+          the AI agent loop. The result is added to the gallery and
+          persisted to disk (lib/images/storage). */}
+      <ManualGenerationPanel
+        onImageGenerated={(img) => {
+          // Forward into the gallery state via the MashupContext.
+          // The same context the AI-agent pipeline uses, so manual
+          // generations show up alongside pipeline output.
+          setImages((prev: GeneratedImage[]) => [
+            {
+              ...img,
+              status: 'ready' as const,
+            } as GeneratedImage,
+            ...prev,
+          ])
+        }}
+      />
+
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#00e6ff]/10 border border-[#00e6ff]/25 flex items-center justify-center shrink-0">

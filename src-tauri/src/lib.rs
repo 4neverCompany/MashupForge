@@ -1548,13 +1548,24 @@ pub fn run() {
 
             // V107.1-OAUTH: register `mashupforge://` at runtime for dev
             // builds (release builds get it from tauri.conf.json via the
-            // bundler). Also subscribe to the plugin's on_open_url event
-            // and re-emit the URL to the WebView as a "deep-link" event
-            // so the frontend OAuth handler can pick it up.
+            // bundler). V1.3.6-OAUTH: also call `register_all()` on
+            // Windows release builds as a defense against the NSIS
+            // bundler bug (Tauri PR #9833) where the registry key
+            // didn't get written. The bundle identifier is the same
+            // either way (`com.4nevercompany.mashupforge`) so
+            // `register_all()` re-writing the key is idempotent.
+            //
+            // Without this fallback, users who installed a build
+            // predating PR #9833 (or whose registry was wiped during
+            // an NSIS reinstall) would never get deep-link events:
+            // Higgsfield's `mashupforge://oauth/callback?code=...`
+            // redirect would have no OS handler, the URL would
+            // silently fail, and the user would see the "app
+            // reloads but doesn't connect" symptom.
             #[cfg(any(debug_assertions, target_os = "windows"))]
             {
-                if let Err(e) = app.deep_link().register("mashupforge") {
-                    log::warn!("[tauri] deep_link register failed: {}", e);
+                if let Err(e) = app.deep_link().register_all() {
+                    log::warn!("[tauri] deep_link register_all failed: {}", e);
                 }
             }
             let app_handle_for_dl = app.handle().clone();

@@ -14,49 +14,58 @@
  *     authenticated: boolean,     // `higgsfield auth token` exits 0
  *     hint: string                // what to do next
  *   }
- *
- * On the Vercel-Web build the CLI is never on PATH; we return
- * binaryAvailable=false with a hint pointing to the desktop app.
- * On the Tauri desktop build the binary is on PATH (installed
- * by the v1.0+ on-boarding flow); the route shells out to it.
  */
 import { NextResponse } from 'next/server';
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 const CLI_BINARIES = ['higgsfield', 'higgs'] as const;
 
-interface CliAuthStatus {
-  binaryAvailable: boolean;
-  authenticated: boolean;
-  /** First 12 chars of the token, when authenticated. Never the full token. */
-  tokenPreview?: string;
-  hint: string;
-}
-
-function probeBinary(): string | null {
-  for (const name of CLI_BINARIES) {
-    if (process.env.PATH?.split(pathSep()).includes('')) continue;
-    // Cheap check: just `which` it via spawn.
-    // We don't need to actually exec — `spawn` with a missing
-    // binary surfaces ENOENT synchronously. But the cleanest
-    // cross-platform way is to use the existing helper from
-    // lib/providers/cli-utils if it exists. For now: shell to
-    // `where` on Windows / `which` on POSIX, with a 2s timeout.
-    try {
-      const which = process.platform === 'win32' ? 'where' : 'which';
-      // We can't block here; return the candidate and let the
-      // caller actually run `auth token` against it. If the
-      // binary doesn't exist, the spawn will ENOENT.
-      return name;
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
 function pathSep(): string {
   return process.platform === 'win32' ? ';' : ':';
+}
+
+/**
+ * V1.3.8-CLI-PROBE: Node doesn't honour Windows PATHEXT the way
+ * cmd/PowerShell do. `spawn('higgsfield', ...)` from Node fails
+ * with ENOENT if the file on disk is `higgsfield.cmd` or
+ * `higgsfield.ps1` (the shim wrappers that `npm i -g` produces).
+ * We have to look at the PATH directories ourselves and check
+ * for the .cmd / .ps1 / .exe variants — and on POSIX, accept
+ * `higgsfield` directly.
+ *
+ * Returns the absolute path of the binary if found, null otherwise.
+ */
+function findBinary(name: string): string | null {
+  const exts = process.platform === 'win32'
+    ? ['.cmd', '.bat', '.ps1', '.exe', '']
+    : [''];
+  // V1.4.4: prefer the user's globally-installed @higgsfield/cli
+  // (lives at %USERPROFILE%\AppData\Roaming\npm on Windows). The
+  // local node_modules/.bin symlink that dev tools create is missing
+  // the `hf.exe` vendor binary — every CLI call via the local copy
+  // fails with "binary not found". Preferring the global install
+  // avoids that for the user-facing desktop build.
+  const preferred: string[] = [];
+  if (process.platform === 'win32' && process.env.USERPROFILE) {
+    preferred.push(join(process.env.USERPROFILE, 'AppData', 'Roaming', 'npm'))
+  }
+  for (const dir of preferred) {
+    for (const ext of exts) {
+      const candidate = join(dir, name + ext);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  const pathDirs = (process.env.PATH || '').split(pathSep()).filter(Boolean);
+  for (const dir of pathDirs) {
+    if (preferred.includes(dir)) continue;
+    for (const ext of exts) {
+      const candidate = join(dir, name + ext);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return null
 }
 
 function runCliAuthCheck(bin: string): Promise<{ ok: boolean; tokenPreview?: string; stderr?: string }> {
@@ -64,13 +73,8 @@ function runCliAuthCheck(bin: string): Promise<{ ok: boolean; tokenPreview?: str
     const child = spawn(bin, ['auth', 'token'], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      // Inherit only the env vars needed for the CLI; don't
-      // leak the parent process's secrets into a child.
       env: {
         ...process.env,
-        // Defensive: if the user has a stale token in their
-        // settings, don't let it override the CLI's own cache.
-        // The CLI's default path is %AppData%/higgsfield/...
         HIGGSFIELD_CREDENTIALS_PATH: '',
       },
     });
@@ -100,24 +104,32 @@ function runCliAuthCheck(bin: string): Promise<{ ok: boolean; tokenPreview?: str
 }
 
 export async function GET(): Promise<Response> {
-  const bin = probeBinary();
+  // V1.3.8-CLI-PROBE: find the actual binary on PATH (with
+  // .cmd/.ps1/.exe extensions on Windows). Old code returned
+  // the bare name, which then made `spawn('higgsfield', ...)`
+  // fail with ENOENT because Node doesn't resolve PATHEXT.
+  const bin = (['higgsfield', 'higgs'] as const)
+    .map((n) => findBinary(n))
+    .find((p): p is string => p !== null);
   if (!bin) {
-    const body: CliAuthStatus = {
+    return NextResponse.json({
       binaryAvailable: false,
       authenticated: false,
-      hint: '`higgsfield` CLI not on PATH. This endpoint is desktop-only; the web build always reports not-available.',
-    };
-    return NextResponse.json(body, { status: 200 });
+      hint: '`higgsfield` CLI not on PATH. Install with `npm i -g @higgsfield/cli` and re-launch.',
+    });
   }
-
-  const probe = await runCliAuthCheck(bin);
-  const body: CliAuthStatus = {
+  const check = await runCliAuthCheck(bin);
+  if (check.ok) {
+    return NextResponse.json({
+      binaryAvailable: true,
+      authenticated: true,
+      tokenPreview: check.tokenPreview,
+      hint: `Authenticated via cached credentials (${bin}).`,
+    });
+  }
+  return NextResponse.json({
     binaryAvailable: true,
-    authenticated: probe.ok,
-    ...(probe.tokenPreview ? { tokenPreview: probe.tokenPreview } : {}),
-    hint: probe.ok
-      ? `Authenticated via cached credentials. Last 4 weeks auto-refresh; you can leave the override field empty.`
-      : `Not authenticated. Run \`${bin} auth login\` in a terminal — the cached token will be reused on every generation.`,
-  };
-  return NextResponse.json(body, { status: 200 });
+    authenticated: false,
+    hint: `CLI found at ${bin}, but not authenticated. Run \`higgsfield auth login\` in a terminal.${check.stderr ? ` (${check.stderr})` : ''}`,
+  });
 }
