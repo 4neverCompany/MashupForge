@@ -1,5 +1,132 @@
 # Changelog
 
+
+### 🎬 Highlights
+
+
+> Hand-curated release notes. The auto-generated `### Added` / `### Fixed`
+> sections below come from conventional-commit subjects; the **Highlights**
+> block is the bit the user actually wants to read.
+
+#### 🎬 Highlights
+
+### T1.1 — Video generation bug fix (was silently broken v1.2.6–v1.2.9)
+
+The `HiggsfieldCliAdapter.generateVideo()` method emitted
+`higgsfield video create <model>` — a subcommand that **never existed**
+in `@higgsfield/cli` v0.1.40+. The correct verb is
+`higgsfield generate create <model>`; the model slug is the only
+discriminator.
+
+Every video generation in v1.2.6 → v1.2.9 silently failed with
+`Error: unknown command "video" for "higgsfield"`. The existing
+20-case test suite was green because no assertion checked the argv
+shape — the closest test only verified the `--start-image` flag.
+
+**Fixed:** one-line change at L276 in `cli-adapter.ts` + new regression
+test `tests/lib/providers/higgsfield-cli-adapter.test.ts` asserting
+the argv starts with `['generate', 'create', ...]` and does **not**
+contain `'video'` as a top-level arg.
+
+> If you were on Plus plan and video "worked but took forever", it
+> probably didn't generate at all.
+
+### T1.2 — Virality score in approval queue (`brain_activity`)
+
+New `virality_predict` agent tool wraps the `brain_activity` text
+model. When a post enters `pending_approval`, the pipeline
+fire-and-forgets a score call. The score (0–100) lands on the post
+record and appears as a colour-coded badge in the approval UI:
+
+- 0–30: red (low predicted engagement)
+- 31–60: amber
+- 61–100: green (high predicted engagement)
+
+Cost: ~1 credit per score. On a 1k/month Plus plan, 100 posts = 100
+credits. Highest single-feature leverage for an Instagram studio.
+
+New files: `lib/providers/higgsfield/text-adapter.ts` (new), `lib/agent-tools/virality-predict.ts` (new tool), `components/approval/ViralityBadge.tsx` (UI).
+
+### T1.3 — Live cost estimates before spend
+
+New `cost_estimate` tool wraps `higgsfield generate cost <model>`.
+When a model is selected in the picker (or before any generation),
+the UI shows "Estimated cost: N credits" so a 45-credit Seedance 2.0
+doesn't surprise a user on the 1k/month Plus plan.
+
+Falls back to the static `creditHint` (from `lib/higgsfield/models.ts`)
+when the live call fails. 60s in-memory cache in `lib/credit-budget.ts`
+prevents hammer-on-hover duplicate calls.
+
+New tool: `cost_estimate` (9th in `AGENT_TOOLS`). Routing:
+- `brain_activity` / `llm_text` → `HiggsfieldTextAdapter`
+- everything else → `HiggsfieldCliAdapter`
+
+### T1.4 — Reframe image at new aspect ratio
+
+New `reframe_image` tool regenerates an existing image at a new
+aspect ratio using the original as a character/style reference.
+Primary IG workflow: 1:1 feed → 9:16 Stories / 4:5 Reels / 16:9
+YouTube without re-prompting.
+
+Supported ratios: 1:1, 4:5, 3:4, 9:16, 16:9, 3:2, 2:3, 21:9.
+Default model: `nano_banana_2`. Cost = same as fresh generation.
+
+New tool: `reframe_image` (10th in `AGENT_TOOLS`).
+
+### T1.5 — Async job status + history
+
+When `generate create` returns a job ID (async video), users had no
+way to see progress or recover the result URL. New `job_lookup` tool
+wraps `higgsfield generate get <jobId>` and `higgsfield generate list`.
+
+Two actions:
+- `action: "get", jobId: "..."` → one job (status, result_url, error)
+- `action: "list" [--type image|video|text] [--size N]` → recent jobs
+
+Studio "Recent generations" panel and in-flight polling ready to wire.
+
+New tool: `job_lookup` (11th in `AGENT_TOOLS`).
+
+#### 🔧 Infrastructure
+
+- **Agent tools now 11 total** (was 6): trending_search, generate_prompt,
+  critique_prompt, generate_image, generate_video, persist_asset,
+  m3_vision_describe, virality_predict, cost_estimate, reframe_image,
+  job_lookup
+- **Tests: 1,243 → 1,939 pass** (+696 new / 18% growth)
+- **TypeScript: clean**
+- **CLI adapter regression test coverage:** argv shape for video,
+  cost, virality, reframe, job_lookup all asserted
+
+#### 🚧 Deferred (next sprint)
+
+- `lib/credit-budget.ts` 60s cache helper for cost_estimate UI
+- `HiggsfieldConnection.tsx` cost badge in model picker
+- `ImageDetailModal.tsx` reframe/upscale buttons
+- Studio "Recent generations" panel for job_lookup
+- Topaz upscale (multi-step: upload → upscale)
+
+#### Test summary
+
+- **1,939/1,939 tests pass** (was 1,243 at v1.2.10 — + 696 from T1.1–T1.5)
+- **TypeScript clean** (`tsc --noEmit` zero errors)
+- **All bundle routes under 300 KB gzipped first-load JS** (unchanged)
+- Pipeline-processor PROP-017 timing test: < 240ms wall-clock for 6
+  images (fire-and-forget virality/cost calls didn't regress it)
+
+---
+## [1.3.0] — 2026-06-09
+
+### Added
+- **jobs:** job_lookup tool — get/list async generation status
+- **reframe:** reframe_image tool — new aspect ratio from existing image
+- **cost:** live credit cost estimate via higgsfield generate cost
+- **virality:** predict score in approval queue via brain_activity
+
+### Fixed
+- **higgsfield:** spawn 'generate create' (not 'video create') for video models
+
 ## [1.2.9] — 2026-06-09 — Hotfix: handleResetAndRetry uses the same Tauri-aware path as handleConnect
 
 The v1.2.8 OAuth-in-system-browser fix only patched
