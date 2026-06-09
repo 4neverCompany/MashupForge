@@ -4,32 +4,34 @@
 
 set -euo pipefail
 
-VERSION="${1:?Usage: ./scripts/release.sh <version> [--force] (e.g. 0.7.2)}"
-FORCE="${2:-}"
+VERSION="${1:?Usage: ./scripts/release.sh <version> (e.g. 0.7.2)}"
 TAG="v${VERSION}"
 DATE="$(date -u +%Y-%m-%d)"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
-# ── Empty-bump guard ─────────────────────────────────────────────────────────
-# 8 of the 10 releases between v1.3.3 and v1.4.3 were version bumps with
-# ZERO real commits since the previous tag — each one cost a ~20 min Tauri
-# CI run and an "Internal-only release; no user-facing changes" entry in
-# the public release list. Refuse to cut a release when nothing changed.
-# `--force` overrides (e.g. re-cutting a release whose build infra failed).
+# ── V1.4.5: skip empty releases ─────────────────────────────────────────────
+# 8 of the 10 releases on 2026-06-09 were "Internal-only; no user-facing
+# changes" — each one made every desktop user download an update for
+# nothing. If there are no releasable commits (feat/fix/refactor/perf/
+# docs/test) since the previous tag, abort BEFORE touching any version
+# files (an abort after the bump would leave a dirty working tree).
+# Override with ALLOW_EMPTY_RELEASE=1 for a deliberate re-ship (e.g. a
+# CI/builder fix). To verify CI health without a release:
+#   gh workflow run tauri-windows.yml
 guard_prev_tag="$(git tag --list 'v*' --sort=-version:refname | head -n 1 || true)"
-if [ -n "${guard_prev_tag}" ] && [ "${FORCE}" != "--force" ]; then
-  real_commits="$(git log "${guard_prev_tag}..HEAD" --no-merges --pretty='%s' \
-    | grep -Evc '^(chore\(release\)|chore\(changelog\)|docs\(changelog\))' || true)"
-  if [ "${real_commits}" -eq 0 ]; then
-    echo "ERROR: No real commits since ${guard_prev_tag} — refusing to cut an empty release." >&2
-    echo "       To verify CI health without a release, use:" >&2
-    echo "         gh workflow run tauri-windows.yml" >&2
-    echo "       To force anyway: ./scripts/release.sh ${VERSION} --force" >&2
+if [ -n "${guard_prev_tag}" ]; then
+  releasable="$(git log "${guard_prev_tag}..HEAD" --no-merges --pretty='%s' \
+    | grep -E '^(feat|fix|refactor|perf|docs|test)(\([^)]+\))?:' \
+    | grep -Ev '^[a-z]+\((release|changelog)\)' \
+    || true)"
+  if [ -z "${releasable}" ] && [ "${ALLOW_EMPTY_RELEASE:-0}" != "1" ]; then
+    echo "ABORT: no releasable commits since ${guard_prev_tag} (only chore/ci/build/style)."
+    echo "       Nothing user-facing to ship — skipping the release."
+    echo "       Set ALLOW_EMPTY_RELEASE=1 to force (e.g. for a CI-only re-ship)."
     exit 1
   fi
-  echo "Empty-bump guard: ${real_commits} real commit(s) since ${guard_prev_tag} — proceeding."
 fi
 
 echo "Bumping to ${VERSION}..."
@@ -101,23 +103,6 @@ if [ -z "${prev_tag}" ]; then
   prev_tag="$(git rev-list --max-parents=0 HEAD | head -n 1)"
 fi
 echo "Generating changelog since ${prev_tag}..."
-
-# ── V1.4.5: skip empty releases ─────────────────────────────────────────────
-# 8 of the 10 releases on 2026-06-09 were "Internal-only; no user-facing
-# changes" — each one made every desktop user download an update for
-# nothing. If there are no releasable commits (feat/fix/refactor/perf/
-# docs/test) since the previous tag, abort. Override with
-# ALLOW_EMPTY_RELEASE=1 for a deliberate re-ship (e.g. CI/builder fix).
-releasable="$(git log "${prev_tag}..HEAD" --no-merges --pretty='%s' \
-  | grep -E '^(feat|fix|refactor|perf|docs|test)(\([^)]+\))?:' \
-  | grep -Ev '^[a-z]+\((release|changelog)\)' \
-  || true)"
-if [ -z "${releasable}" ] && [ "${ALLOW_EMPTY_RELEASE:-0}" != "1" ]; then
-  echo "ABORT: no releasable commits since ${prev_tag} (only chore/ci/build/style)."
-  echo "       Nothing user-facing to ship — skipping the release."
-  echo "       Set ALLOW_EMPTY_RELEASE=1 to force (e.g. for a CI-only re-ship)."
-  exit 1
-fi
 
 # ── V1.4.5: changelog dedupe ────────────────────────────────────────────
 # CHANGELOG.md ended up with `## [1.4.4]` three times and `## [1.3.4]`
