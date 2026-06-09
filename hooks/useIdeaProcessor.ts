@@ -30,6 +30,7 @@ import { awaitImagesOrSkip } from '@/lib/image-readiness';
 import { generateNegativePrompt } from '@/lib/negative-prompts';
 import { extractTrademarkNames } from '@/lib/extract-trademark-names';
 import { setOutcome } from '@/lib/trademark-outcomes';
+import { computeViralityScoreServer } from '@/lib/actions/virality';
 import type { WriteCheckpointBase } from './usePipelineDaemon';
 import { useDesktopConfig } from './useDesktopConfig';
 
@@ -392,6 +393,13 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
         writeCheckpoint: checkpoint,
         isSkipRequested: () => skipSignal.aborted,
         getScheduledPosts: () => getSettings().scheduledPosts || [],
+        computeViralityScore: async (caption: string) => {
+          try {
+            return await computeViralityScoreServer(caption);
+          } catch {
+            return null;
+          }
+        },
         desktopCreds: isDesktop ? desktopCreds : undefined,
       };
 

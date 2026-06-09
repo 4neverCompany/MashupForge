@@ -25,7 +25,6 @@ import {
   type DesktopCredentialFlags,
   type PipelinePlatform,
 } from '@/lib/platform-credentials';
-import { executeViralityPredict } from '@/lib/agent-tools/virality-predict';
 
 /** Typed replacement for the __SKIP_IDEA__ string sentinel. */
 export class SkipIdeaSignal extends Error {
@@ -107,6 +106,13 @@ export interface ProcessIdeaDeps {
   isSkipRequested(): boolean;
   /** Read the freshest scheduled posts for slot collision avoidance. */
   getScheduledPosts(): ScheduledPost[];
+  /**
+   * Compute virality score (0-100) for a caption. Returns null on failure.
+   * Implementations should call a Server Action or API route — the caller
+   * handles retries and timeouts. Returns null on failure (non-fatal).
+   * Optional for test mocks and server-side callers that don't need it.
+   */
+  computeViralityScore?: (caption: string) => Promise<number | null>;
   /**
    * V041-HOTFIX-IG: presence flags for credentials stored in the desktop
    * config.json (separate from settings.apiKeys, which is the web-mode
@@ -463,11 +469,11 @@ export async function processIdea(
         }));
         // V1.3: compute virality score for the carousel's shared caption.
         // Compute once and stamp on all posts in the group.
-        if (carouselStatus === 'pending_approval' && sharedCaption) {
+        if (carouselStatus === 'pending_approval' && sharedCaption && deps.computeViralityScore) {
           try {
-            const scoreResult = await executeViralityPredict({ prompt: sharedCaption });
-            if (scoreResult.ok) {
-              for (const p of newPosts) p.viralityScore = scoreResult.value.score;
+            const score = await deps.computeViralityScore(sharedCaption);
+            if (score !== null) {
+              for (const p of newPosts) p.viralityScore = score;
             }
           } catch {
             // virality computation failed — leave viralityScore undefined
@@ -636,11 +642,11 @@ export async function processIdea(
           // until the score arrives, then updates via the settings
           // subscription. A failed score leaves the field undefined
           // and the badge hidden — non-fatal.
-          if (newPost.status === 'pending_approval' && newPost.caption) {
+          if (newPost.status === 'pending_approval' && newPost.caption && deps.computeViralityScore) {
             const caption = newPost.caption;
-            void executeViralityPredict({ prompt: caption }).then((r) => {
-              if (r.ok) {
-                newPost.viralityScore = r.value.score;
+            void deps.computeViralityScore(caption).then((score) => {
+              if (score !== null) {
+                newPost.viralityScore = score;
               }
             });
           }
