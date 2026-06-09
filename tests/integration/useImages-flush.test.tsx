@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
-// BUG-CRIT-006 / BUG-DES-002 / V1.2.7-HOTFIX: useImages flush-on-unload
-// safety net.
+// BUG-CRIT-006 / BUG-DES-002 / V1.2.7-HOTFIX / V1.4.4-DATALOSS-FIX:
+// useImages flush-on-unload safety net.
 //
 // Bug (v1.2.5): useImages persists savedImages with a 200ms
 // debounce. A manual Post Now (postedAt/postError patch) that
@@ -21,14 +21,23 @@
 // The next page's load effect found the empty array and
 // clobbered the store with `[]` — wiping the user's images.
 //
-// New fix (v1.2.7-HOTFIX): the listener is now gated on
-// BOTH `isImagesLoaded` AND `loadTriggered`. The user must
-// have actually visited the data's home view (Gallery) for
-// the listener to be active. When `loadTriggered` is false,
-// there's no debounce to flush, so no listener is needed.
+// Fix (v1.2.7-HOTFIX): gate the listener on `loadTriggered`.
 //
-// This test pins the new contract so a future refactor
-// can't silently re-introduce the v1.2.5 data-loss bug.
+// New bug (v1.4.4): the `loadTriggered` gate ALSO killed the
+// safety net for the common case — user generates an image in
+// Studio (never visits the Gallery, so requestLoad() never
+// fires), closes the app within the 200ms debounce window, the
+// image is lost.
+//
+// Fix (V1.4.4-DATALOSS-FIX): the listener is registered
+// UNCONDITIONALLY, but the flush function refuses to write an
+// empty array. Both protections hold:
+//   - Empty state never pollutes localStorage (v1.2.5 / v1.2.7
+//     clobber protection)
+//   - Any non-empty state survives shutdown (v1.4.4 fix)
+//
+// This test pins the v1.4.4 contract so a future refactor can't
+// silently re-introduce either data-loss bug.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, cleanup } from '@testing-library/react';
@@ -52,49 +61,67 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('V1.2.7-HOTFIX — beforeunload flush is gated on loadTriggered', () => {
-  it('does NOT register the beforeunload listener when loadTriggered is false', async () => {
-    // The user just opened the studio. isImagesLoaded flips to true
-    // immediately (lazy load) but the actual store-load hasn't run
-    // because requestLoad() wasn't called yet. The flush listener
-    // must NOT be active in this state — otherwise the next page
-    // navigation would write the initial in-memory `[]` to
-    // localStorage and clobber the store.
+describe('V1.4.4-DATALOSS-FIX — beforeunload flush is unconditional but refuses empty state', () => {
+  it('registers the beforeunload listener on mount (no loadTriggered gate)', async () => {
     const addSpy = vi.spyOn(window, 'addEventListener');
 
     renderHook(() => useImages());
-    // Flush the synchronous effects pass + the setState re-render
-    // that happens when the lazy-load useEffect calls
-    // setIsImagesLoaded(true).
     await act(async () => {
       await Promise.resolve();
     });
 
     const beforeunloadCalls = addSpy.mock.calls.filter(([type]) => type === 'beforeunload');
-    expect(beforeunloadCalls.length).toBe(0);
+    expect(beforeunloadCalls.length).toBe(1);
 
     addSpy.mockRestore();
   });
 
-  it('DOES register the beforeunload listener once requestLoad() is called', async () => {
+  it('flush with empty state writes NOTHING (v1.2.5/v1.2.7 clobber protection)', async () => {
+    renderHook(() => useImages());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // No images saved, no requestLoad — the OAuth-redirect
+    // scenario that wiped stores in v1.2.5. The listener is
+    // active, but firing it must not write the in-memory `[]`.
+    act(() => {
+      window.dispatchEvent(new Event('beforeunload'));
+    });
+
+    expect(localStorage.getItem('mashup_saved_images')).toBeNull();
+  });
+
+  it('flush preserves a non-empty state even WITHOUT requestLoad (the v1.4.4 Studio scenario)', async () => {
     const { result } = renderHook(() => useImages());
     await act(async () => {
       await Promise.resolve();
     });
 
-    // Trigger the lazy load (simulating the user navigating to
-    // the Gallery view which calls requestLoad() on mount).
+    // User generates an image in Studio — saveImage fires, but the
+    // Gallery (and therefore requestLoad()) was never visited.
     act(() => {
-      result.current.requestLoad();
+      result.current.saveImage({
+        id: 'img-studio-1',
+        prompt: 'studio test',
+        url: 'https://example.test/s.png',
+      });
     });
-    await vi.waitFor(() => expect(result.current.isImagesLoaded).toBe(true));
+    expect(result.current.savedImages).toHaveLength(1);
 
-    // Now the listener should be active. The 200ms debounce is in
-    // play; beforeunload is the only sync path to localStorage.
-    expect(localStorage.getItem('mashup_saved_images')).toBeNull();
+    // App closes within the 200ms debounce window.
+    act(() => {
+      window.dispatchEvent(new Event('beforeunload'));
+    });
+
+    const persisted = localStorage.getItem('mashup_saved_images');
+    expect(persisted).not.toBeNull();
+    const parsed = JSON.parse(persisted!) as Array<{ id: string }>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]!.id).toBe('img-studio-1');
   });
 
-  it('writes savedImages to localStorage when beforeunload fires (after loadTriggered)', async () => {
+  it('writes savedImages to localStorage when beforeunload fires (after requestLoad)', async () => {
     const { result } = renderHook(() => useImages());
     await act(async () => {
       await Promise.resolve();
