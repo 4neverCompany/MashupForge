@@ -21,9 +21,12 @@ jobs:
       # Mirrors tauri-windows.yml: Bun primary for ~40× faster installs,
       # Node still set up because the build script chains node and the
       # npm fallback below needs it.
+      # No `cache: 'npm'` — that option requires a package-lock.json,
+      # which was removed in v1.4.4 (bun.lock is the only lockfile).
+      # Bun installs are cached separately below.
       - name: Setup Node.js
         uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'npm' }
+        with: { node-version: '22' }
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -47,7 +50,9 @@ jobs:
         if: steps.bun_install.outcome == 'failure'
         run: |
           echo "::warning::Bun install failed; falling back to npm. Investigate Bun step output."
-          npm ci
+          # `npm install`, not `npm ci` — there is no package-lock.json
+          # anymore (bun.lock is the single lockfile since v1.4.4).
+          npm install
 
       - name: Type check
         run: npx tsc --noEmit
