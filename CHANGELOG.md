@@ -231,10 +231,6 @@ _Internal-only release; no user-facing changes since v1.3.4._
 
 _Internal-only release; no user-facing changes since v1.3.3._
 
-## [1.3.4] — 2026-06-09
-
-_Internal-only release; no user-facing changes since v1.3.3._
-
 ## [1.3.3] — 2026-06-09
 
 _Internal-only release; no user-facing changes since v1.3.2._
