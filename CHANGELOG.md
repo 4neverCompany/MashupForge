@@ -118,6 +118,11 @@ New tool: `job_lookup` (11th in `AGENT_TOOLS`).
 ---
 ## [1.4.4] — 2026-06-09
 
+### Fixed
+- **images:** v1.4.4 unconditional beforeunload flush
+
+## [1.4.4] — 2026-06-09
+
 _Internal-only release; no user-facing changes since v1.4.3._
 
 ## [1.4.4] — 2026-06-09
