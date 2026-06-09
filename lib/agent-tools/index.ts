@@ -42,6 +42,8 @@ import { viralityPredictTool, executeViralityPredict } from './virality-predict'
 // the user / Director loop can decide whether to proceed. Same
 // routing pattern as virality_predict.
 import { costEstimateTool, executeCostEstimate } from './cost-estimate';
+// V1.3.0 T1.4
+import { reframeImageTool, executeReframeImage } from './reframe-image';
 
 // ---------------------------------------------------------------------------
 // Schemas (re-export so consumers can re-use them in tests / route validation)
@@ -164,6 +166,9 @@ export {
   // V1.3.0 — T1.3
   costEstimateTool,
   executeCostEstimate,
+  // V1.3.0 — T1.4
+  reframeImageTool,
+  executeReframeImage,
 };
 
 // Pure helpers re-exported for unit tests + non-SDK callers.
@@ -206,6 +211,7 @@ export const AGENT_TOOLS = [
   // commits to a generation. Surfaces "Cost: 60 credits" hints
   // in the model picker. Always informational, never a gate.
   costEstimateTool,
+  reframeImageTool,
 ] as unknown as Tool[];
 
 // ---------------------------------------------------------------------------
@@ -243,6 +249,7 @@ export function describeAgentTools(): Array<{ name: string; description: string;
       if (t === m3VisionDescribeTool) return 'm3_vision_describe';
       if (t === viralityPredictTool) return 'virality_predict';
       if (t === costEstimateTool) return 'cost_estimate';
+      if (t === reframeImageTool) return 'reframe_image';
       return 'unknown';
     })();
     return { name, description: desc, hasInputSchema: hasInput, hasOutputSchema: hasOutput };
