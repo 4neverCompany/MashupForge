@@ -700,3 +700,143 @@ function CliAuthStatusBlock() {
     </div>
   );
 }
+
+export function ImageBackupPanel() {
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const handleExport = async () => {
+    if (!confirm('Export all saved images to a backup file? This includes all your generated images and their metadata.')) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      const { get } = await import('@/lib/persistence');
+      const { exportImagesToFile } = await import('@/lib/backup/images');
+      const images = await get<import('@/types/mashup').GeneratedImage[]>('mashup_saved_images');
+      if (!images || images.length === 0) {
+        setMessage('No images to export');
+        setLoading(false);
+        return;
+      }
+      const { exportImagesToFile: doExport } = await import('@/lib/backup/images');
+      const ok = await doExport(images);
+      if (ok) setMessage('✅ Images exported successfully');
+      else setMessage('❌ Export failed');
+    } catch (e) {
+      setMessage(`❌ Export failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!confirm('Import images from a backup file? This will merge with your current images.')) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      const { importImagesFromFile } = await import('@/lib/backup/images');
+      // Prompt user to pick a backup file via hidden <input type="file">
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json';
+      const file = await new Promise<File | null>((resolve) => {
+        input.onchange = () => resolve(input.files?.[0] ?? null);
+        input.oncancel = () => resolve(null);
+        input.click();
+      });
+      if (!file) {
+        setMessage('Import cancelled');
+        setLoading(false);
+        return;
+      }
+      const images = await importImagesFromFile(file);
+      if (images.length === 0) {
+        setMessage('No valid images found in the backup file');
+        setLoading(false);
+        return;
+      }
+      const { set, get } = await import('@/lib/persistence');
+      const existing = (await get<import('@/types/mashup').GeneratedImage[]>('mashup_saved_images')) || [];
+      const byId = new Map<string, import('@/types/mashup').GeneratedImage>();
+      for (const img of existing) byId.set(img.id, img);
+      for (const img of images) byId.set(img.id, img);
+      const merged = Array.from(byId.values());
+      await set('mashup_saved_images', merged);
+      setMessage(`✅ Imported ${images.length} images (merged with existing)`);
+    } catch (e) {
+      setMessage(`❌ Import failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!confirm('Restore images from the latest automatic backup? This will replace your current images.')) return;
+    setLoading(true);
+    setMessage(null);
+    try {
+      const { restoreFromAutoBackup } = await import('@/lib/backup/images');
+      const { set } = await import('@/lib/persistence');
+      const images = await restoreFromAutoBackup();
+      if (!images || images.length === 0) {
+        setMessage('No backup found');
+        setLoading(false);
+        return;
+      }
+      await set('mashup_saved_images', images);
+      setMessage(`✅ Restored ${images.length} images from backup`);
+    } catch (e) {
+      setMessage(`❌ Restore failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <details className="mt-4 group">
+      <summary className="cursor-pointer text-sm font-medium text-white/70 flex items-center gap-2">
+        <span className="text-white/50">💾</span>
+        Image Library Backup &amp; Restore
+      </summary>
+      <div className="mt-3 space-y-3 pt-3 border-t border-white/5">
+        <p className="text-[11px] text-white/40 leading-relaxed">
+          Automatic backups are saved to your Documents folder (survives app reinstall). 
+          Use these tools for manual backup/restore.
+        </p>
+        
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/80 transition hover:bg-white/10 disabled:opacity-50"
+          >
+            <span>📤</span> Export Images
+          </button>
+          <button
+            type="button"
+            onClick={handleImport}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/80 transition hover:bg-white/10 disabled:opacity-50"
+          >
+            <span>📥</span> Import from File
+          </button>
+          <button
+            type="button"
+            onClick={handleRestore}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded border border-amber-400/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-200 transition hover:bg-amber-500/20 disabled:opacity-50"
+          >
+            <span>🔄</span> Restore Latest Backup
+          </button>
+        </div>
+
+        {message && (
+          <div className={`text-[11px] transition-colors ${message.startsWith('✅') ? 'text-emerald-300' : 'text-rose-300'}`}>
+            {message}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}

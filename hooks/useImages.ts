@@ -5,8 +5,9 @@ import { useState, useEffect, useRef } from 'react';
 // store in production, idb-keyval fallback in dev/test). The IDB key name
 // stays the same so the migration runner in persistence.ts can detect any
 // pre-fix value and copy it forward on first launch.
-import { get, set } from '@/lib/persistence';
-import { type GeneratedImage } from '../types/mashup';
+import { get, set } from '@/lib/persistence'
+import { autoBackupImages } from '@/lib/backup/images'
+import { type GeneratedImage } from '../types/mashup'
 
 // Normalize images on load: rewrite legacy tag spelling and reset any
 // transient pipeline status that was persisted mid-flight (the work itself
@@ -120,6 +121,8 @@ export function useImages() {
     if (!isImagesLoaded) return;
     const timer = setTimeout(() => {
       void set('mashup_saved_images', savedImages).catch(() => {});
+      // Auto-backup to Documents folder (survives reinstall)
+      void autoBackupImages(savedImages);
     }, 200);
     return () => clearTimeout(timer);
   }, [savedImages, isImagesLoaded]);
