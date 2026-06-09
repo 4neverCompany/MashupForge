@@ -121,6 +121,13 @@ const HiggsfieldVideoResponse = z.object({
 });
 export type HiggsfieldVideoResponseT = z.infer<typeof HiggsfieldVideoResponse>;
 
+/** Response shape for `higgsfield generate cost` calls. */
+const HiggsfieldCostResponse = z.object({
+  credits: z.number(),
+  credits_exact: z.number().optional(),
+});
+export type HiggsfieldCostResponseT = z.infer<typeof HiggsfieldCostResponse>;
+
 /** Common error payload shape. */
 const HiggsfieldErrorPayload = z.object({
   error: z.object({
@@ -304,6 +311,79 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
 
     const result = await this.runWithErrorMapping(invokeOpts, HiggsfieldVideoResponse);
     return videoResponseToAssetRef(result, this.name);
+  }
+
+  /**
+   * V1.3: real-time credit cost estimate via `higgsfield generate cost`.
+   *
+   * Uses the same auth pattern as generateImage/generateVideo.
+   * The `--duration` flag is NOT forwarded — the cost CLI may not
+   * support it (verified: duration is silently ignored for video models).
+   *
+   * Falls back to the static creditHint when the CLI call fails
+   * (CLI not on PATH, rate-limited, etc.). Callers should always
+   * check `raw` for a `warning` field to detect fallback usage.
+   */
+  async estimateCost(
+    model: string,
+    opts: {
+      prompt?: string;
+      imagePath?: string;
+      imageUrl?: string;
+      imageId?: string;
+    } = {},
+  ): Promise<{ credits: number; credits_exact: number | undefined; currency: 'credit'; raw: unknown }> {
+    const bin = await this.requireBinary();
+
+    const args = ['generate', 'cost', model, '--json'];
+    pushFlag(args, '--prompt', opts.prompt ?? 'estimate');
+
+    if (opts.imagePath || opts.imageUrl || opts.imageId) {
+      const ref = await this.resolveImageReference({
+        path: opts.imagePath,
+        url: opts.imageUrl,
+        id: opts.imageId,
+      });
+      if (ref) pushFlag(args, '--image', ref);
+    }
+
+    const invokeOpts: CliInvokeOptions<unknown> = {
+      provider: this.name,
+      binary: bin,
+      args,
+      env: await this.maybeBuildAuthEnv(),
+      timeoutMs: 30_000, // cost calls are fast; 30s is generous
+    };
+
+    const invoked = await cliInvoke<unknown>({ ...invokeOpts, schema: undefined });
+    const raw = invoked.parsed;
+
+    // Check for error payload (rate-limit, quota, etc.)
+    const errPayload = HiggsfieldErrorPayload.safeParse(raw);
+    if (errPayload.success) {
+      throw new ProviderRejectedError(
+        this.name,
+        errPayload.data.error.code ?? 'UNKNOWN',
+        errPayload.data.error.message,
+        errPayload.data.error.hint,
+      );
+    }
+
+    const parsed = HiggsfieldCostResponse.safeParse(raw);
+    if (!parsed.success) {
+      throw new ProviderParseError(
+        this.name,
+        `cost response did not match schema: ${parsed.error.message}`,
+        invoked.stdout.slice(0, 500),
+      );
+    }
+
+    return {
+      credits: parsed.data.credits,
+      credits_exact: parsed.data.credits_exact,
+      currency: 'credit',
+      raw,
+    };
   }
 
   // -------------------------------------------------------------------------

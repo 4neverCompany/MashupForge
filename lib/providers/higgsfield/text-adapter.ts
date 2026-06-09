@@ -72,6 +72,12 @@ const HiggsfieldErrorPayload = z.object({
   }),
 });
 
+/** Response shape for `higgsfield generate cost brain_activity --json` */
+const HiggsfieldTextCostResponse = z.object({
+  credits: z.number(),
+  credits_exact: z.number().optional(),
+});
+
 // ---------------------------------------------------------------------------
 // Adapter
 // ---------------------------------------------------------------------------
@@ -151,6 +157,39 @@ export class HiggsfieldTextAdapter implements ProviderAdapter {
 
     const result = await this.runWithErrorMapping(invokeOpts, HiggsfieldTextResponse);
     return parseBrainActivityOutput(result.text, this.name);
+  }
+
+  /**
+   * V1.3: real-time credit cost estimate for the brain_activity
+   * text model. Same `higgsfield generate cost` surface as the
+   * CLI adapter; only the model slug is text-specific.
+   */
+  async estimateCost(
+    prompt?: string,
+  ): Promise<{ credits: number; credits_exact?: number; currency: 'credit'; raw: unknown }> {
+    const bin = await this.requireBinary();
+
+    const args = [
+      'generate', 'cost',
+      BRAIN_ACTIVITY_MODEL,
+      '--json',
+    ];
+    args.push('--prompt', prompt ?? 'estimate');
+
+    const invokeOpts: CliInvokeOptions<unknown> = {
+      provider: this.name,
+      binary: bin,
+      args,
+      env: await this.maybeBuildAuthEnv(),
+    };
+
+    const result = await this.runWithErrorMapping(invokeOpts, HiggsfieldTextCostResponse);
+    return {
+      credits: result.credits,
+      credits_exact: result.credits_exact,
+      currency: 'credit',
+      raw: result,
+    };
   }
 
   // -------------------------------------------------------------------------

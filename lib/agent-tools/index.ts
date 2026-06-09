@@ -33,9 +33,15 @@ import { persistAssetTool, executePersistAsset, toGeneratedImage, upsertImage, m
 // array; the model decides when to call it after a generate_image
 // (e.g. for a consistency check before persist_asset).
 import { m3VisionDescribeTool, executeM3VisionDescribe } from './m3-vision-describe';
-// V1.3: virality score — brain_activity model scores a post's
-// predicted engagement when it enters the approval queue.
+// V1.3: virality tool — wraps the brain_activity text model for
+// approval-queue scoring. Same fire-and-forget pattern as
+// m3-vision-describe (called automatically by the pipeline, not
+// by the agent loop directly).
 import { viralityPredictTool, executeViralityPredict } from './virality-predict';
+// V1.3: cost estimate — predicts credit cost BEFORE generation so
+// the user / Director loop can decide whether to proceed. Same
+// routing pattern as virality_predict.
+import { costEstimateTool, executeCostEstimate } from './cost-estimate';
 
 // ---------------------------------------------------------------------------
 // Schemas (re-export so consumers can re-use them in tests / route validation)
@@ -155,6 +161,9 @@ export {
   // V1.3
   viralityPredictTool,
   executeViralityPredict,
+  // V1.3.0 — T1.3
+  costEstimateTool,
+  executeCostEstimate,
 };
 
 // Pure helpers re-exported for unit tests + non-SDK callers.
@@ -193,6 +202,10 @@ export const AGENT_TOOLS = [
   // pending_approval transition; the model can also call it
   // explicitly to re-score.
   viralityPredictTool,
+  // V1.3: cost estimate — predicts credit cost BEFORE the user
+  // commits to a generation. Surfaces "Cost: 60 credits" hints
+  // in the model picker. Always informational, never a gate.
+  costEstimateTool,
 ] as unknown as Tool[];
 
 // ---------------------------------------------------------------------------
@@ -229,6 +242,7 @@ export function describeAgentTools(): Array<{ name: string; description: string;
       if (t === persistAssetTool) return 'persist_asset';
       if (t === m3VisionDescribeTool) return 'm3_vision_describe';
       if (t === viralityPredictTool) return 'virality_predict';
+      if (t === costEstimateTool) return 'cost_estimate';
       return 'unknown';
     })();
     return { name, description: desc, hasInputSchema: hasInput, hasOutputSchema: hasOutput };

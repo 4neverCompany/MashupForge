@@ -20,15 +20,16 @@ import {
   persistAssetTool,
   m3VisionDescribeTool,
   viralityPredictTool,
+  costEstimateTool,
 } from '@/lib/agent-tools';
 
 describe('AGENT_TOOLS — barrel contents', () => {
-  // V1.3.0: 8 tools total (was 7) — virality_predict added for T1.2.
-  it('contains exactly the 8 documented tools', () => {
-    expect(AGENT_TOOLS).toHaveLength(8);
+  // V1.3.0: 9 tools total (was 8) — cost_estimate added for T1.3.
+  it('contains exactly the 9 documented tools', () => {
+    expect(AGENT_TOOLS).toHaveLength(9);
   });
 
-  it('contains the 8 expected tool references (in any order)', () => {
+  it('contains the 9 expected tool references (in any order)', () => {
     const set = new Set(AGENT_TOOLS);
     expect(set.has(trendingSearchTool)).toBe(true);
     expect(set.has(generatePromptTool)).toBe(true);
@@ -38,6 +39,7 @@ describe('AGENT_TOOLS — barrel contents', () => {
     expect(set.has(persistAssetTool)).toBe(true);
     expect(set.has(m3VisionDescribeTool)).toBe(true);
     expect(set.has(viralityPredictTool)).toBe(true);
+    expect(set.has(costEstimateTool)).toBe(true);
   });
 });
 
@@ -52,13 +54,14 @@ describe('AGENT_TOOLS — per-tool contract', () => {
     'persist_asset',
     'm3_vision_describe',
     'virality_predict',
+    'cost_estimate',
   ];
 
   it('exposes one description row per tool', () => {
-    expect(docs).toHaveLength(8);
+    expect(docs).toHaveLength(9);
   });
 
-  it('names match the 8 documented tools', () => {
+  it('names match the 9 documented tools', () => {
     const names = docs.map((d) => d.name).sort();
     expect(names).toEqual([...expectedNames].sort());
   });

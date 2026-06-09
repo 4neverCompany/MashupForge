@@ -112,8 +112,8 @@ describe('m3_vision_describe tool — registry wiring (V1.2.6)', () => {
     expect(found!.hasOutputSchema).toBe(true);
   });
 
-  it('the AGENT_TOOLS array now contains 8 tools (was 7, virality_predict added in V1.3.0)', () => {
-    expect(AGENT_TOOLS.length).toBe(8);
+  it('the AGENT_TOOLS array now contains 9 tools (was 8, cost_estimate added in V1.3.0 T1.3)', () => {
+    expect(AGENT_TOOLS.length).toBe(9);
   });
 
   it('m3VisionDescribeTool object is the same reference as in AGENT_TOOLS', () => {

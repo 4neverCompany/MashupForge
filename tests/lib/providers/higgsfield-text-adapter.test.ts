@@ -168,9 +168,48 @@ describe('HiggsfieldTextAdapter.isAvailable', () => {
 
   it('returns false when binary is not found', async () => {
     const unresolvedAdapter = new HiggsfieldTextAdapter();
-    (unresolvedAdapter as unknown as { resolvedBinary: string | null; resolveAttempted: boolean }).resolvedBinary = null;
-    (unresolvedAdapter as unknown as { resolvedBinary: string | null; resolveAttempted: boolean }).resolveAttempted = true;
+    (unresolvedAdapter as unknown as { resolvedBinary: string | null }).resolvedBinary = null;
+    (unresolvedAdapter as unknown as { resolveAttempted: boolean }).resolveAttempted = true;
     const available = await unresolvedAdapter.isAvailable();
     expect(available).toBe(false);
+  });
+});
+
+describe('HiggsfieldTextAdapter.estimateCost — T1.3 credit-cost preview', () => {
+  it('returns credits for a sync cost response', async () => {
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { credits: 1, credits_exact: 1 },
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    const a = new HiggsfieldTextAdapter();
+    (a as unknown as { resolvedBinary: string; resolveAttempted: boolean }).resolvedBinary = 'higgsfield';
+    (a as unknown as { resolvedBinary: string; resolveAttempted: boolean }).resolveAttempted = true;
+    const out = await a.estimateCost('a caption to estimate');
+    expect(out.credits).toBe(1);
+    expect(out.currency).toBe('credit');
+    spy.mockRestore();
+  });
+
+  it('builds the right argv: generate cost brain_activity --json', async () => {
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { credits: 1 },
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    const a = new HiggsfieldTextAdapter();
+    (a as unknown as { resolvedBinary: string; resolveAttempted: boolean }).resolvedBinary = 'higgsfield';
+    (a as unknown as { resolvedBinary: string; resolveAttempted: boolean }).resolveAttempted = true;
+    await a.estimateCost('estimate this');
+    const callArgs = spy.mock.calls[0][0] as { args: string[] };
+    expect(callArgs.args[0]).toBe('generate');
+    expect(callArgs.args[1]).toBe('cost');
+    expect(callArgs.args[2]).toBe('brain_activity');
+    expect(callArgs.args[3]).toBe('--json');
+    spy.mockRestore();
   });
 });

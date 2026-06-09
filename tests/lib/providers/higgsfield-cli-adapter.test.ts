@@ -356,3 +356,64 @@ describe('HiggsfieldCliAdapter — V1.2.6 auth via HIGGSFIELD_CREDENTIALS_PATH',
     spy.mockRestore();
   });
 });
+
+describe('HiggsfieldCliAdapter.estimateCost — T1.3 credit-cost preview', () => {
+  it('returns credits for a sync cost response', async () => {
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { credits: 60, credits_exact: 60 },
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    const a = new HiggsfieldCliAdapter();
+    (a as unknown as { resolvedBinary: string; resolveAttempted: boolean }).resolvedBinary = 'higgsfield';
+    (a as unknown as { resolvedBinary: string; resolveAttempted: boolean }).resolveAttempted = true;
+    const out = await a.estimateCost('seedance_2_0', { prompt: 'a sunrise' });
+    expect(out.credits).toBe(60);
+    expect(out.currency).toBe('credit');
+    spy.mockRestore();
+  });
+
+  it('builds the right argv: generate cost <model> --prompt <text> --json', async () => {
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { credits: 4 },
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    const a = new HiggsfieldCliAdapter();
+    (a as unknown as { resolvedBinary: string; resolveAttempted: boolean }).resolvedBinary = 'higgsfield';
+    (a as unknown as { resolvedBinary: string; resolveAttempted: boolean }).resolveAttempted = true;
+    await a.estimateCost('nano_banana_2', { prompt: 'a cat' });
+    const callArgs = spy.mock.calls[0][0] as CliInvokeOptions<unknown>;
+    expect(callArgs.args[0]).toBe('generate');
+    expect(callArgs.args[1]).toBe('cost');
+    expect(callArgs.args[2]).toBe('nano_banana_2');
+    expect(callArgs.args[3]).toBe('--json');
+    spy.mockRestore();
+  });
+
+  it('throws ProviderParseError on a non-numeric credits field', async () => {
+    const spy = vi.spyOn(cliUtils, 'cliInvoke').mockResolvedValueOnce({
+      parsed: { credits: 'sixty' }, // wrong type
+      stdout: '{}',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+    } as never);
+    const a = new HiggsfieldCliAdapter();
+    (a as unknown as { resolvedBinary: string; resolveAttempted: boolean }).resolvedBinary = 'higgsfield';
+    (a as unknown as { resolvedBinary: string; resolveAttempted: boolean }).resolveAttempted = true;
+    await expect(a.estimateCost('nano_banana_2', { prompt: 'a cat' })).rejects.toThrow();
+    spy.mockRestore();
+  });
+
+  it('throws ProviderUnavailableError when the CLI is not on PATH', async () => {
+    const a = new HiggsfieldCliAdapter();
+    (a as unknown as { resolvedBinary: string | null }).resolvedBinary = null;
+    (a as unknown as { resolveAttempted: boolean }).resolveAttempted = true;
+    await expect(a.estimateCost('nano_banana_2', { prompt: 'a cat' })).rejects.toThrow();
+  });
+});
