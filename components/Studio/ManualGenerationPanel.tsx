@@ -37,7 +37,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Sparkles, Image as ImageIcon, Film, Loader2, X, Check } from 'lucide-react'
-import { loadHiggsfieldSkillContent } from '@/lib/higgsfield/skills'
+import { loadSkillContentForModel } from '@/lib/actions/higgsfield-skills'
 import { useSettings } from '@/hooks/useSettings'
 import { type GeneratedImage } from '@/types/mashup'
 import {
@@ -380,17 +380,14 @@ export function ManualGenerationPanel({ onImageGenerated }: { onImageGenerated?:
           if (cliToken) body.higgsfieldCliToken = cliToken
           // V1.4.3-MANUAL-SKILLS: in manual mode (Studio panel),
           // the pipeline's `activeSkills`-based skill injection
-          // doesn't run. Look up the model's skill binding in the
-          // unified registry and prepend the skill content directly
-          // to the prompt so the CLI gets the same quality boost.
+          // doesn't run. The skill files live on the server's disk,
+          // so a Server Action resolves the binding + content
+          // (loading them here would pull node:fs into the client
+          // bundle — the v1.4.4 Turbopack build break).
           try {
-            const { getImageModel } = await import('@/lib/image-models')
-            const unifiedModel = getImageModel(`higgsfield:${modelId}`)
-            if (unifiedModel?.skillBinding) {
-              const skillContent = loadHiggsfieldSkillContent(unifiedModel.skillBinding)
-              if (skillContent) {
-                body.prompt = `${skillContent}\n\n---\n\n# Idea to render\n\n${body.prompt}`
-              }
+            const skillContent = await loadSkillContentForModel(`higgsfield:${modelId}`)
+            if (skillContent) {
+              body.prompt = `${skillContent}\n\n---\n\n# Idea to render\n\n${body.prompt}`
             }
           } catch {
             // Non-fatal — proceed with the raw prompt if the
