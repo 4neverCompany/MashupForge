@@ -116,6 +116,10 @@ New tool: `job_lookup` (11th in `AGENT_TOOLS`).
   images (fire-and-forget virality/cost calls didn't regress it)
 
 ---
+## [1.4.0] — 2026-06-09
+
+_Internal-only release; no user-facing changes since v1.3.8._
+
 ## [1.3.8] — 2026-06-09
 
 _Internal-only release; no user-facing changes since v1.3.7._
