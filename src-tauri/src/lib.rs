@@ -886,6 +886,15 @@ pub fn run() {
         // the IndexedDB origin pin (STORY-121). See lib.rs:622+ for
         // the sidecar-kill handler this triggers.
         .plugin(tauri_plugin_process::init())
+        // V1.4.5: tauri-plugin-fs backs the JS @tauri-apps/plugin-fs
+        // calls in lib/images/storage.ts (file-per-image persistence)
+        // and lib/backup/images.ts (auto-backup + salt backup). The
+        // v1.4.4 mega-release shipped the JS side without registering
+        // the Rust plugin, so every call rejected inside its
+        // try/catch — persist/export/restore silently did nothing.
+        // Scopes live in capabilities/default.json ($APPDATA, the
+        // Documents backup folder, and the config.json salt path).
+        .plugin(tauri_plugin_fs::init())
         // V1.1.2-SINGLE-INSTANCE: tauri-plugin-single-instance routes
         // a second launch (e.g. an OS-handled `mashupforge://oauth/callback`
         // click) to the running instance instead of spawning a fresh

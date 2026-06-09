@@ -31,6 +31,24 @@
     "store:default",
     "process:default",
     "process:allow-restart",
-    "deep-link:default"
+    "deep-link:default",
+    "fs:default",
+    "fs:allow-mkdir",
+    "fs:allow-write-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-text-file",
+    "fs:allow-stat",
+    "fs:allow-remove",
+    "fs:allow-read-dir",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**" },
+        { "path": "$DOCUMENT/MashupForge Backups" },
+        { "path": "$DOCUMENT/MashupForge Backups/**" },
+        { "path": "$CONFIG/MashupForge/config.json" }
+      ]
+    }
   ]
 }
