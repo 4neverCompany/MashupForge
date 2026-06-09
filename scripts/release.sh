@@ -102,6 +102,44 @@ if [ -z "${prev_tag}" ]; then
 fi
 echo "Generating changelog since ${prev_tag}..."
 
+# ── V1.4.5: skip empty releases ─────────────────────────────────────────────
+# 8 of the 10 releases on 2026-06-09 were "Internal-only; no user-facing
+# changes" — each one made every desktop user download an update for
+# nothing. If there are no releasable commits (feat/fix/refactor/perf/
+# docs/test) since the previous tag, abort. Override with
+# ALLOW_EMPTY_RELEASE=1 for a deliberate re-ship (e.g. CI/builder fix).
+releasable="$(git log "${prev_tag}..HEAD" --no-merges --pretty='%s' \
+  | grep -E '^(feat|fix|refactor|perf|docs|test)(\([^)]+\))?:' \
+  | grep -Ev '^[a-z]+\((release|changelog)\)' \
+  || true)"
+if [ -z "${releasable}" ] && [ "${ALLOW_EMPTY_RELEASE:-0}" != "1" ]; then
+  echo "ABORT: no releasable commits since ${prev_tag} (only chore/ci/build/style)."
+  echo "       Nothing user-facing to ship — skipping the release."
+  echo "       Set ALLOW_EMPTY_RELEASE=1 to force (e.g. for a CI-only re-ship)."
+  exit 1
+fi
+
+# ── V1.4.5: changelog dedupe ────────────────────────────────────────────
+# CHANGELOG.md ended up with `## [1.4.4]` three times and `## [1.3.4]`
+# twice: tag+push are left to the operator, so re-running the script
+# before the tag existed re-inserted the same block. The documented
+# re-run flow (backfilling a highlights file) must keep working, so on
+# re-run we REMOVE the existing block for this version first and then
+# insert the regenerated one — idempotent instead of duplicating.
+if grep -qE "^## \\[${VERSION}\\]" CHANGELOG.md; then
+  echo "Heading ## [${VERSION}] already in CHANGELOG.md — replacing it (re-run)."
+  dedup_tmp="$(mktemp)"
+  awk -v ver="${VERSION}" '
+    BEGIN { skip = 0 }
+    /^## / {
+      if ($0 ~ ("^## \\\\[" ver "\\\\]")) { skip = 1; next }
+      skip = 0
+    }
+    skip == 0 { print }
+  ' CHANGELOG.md > "${dedup_tmp}"
+  mv "${dedup_tmp}" CHANGELOG.md
+fi
+
 block="$(mktemp)"
 trap 'rm -f "${block}"' EXIT
 
