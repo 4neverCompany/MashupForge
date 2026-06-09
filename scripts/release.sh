@@ -4,12 +4,33 @@
 
 set -euo pipefail
 
-VERSION="${1:?Usage: ./scripts/release.sh <version> (e.g. 0.7.2)}"
+VERSION="${1:?Usage: ./scripts/release.sh <version> [--force] (e.g. 0.7.2)}"
+FORCE="${2:-}"
 TAG="v${VERSION}"
 DATE="$(date -u +%Y-%m-%d)"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+
+# ── Empty-bump guard ─────────────────────────────────────────────────────────
+# 8 of the 10 releases between v1.3.3 and v1.4.3 were version bumps with
+# ZERO real commits since the previous tag — each one cost a ~20 min Tauri
+# CI run and an "Internal-only release; no user-facing changes" entry in
+# the public release list. Refuse to cut a release when nothing changed.
+# `--force` overrides (e.g. re-cutting a release whose build infra failed).
+guard_prev_tag="$(git tag --list 'v*' --sort=-version:refname | head -n 1 || true)"
+if [ -n "${guard_prev_tag}" ] && [ "${FORCE}" != "--force" ]; then
+  real_commits="$(git log "${guard_prev_tag}..HEAD" --no-merges --pretty='%s' \
+    | grep -Evc '^(chore\(release\)|chore\(changelog\)|docs\(changelog\))' || true)"
+  if [ "${real_commits}" -eq 0 ]; then
+    echo "ERROR: No real commits since ${guard_prev_tag} — refusing to cut an empty release." >&2
+    echo "       To verify CI health without a release, use:" >&2
+    echo "         gh workflow run tauri-windows.yml" >&2
+    echo "       To force anyway: ./scripts/release.sh ${VERSION} --force" >&2
+    exit 1
+  fi
+  echo "Empty-bump guard: ${real_commits} real commit(s) since ${guard_prev_tag} — proceeding."
+fi
 
 echo "Bumping to ${VERSION}..."
 
