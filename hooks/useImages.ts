@@ -134,7 +134,7 @@ export function useImages() {
   // localStorage; the load path migrates localStorage → IDB on next
   // session start. Mirrors the useSettings beforeunload flush.
   //
-  // V1.4.4-DATALOSS-FIX: the v1.2.6-HOTFIX gated this listener on
+  // V1.4.4-DATALOSS-FIX: the v1.2.7-HOTFIX gated this listener on
   // `loadTriggered` to avoid the v1.2.5 bug (writing the initial
   // in-memory `[]` on first navigation). But the gate ALSO killed
   // the safety net for the common case: user generates an image in

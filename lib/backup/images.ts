@@ -1,5 +1,13 @@
 import { get, set } from '@/lib/persistence'
 import { type GeneratedImage } from '@/types/mashup'
+import pkg from '@/package.json'
+
+/**
+ * Backup metadata stamps the app version that wrote it. Derived from
+ * package.json — was hardcoded '1.3.1' until v1.4.5, which made every
+ * backup claim it came from v1.3.1 regardless of the actual version.
+ */
+const APP_VERSION = pkg.version
 
 const BACKUP_KEY = 'mashup_saved_images_backup'
 const BACKUP_METADATA_KEY = 'mashup_saved_images_backup_meta'
@@ -20,10 +28,13 @@ function isTauriWithFS(): boolean {
 async function getBackupDir(): Promise<string | null> {
   if (!isTauriWithFS()) return null
   try {
-    const { appDataDir } = await import('@tauri-apps/api/path')
-    const baseDir = await appDataDir()
-    const { join } = await import('@tauri-apps/api/path')
-    return await join(baseDir, '..', 'Documents', 'MashupForge Backups')
+    // The user's real Documents folder. The pre-v1.4.5 code resolved
+    // `appDataDir()/../Documents/...`, which on Windows lands in
+    // `%APPDATA%\Roaming\Documents\...` — a folder that doesn't exist
+    // and isn't where a user would ever look for their backups.
+    const { documentDir, join } = await import('@tauri-apps/api/path')
+    const baseDir = await documentDir()
+    return await join(baseDir, 'MashupForge Backups')
   } catch { return null }
 }
 
@@ -61,7 +72,7 @@ export async function autoBackupImages(images: GeneratedImage[]): Promise<void> 
   if (images.length === 0) return
   const metadata: BackupMetadata = {
     timestamp: Date.now(),
-    version: '1.3.1',
+    version: APP_VERSION,
     imageCount: images.length,
     source: 'auto',
   }
@@ -82,10 +93,15 @@ export async function autoBackupImages(images: GeneratedImage[]): Promise<void> 
  */
 export async function backupHiggsfieldSalt(): Promise<void> {
   try {
-    const { readTextFile } = await import('@tauri-apps/plugin-fs')
-    const { appDataDir, join } = await import('@tauri-apps/api/path')
-    const appDir = await appDataDir()
-    const configPath = await join(appDir, '..', 'config.json')
+    // lib/desktop-env.ts writes config.json to
+    // `%APPDATA%\MashupForge\config.json` (i.e. $CONFIG/MashupForge/
+    // in Tauri path terms — note: the brand dir, NOT the app
+    // identifier dir). The pre-v1.4.5 code read `appDataDir()/../
+    // config.json`, a path nothing ever writes to, so the salt
+    // backup silently never happened.
+    const { configDir, join } = await import('@tauri-apps/api/path')
+    const baseDir = await configDir()
+    const configPath = await join(baseDir, 'MashupForge', 'config.json')
     const configContent = await (await import('@tauri-apps/plugin-fs')).readTextFile(configPath)
     const config = JSON.parse(configContent)
     const salt = config[SALT_CONFIG_KEY] || config['HIGGSFIELD_OAUTH_SALT']
@@ -105,7 +121,7 @@ export async function exportImagesToFile(images: GeneratedImage[]): Promise<bool
   if (typeof window === 'undefined') return false
   try {
     const json = JSON.stringify(
-      { images, exportedAt: new Date().toISOString(), version: '1.3.1' },
+      { images, exportedAt: new Date().toISOString(), version: APP_VERSION },
       null,
       2,
     )
@@ -125,9 +141,11 @@ export async function exportImagesToFile(images: GeneratedImage[]): Promise<bool
 }
 
 /**
- * Restore images from a user-picked JSON file. The file is selected
- * via a hidden file input. Validates the shape, merges with existing
- * images (newer wins, dedupe by `id`), and writes back to the store.
+ * Parse and validate images from a user-picked JSON backup file.
+ * Returns only the entries that pass the shape check — it does NOT
+ * merge or write anything. The caller merges into the store
+ * (HiggsfieldConnection's handleImport: dedupe by `id`, imported
+ * entries overwrite existing ones with the same id).
  */
 export async function importImagesFromFile(file: File): Promise<GeneratedImage[]> {
   try {
