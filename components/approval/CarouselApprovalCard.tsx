@@ -17,6 +17,7 @@ import { CarouselThumbnailStrip } from './CarouselThumbnailStrip';
 import { CarouselReviewPanel } from './CarouselReviewPanel';
 import { DegradeNotice } from './DegradeNotice';
 import { InlineCaptionEditor } from './InlineCaptionEditor';
+import { ViralityBadge } from './ViralityBadge';
 import { canRejectMoreInCarousel } from '@/lib/carousel-degrade-guard';
 import {
   GHOST_TTL_MS,
@@ -248,7 +249,13 @@ export function CarouselApprovalCard({
             Carousel · {images.length}
           </span>
         </span>
-        <CarouselStatusPill {...counts} />
+        <div className="flex items-center gap-2">
+          {/* V1.3: virality score badge — all posts in a carousel share the same score */}
+          {posts[0]?.viralityScore != null && (
+            <ViralityBadge score={posts[0].viralityScore} />
+          )}
+          <CarouselStatusPill {...counts} />
+        </div>
       </div>
 
       {!expanded && (

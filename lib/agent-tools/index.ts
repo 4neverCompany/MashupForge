@@ -33,6 +33,9 @@ import { persistAssetTool, executePersistAsset, toGeneratedImage, upsertImage, m
 // array; the model decides when to call it after a generate_image
 // (e.g. for a consistency check before persist_asset).
 import { m3VisionDescribeTool, executeM3VisionDescribe } from './m3-vision-describe';
+// V1.3: virality score — brain_activity model scores a post's
+// predicted engagement when it enters the approval queue.
+import { viralityPredictTool, executeViralityPredict } from './virality-predict';
 
 // ---------------------------------------------------------------------------
 // Schemas (re-export so consumers can re-use them in tests / route validation)
@@ -70,6 +73,11 @@ export {
   IMAGE_SETTINGS_DEFAULTS,
   VIDEO_SETTINGS_DEFAULTS,
 } from './schemas';
+// V1.3: virality prediction schemas (defined in virality-predict.ts)
+export {
+  zViralityPredictInput,
+  zViralityPredictOutput,
+} from './virality-predict';
 
 // Inferred TYPES (use in function signatures, return types, etc.).
 // The `type` keyword on the export tells `isolatedModules` that this
@@ -102,6 +110,8 @@ export type {
   M3VisionDescribeInput,
   M3VisionDescribeOutput,
 } from './schemas';
+// V1.3: virality prediction types (defined in virality-predict.ts)
+export type { ViralityPredictInput, ViralityPredictOutput } from './virality-predict';
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -142,6 +152,9 @@ export {
   // V1.2.6
   m3VisionDescribeTool,
   executeM3VisionDescribe,
+  // V1.3
+  viralityPredictTool,
+  executeViralityPredict,
 };
 
 // Pure helpers re-exported for unit tests + non-SDK callers.
@@ -175,6 +188,11 @@ export const AGENT_TOOLS = [
   // image/video→persist flow. The model opts in to vision
   // feedback by calling m3_vision_describe explicitly.
   m3VisionDescribeTool,
+  // V1.3: virality — scores a post when it enters the approval
+  // queue. The Director loop calls this automatically on
+  // pending_approval transition; the model can also call it
+  // explicitly to re-score.
+  viralityPredictTool,
 ] as unknown as Tool[];
 
 // ---------------------------------------------------------------------------
@@ -210,6 +228,7 @@ export function describeAgentTools(): Array<{ name: string; description: string;
       if (t === generateVideoTool) return 'generate_video';
       if (t === persistAssetTool) return 'persist_asset';
       if (t === m3VisionDescribeTool) return 'm3_vision_describe';
+      if (t === viralityPredictTool) return 'virality_predict';
       return 'unknown';
     })();
     return { name, description: desc, hasInputSchema: hasInput, hasOutputSchema: hasOutput };

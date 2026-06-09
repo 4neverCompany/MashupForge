@@ -25,6 +25,7 @@ import {
   type DesktopCredentialFlags,
   type PipelinePlatform,
 } from '@/lib/platform-credentials';
+import { executeViralityPredict } from '@/lib/agent-tools/virality-predict';
 
 /** Typed replacement for the __SKIP_IDEA__ string sentinel. */
 export class SkipIdeaSignal extends Error {
@@ -460,6 +461,18 @@ export async function processIdea(
           carouselGroupId: groupId,
           sourceIdeaId: idea.id,
         }));
+        // V1.3: compute virality score for the carousel's shared caption.
+        // Compute once and stamp on all posts in the group.
+        if (carouselStatus === 'pending_approval' && sharedCaption) {
+          try {
+            const scoreResult = await executeViralityPredict({ prompt: sharedCaption });
+            if (scoreResult.ok) {
+              for (const p of newPosts) p.viralityScore = scoreResult.value.score;
+            }
+          } catch {
+            // virality computation failed — leave viralityScore undefined
+          }
+        }
         accumulatedPosts.push(...newPosts);
         updateSettings((prev) => ({
           scheduledPosts: [...(prev.scheduledPosts || []), ...newPosts],
@@ -615,6 +628,22 @@ export async function processIdea(
             ),
             sourceIdeaId: idea.id,
           };
+          // V1.3: compute virality score when post enters pending_approval.
+          // Fire-and-forget — we do NOT await this call so the
+          // pipeline doesn't block on a synchronous text-generation
+          // round-trip. The score lands on the post record a few
+          // seconds later; the UI shows a "computing…" placeholder
+          // until the score arrives, then updates via the settings
+          // subscription. A failed score leaves the field undefined
+          // and the badge hidden — non-fatal.
+          if (newPost.status === 'pending_approval' && newPost.caption) {
+            const caption = newPost.caption;
+            void executeViralityPredict({ prompt: caption }).then((r) => {
+              if (r.ok) {
+                newPost.viralityScore = r.value.score;
+              }
+            });
+          }
           accumulatedPosts.push(newPost);
           updateSettings((prev) => ({
             scheduledPosts: [...(prev.scheduledPosts || []), newPost],

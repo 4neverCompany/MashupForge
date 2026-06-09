@@ -97,6 +97,7 @@ describe('registry.getProvider', () => {
   it('exposes the full list of built-in provider ids', () => {
     expect(BUILTIN_PROVIDER_IDS).toEqual([
       'higgsfield',
+      'higgsfield-text',
       'mmx',
       'leonardo',
       'minimax-text',
@@ -129,6 +130,7 @@ describe('registry.listProviders', () => {
 describe('registry.getFirstAvailable', () => {
   it('returns the first available provider in priority order', async () => {
     __registerProvider('higgsfield', new FakeAdapter('higgsfield', false));
+    __registerProvider('higgsfield-text', new FakeAdapter('higgsfield-text', false));
     __registerProvider('mmx', new FakeAdapter('mmx', true));
     const p = await getFirstAvailable();
     expect(p!.name).toBe('mmx');
@@ -153,6 +155,7 @@ describe('registry.getFirstAvailable', () => {
 describe('registry.requireFirstAvailable', () => {
   it('returns the first available provider', async () => {
     __registerProvider('higgsfield', new FakeAdapter('higgsfield', false));
+    __registerProvider('higgsfield-text', new FakeAdapter('higgsfield-text', false));
     __registerProvider('leonardo', new FakeAdapter('leonardo', true));
     const p = await requireFirstAvailable();
     expect(p.name).toBe('leonardo');

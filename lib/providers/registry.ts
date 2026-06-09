@@ -22,6 +22,7 @@ import {
   ProviderUnavailableError,
 } from './interface';
 import { higgsfieldAdapter, HiggsfieldCliAdapter } from './higgsfield/cli-adapter';
+import { higgsfieldTextAdapter, HiggsfieldTextAdapter } from './higgsfield/text-adapter';
 import { leonardoAdapter, LeonardoHttpAdapter } from './leonardo/http-adapter';
 import { mmxAdapter, MmxCliAdapter } from './mmx/cli-adapter';
 import { minimaxTextAdapter, MinimaxTextAdapter } from './minimax/text-adapter';
@@ -38,6 +39,7 @@ import { minimaxVideoAdapter, MinimaxVideoAdapter } from './minimax/video-adapte
  */
 export const BUILTIN_PROVIDER_IDS = [
   'higgsfield',
+  'higgsfield-text',
   'mmx',
   'leonardo',
   'minimax-text',
@@ -70,6 +72,7 @@ export function setProviderRuntimeConfig(cfg: { higgsfieldCliToken?: string }): 
 
 const FACTORIES: Record<string, () => ProviderAdapter> = {
   higgsfield: () => new HiggsfieldCliAdapter({ cliToken: _runtimeConfig.higgsfieldCliToken }),
+  'higgsfield-text': () => new HiggsfieldTextAdapter({ cliToken: _runtimeConfig.higgsfieldCliToken }),
   mmx: () => new MmxCliAdapter(),
   leonardo: () => new LeonardoHttpAdapter(),
   'minimax-text': () => new MinimaxTextAdapter(),
@@ -222,6 +225,7 @@ export function __resetRegistry(): void {
 
 export {
   higgsfieldAdapter,
+  higgsfieldTextAdapter,
   leonardoAdapter,
   mmxAdapter,
   minimaxTextAdapter,

@@ -217,6 +217,13 @@ export interface ScheduledPost {
    * idea concept.
    */
   sourceIdeaId?: string;
+  /**
+   * V1.3: predicted virality score (0–100) computed by the
+   * Higgsfield brain_activity model when the post enters
+   * pending_approval. Null if the score hasn't been computed yet
+   * (e.g. posts created before v1.3 upgrade, or provider unavailable).
+   */
+  viralityScore?: number | null;
 }
 
 export interface UserSettings {
