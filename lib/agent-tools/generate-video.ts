@@ -27,6 +27,7 @@ import {
   getHiggsfieldVideoModel,
   type HiggsfieldVideoModelSlug,
 } from '@/lib/higgsfield/models';
+import { getProvider } from '@/lib/providers/registry';
 import { requireApproval } from '@/lib/agent-loop/hil';
 import { currentRunContext, bumpStepCounter } from '@/lib/agent-loop/run-context';
 
@@ -35,6 +36,9 @@ import { currentRunContext, bumpStepCounter } from '@/lib/agent-loop/run-context
 // ---------------------------------------------------------------------------
 
 type ProviderKind = 'higgsfield' | 'minimax' | 'leonardo' | 'openai' | 'mock';
+
+/** Shape of a Higgsfield `generate get` job record (subset we read). */
+type HiggsfieldJobRecord = { status?: string; result_url?: string; url?: string; error?: string };
 
 function detectProvider(model: string): ProviderKind {
   if (model.startsWith('higgsfield:')) return 'higgsfield';
@@ -65,11 +69,112 @@ async function generateMock(input: GenerateVideoInput): Promise<GenerateVideoOut
   });
 }
 
-async function generateHiggsfield(_input: GenerateVideoInput): Promise<GenerateVideoOutput> {
-  throw new ToolNotAvailableError(
+/**
+ * V1.5: Higgsfield video — wired to the CLI adapter. Most video models
+ * (seedance_2_0, veo3_1, …) generate asynchronously: `generate create`
+ * returns a job id and the URL lands later. We do a bounded inline poll
+ * via the adapter's getJobStatus (`higgsfield generate get <id>`) so the
+ * agent gets a finished URL in the common case; if it's still queued
+ * after the budget, we surface a retryable error so the agent can poll
+ * with job_lookup instead of blocking forever.
+ */
+async function generateHiggsfield(
+  input: GenerateVideoInput,
+  signal?: AbortSignal,
+): Promise<GenerateVideoOutput> {
+  const model = input.model.startsWith('higgsfield:')
+    ? input.model.slice('higgsfield:'.length)
+    : input.model;
+  const settings = { ...VIDEO_SETTINGS_DEFAULTS, ...(input.settings ?? {}) };
+
+  let adapter;
+  try {
+    adapter = getProvider('higgsfield');
+  } catch {
+    throw new ToolNotAvailableError(
+      'generate_video',
+      'higgsfield provider is not registered — check lib/providers/registry.ts',
+    );
+  }
+  if (!(await adapter.isAvailable())) {
+    throw new ToolNotAvailableError(
+      'generate_video',
+      'Higgsfield CLI is not available (the higgsfield/higgs binary is missing or '
+        + 'not authenticated). Run `higgsfield auth login`, or paste a CLI token in '
+        + 'Settings → Higgsfield.',
+    );
+  }
+
+  const ref = await adapter.generateVideo({
+    prompt: input.prompt,
+    model,
+    durationSec: settings.durationSec,
+    ...(signal ? { signal } : {}),
+  });
+
+  // Synchronous completion — return the URL directly.
+  if (ref.url) {
+    return zGenerateVideoOutput.parse({
+      assetRef: { provider: 'higgsfield', id: ref.jobId || ref.path || ref.url, url: ref.url },
+    });
+  }
+
+  // Async job — bounded poll. getJobStatus lives on the concrete CLI
+  // adapter (not the ProviderAdapter interface), accessed via the same
+  // cast pattern as cost_estimate / job_lookup.
+  const jobId = ref.jobId;
+  if (!jobId) {
+    throw new ToolExecutionError('generate_video', 'Higgsfield returned neither a URL nor a job id.', {
+      retryable: false,
+    });
+  }
+  const adapterAny = adapter as unknown as { getJobStatus?: (id: string) => Promise<unknown> };
+  if (typeof adapterAny.getJobStatus !== 'function') {
+    throw new ToolExecutionError(
+      'generate_video',
+      `Higgsfield returned async job ${jobId}; poll it with job_lookup.`,
+      { retryable: true },
+    );
+  }
+
+  const MAX_ATTEMPTS = 12;
+  const INTERVAL_MS = 5000;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (signal?.aborted) {
+      throw new ToolExecutionError('generate_video', 'aborted while polling Higgsfield job', {
+        retryable: false,
+      });
+    }
+    await new Promise((res) => setTimeout(res, INTERVAL_MS));
+    let record: HiggsfieldJobRecord | null = null;
+    try {
+      record = (await adapterAny.getJobStatus(jobId)) as HiggsfieldJobRecord | null;
+    } catch {
+      // Transient poll failure — keep trying until the attempt budget runs out.
+      continue;
+    }
+    const status = record?.status;
+    const resultUrl = record?.result_url || record?.url;
+    if (status === 'completed' && resultUrl) {
+      return zGenerateVideoOutput.parse({
+        assetRef: { provider: 'higgsfield', id: jobId, url: resultUrl },
+      });
+    }
+    if (status === 'failed') {
+      throw new ToolExecutionError(
+        'generate_video',
+        `Higgsfield job ${jobId} failed${record?.error ? `: ${record.error}` : ''}`,
+        { retryable: false },
+      );
+    }
+  }
+
+  // Still queued after the budget — let the agent poll explicitly.
+  throw new ToolExecutionError(
     'generate_video',
-    'Higgsfield video provider is not wired into lib/agent-tools/ yet — see v1.2.3 (ROADMAP). '
-      + 'Use the mock provider for now, or call /api/higgsfield/video directly.',
+    `Higgsfield job ${jobId} is still rendering after ${(MAX_ATTEMPTS * INTERVAL_MS) / 1000}s; `
+      + 'poll it with job_lookup({ action: "get", jobId }).',
+    { retryable: true },
   );
 }
 
@@ -183,7 +288,7 @@ export async function executeGenerateVideo(
         output = await generateMock(input);
         break;
       case 'higgsfield':
-        output = await generateHiggsfield(input);
+        output = await generateHiggsfield(input, opts.signal);
         break;
       case 'minimax':
         output = await generateMinimax(input);

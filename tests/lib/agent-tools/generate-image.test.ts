@@ -6,7 +6,7 @@
  * assert on the ToolNotAvailableError shape (the v1.2.3 PR
  * fleshes those out).
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   executeGenerateImage,
   generateImageTool,
@@ -18,8 +18,31 @@ import {
   ToolNotAvailableError,
 } from '@/lib/agent-tools/errors';
 import { HIGGSFIELD_IMAGE_MODELS, getHiggsfieldImageModel } from '@/lib/higgsfield/models';
+import { __registerProvider, __resetRegistry } from '@/lib/providers/registry';
+import type { AssetRef, ProviderAdapter } from '@/lib/providers/interface';
 
 const validPrompt = 'A long enough prompt to satisfy the min-20 validation gate.';
+
+/**
+ * V1.5: deterministic Higgsfield adapter stand-in so the wired tests
+ * don't depend on whether the real CLI binary is on the test machine's
+ * PATH. `available:false` exercises the not-available path; `image`
+ * sets the AssetRef the (available) generateImage returns.
+ */
+function mockHiggsfield(opts: { available: boolean; image?: Partial<AssetRef> }): ProviderAdapter {
+  return {
+    name: 'higgsfield',
+    label: 'Higgsfield (mock)',
+    isAvailable: async () => opts.available,
+    generateImage: async () =>
+      ({ kind: 'image', provider: 'higgsfield', ...opts.image }) as AssetRef,
+    generateVideo: async () => ({ kind: 'video', provider: 'higgsfield' }) as AssetRef,
+  };
+}
+
+afterEach(() => {
+  __resetRegistry();
+});
 
 describe('executeGenerateImage — input validation', () => {
   it('rejects when model is missing', async () => {
@@ -59,13 +82,41 @@ describe('executeGenerateImage — provider dispatch', () => {
     }
   });
 
-  it('higgsfield provider throws ToolNotAvailableError (until v1.2.3)', async () => {
+  it('higgsfield provider throws ToolNotAvailableError when the CLI is unavailable', async () => {
+    __registerProvider('higgsfield', mockHiggsfield({ available: false }));
     const r = await executeGenerateImage({
       model: 'nano_banana_2',
       prompt: validPrompt,
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toBeInstanceOf(ToolNotAvailableError);
+  });
+
+  it('V1.5: higgsfield provider returns the AssetRef when the CLI is available', async () => {
+    __registerProvider(
+      'higgsfield',
+      mockHiggsfield({ available: true, image: { url: 'https://cdn.higgsfield.ai/img/abc.png', jobId: 'job-abc' } }),
+    );
+    const r = await executeGenerateImage({
+      model: 'nano_banana_2',
+      prompt: validPrompt,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.assetRef.provider).toBe('higgsfield');
+      expect(r.value.assetRef.url).toBe('https://cdn.higgsfield.ai/img/abc.png');
+      expect(r.value.assetRef.id).toBe('job-abc');
+    }
+  });
+
+  it('V1.5: higgsfield surfaces a retryable error when generation returns an async job (no url)', async () => {
+    __registerProvider(
+      'higgsfield',
+      mockHiggsfield({ available: true, image: { jobId: 'job-xyz' } }),
+    );
+    const r = await executeGenerateImage({ model: 'nano_banana_2', prompt: validPrompt });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBeInstanceOf(ToolExecutionError);
   });
 
   it('minimax provider throws ToolNotAvailableError', async () => {
@@ -130,11 +181,12 @@ describe('executeGenerateImage — settings validation', () => {
     if (!r.ok) expect(r.error).toBeInstanceOf(ValidationError);
   });
 
-  it('routes an unknown model slug to the higgsfield provider, surfacing ToolNotAvailableError', async () => {
-    // The dispatcher doesn't know any `higgsfield:*` model that
-    // isn't in the catalog yet; it falls through to the
-    // generateHiggsfield stub which throws ToolNotAvailableError
-    // (v1.2.3 will replace this with a real call).
+  it('routes an unknown higgsfield:* slug to the higgsfield provider (unavailable → ToolNotAvailableError)', async () => {
+    // The dispatcher routes any `higgsfield:*` slug to the
+    // Higgsfield provider. With the CLI unavailable, that surfaces
+    // ToolNotAvailableError — proving the routing without depending
+    // on the real binary.
+    __registerProvider('higgsfield', mockHiggsfield({ available: false }));
     const r = await executeGenerateImage({
       model: 'higgsfield:nonexistent',
       prompt: validPrompt,

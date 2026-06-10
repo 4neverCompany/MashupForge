@@ -40,6 +40,7 @@ import {
   getHiggsfieldImageModel,
   type HiggsfieldImageModelSlug,
 } from '@/lib/higgsfield/models';
+import { getProvider } from '@/lib/providers/registry';
 import { requireApproval } from '@/lib/agent-loop/hil';
 import { currentRunContext, bumpStepCounter } from '@/lib/agent-loop/run-context';
 
@@ -111,15 +112,71 @@ async function generateMock(
   });
 }
 
-/** Stub for the Higgsfield provider path. Throws until v1.2.3 lands. */
+/**
+ * V1.5: Higgsfield provider path — wired to the CLI adapter
+ * (lib/providers/higgsfield/cli-adapter.ts) via the registry. Images
+ * generate synchronously on Higgsfield, so a successful call returns
+ * an AssetRef with a URL. The agent loop can now actually generate
+ * images through Higgsfield's CLI (this was a `throw` stub before).
+ */
 async function generateHiggsfield(
-  _input: GenerateImageInput,
+  input: GenerateImageInput,
+  signal?: AbortSignal,
 ): Promise<GenerateImageOutput> {
-  throw new ToolNotAvailableError(
-    'generate_image',
-    'Higgsfield provider is not wired into lib/agent-tools/ yet — see v1.2.3 (ROADMAP). '
-      + 'Use the mock provider for now, or call /api/higgsfield/image directly.',
-  );
+  // The catalog uses bare slugs ("nano_banana_2"); strip the optional
+  // "higgsfield:" namespace the tool schema may carry.
+  const model = input.model.startsWith('higgsfield:')
+    ? input.model.slice('higgsfield:'.length)
+    : input.model;
+  const settings = { ...IMAGE_SETTINGS_DEFAULTS, ...(input.settings ?? {}) };
+
+  let adapter;
+  try {
+    adapter = getProvider('higgsfield');
+  } catch {
+    throw new ToolNotAvailableError(
+      'generate_image',
+      'higgsfield provider is not registered — check lib/providers/registry.ts',
+    );
+  }
+  if (!(await adapter.isAvailable())) {
+    throw new ToolNotAvailableError(
+      'generate_image',
+      'Higgsfield CLI is not available (the higgsfield/higgs binary is missing or '
+        + 'not authenticated). Run `higgsfield auth login`, or paste a CLI token in '
+        + 'Settings → Higgsfield.',
+    );
+  }
+
+  const ref = await adapter.generateImage({
+    prompt: input.prompt,
+    model,
+    aspectRatio: settings.aspectRatio,
+    ...(signal ? { signal } : {}),
+  });
+
+  // Images are synchronous — a successful call carries a URL. If we got
+  // an async job instead (no url), surface a retryable error so the
+  // agent polls via job_lookup rather than fabricating a URL to satisfy
+  // the schema.
+  const url = ref.url;
+  if (!url) {
+    throw new ToolExecutionError(
+      'generate_image',
+      ref.jobId
+        ? `Higgsfield returned an async job (${ref.jobId}) instead of an image URL; poll it with job_lookup.`
+        : 'Higgsfield returned no image URL.',
+      { retryable: Boolean(ref.jobId) },
+    );
+  }
+
+  return zGenerateImageOutput.parse({
+    assetRef: {
+      provider: 'higgsfield',
+      id: ref.jobId || ref.path || url,
+      url,
+    },
+  });
 }
 
 async function generateMinimax(_input: GenerateImageInput): Promise<GenerateImageOutput> {
@@ -239,7 +296,7 @@ export async function executeGenerateImage(
         output = await generateMock(input);
         break;
       case 'higgsfield':
-        output = await generateHiggsfield(input);
+        output = await generateHiggsfield(input, opts.signal);
         break;
       case 'minimax':
         output = await generateMinimax(input);

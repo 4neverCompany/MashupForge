@@ -4,7 +4,7 @@
  * Mirrors the structure of `generate-image.test.ts` — provider
  * dispatch + per-model duration caps + settings validation.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   executeGenerateVideo,
   generateVideoTool,
@@ -16,8 +16,43 @@ import {
   ToolExecutionError,
 } from '@/lib/agent-tools/errors';
 import { HIGGSFIELD_VIDEO_MODELS } from '@/lib/higgsfield/models';
+import { __registerProvider, __resetRegistry } from '@/lib/providers/registry';
+import type { AssetRef, ProviderAdapter } from '@/lib/providers/interface';
 
 const validPrompt = 'A long enough prompt to satisfy the min-20 validation gate.';
+
+/**
+ * V1.5: deterministic Higgsfield video adapter stand-in so the wired
+ * tests don't depend on the real CLI binary being on PATH. The default
+ * (registered in beforeEach) is UNAVAILABLE so the pre-existing dispatch
+ * tests still surface ToolNotAvailableError on every machine.
+ */
+function mockHiggsfieldVideo(opts: {
+  available: boolean;
+  video?: Partial<AssetRef>;
+  jobStatus?: { status?: string; result_url?: string; error?: string };
+}): ProviderAdapter & { getJobStatus?: (id: string) => Promise<unknown> } {
+  return {
+    name: 'higgsfield',
+    label: 'Higgsfield (mock)',
+    isAvailable: async () => opts.available,
+    generateImage: async () => ({ kind: 'image', provider: 'higgsfield' }) as AssetRef,
+    generateVideo: async () =>
+      ({ kind: opts.video?.url ? 'video' : 'job', provider: 'higgsfield', ...opts.video }) as AssetRef,
+    getJobStatus: async () => opts.jobStatus ?? { status: 'queued' },
+  };
+}
+
+beforeEach(() => {
+  // Default: CLI unavailable. Individual tests override with an
+  // available mock when they exercise the wired success/poll paths.
+  __registerProvider('higgsfield', mockHiggsfieldVideo({ available: false }));
+});
+
+afterEach(() => {
+  __resetRegistry();
+  vi.useRealTimers();
+});
 
 describe('executeGenerateVideo — input validation', () => {
   it('rejects when model is missing', async () => {
@@ -74,6 +109,56 @@ describe('executeGenerateVideo — provider dispatch', () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toBeInstanceOf(ToolNotAvailableError);
+  });
+});
+
+describe('V1.5: executeGenerateVideo — wired Higgsfield CLI', () => {
+  it('returns the AssetRef directly when generation completes synchronously', async () => {
+    __registerProvider(
+      'higgsfield',
+      mockHiggsfieldVideo({ available: true, video: { url: 'https://cdn.higgsfield.ai/vid/abc.mp4' } }),
+    );
+    const r = await executeGenerateVideo({ model: 'seedance_2_0', prompt: validPrompt });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.assetRef.provider).toBe('higgsfield');
+      expect(r.value.assetRef.url).toBe('https://cdn.higgsfield.ai/vid/abc.mp4');
+    }
+  });
+
+  it('polls an async job and returns the result URL when it completes', async () => {
+    vi.useFakeTimers();
+    __registerProvider(
+      'higgsfield',
+      mockHiggsfieldVideo({
+        available: true,
+        video: { jobId: 'job-async-1' },
+        jobStatus: { status: 'completed', result_url: 'https://cdn.higgsfield.ai/vid/done.mp4' },
+      }),
+    );
+    const promise = executeGenerateVideo({ model: 'seedance_2_0', prompt: validPrompt });
+    // Advance past the first 5s poll interval.
+    await vi.advanceTimersByTimeAsync(6000);
+    const r = await promise;
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.assetRef.url).toBe('https://cdn.higgsfield.ai/vid/done.mp4');
+  });
+
+  it('surfaces a retryable error when an async job fails', async () => {
+    vi.useFakeTimers();
+    __registerProvider(
+      'higgsfield',
+      mockHiggsfieldVideo({
+        available: true,
+        video: { jobId: 'job-async-2' },
+        jobStatus: { status: 'failed', error: 'content policy' },
+      }),
+    );
+    const promise = executeGenerateVideo({ model: 'seedance_2_0', prompt: validPrompt });
+    await vi.advanceTimersByTimeAsync(6000);
+    const r = await promise;
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBeInstanceOf(ToolExecutionError);
   });
 });
 
