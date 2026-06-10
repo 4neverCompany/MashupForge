@@ -438,6 +438,12 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
           }
           setComparisonResults(prev => prev.map(img => img.id === placeholders[i].id ? newImg : img));
           readyImages.push(newImg);
+          // V1.7.0-PROVIDER-LOG: report the provider that actually produced
+          // this image so the pipeline timeline can name it live. Swallow
+          // consumer throws so a bad listener can't break the loop.
+          try {
+            options?.onModelSuccess?.(modelId, modelName, submitProvider);
+          } catch { /* ignore consumer-side throw */ }
         } catch (imgErr: unknown) {
           // Surface the failure on the placeholder instead of silently
           // dropping it (the prior catch{} just filtered the placeholder
