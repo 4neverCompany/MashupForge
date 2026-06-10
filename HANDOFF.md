@@ -884,5 +884,75 @@ NICHT in v1.1.2 — das ist v1.2-Scope.
 
 ---
 
+## §21 — Fast-Forward v1.4.4 → v1.6.0 (Stand 2026-06-11) — WO WIR JETZT SIND
+
+> §0–§20 oben beschreiben den Stand bis v1.1.2 und sind als Architektur-
+> Referenz weiter gültig, aber NICHT mehr der Projektstand. Hier der
+> Schnellvorlauf:
+
+**Produktionsstand: v1.6.0** (published Latest, 2026-06-10). Updater
+funktioniert; Release-Pipeline läuft wieder durch.
+
+- **v1.4.4** — getaggt, aber nie published (Tauri-Build 6× rot:
+  Turbopack-Break + npm-ci-ohne-Lockfile).
+- **v1.4.5** — Recovery-Release: Tauri-`fs`-Plugin registriert
+  (file-per-image Storage, Auto-Backups nach `Documents\MashupForge
+  Backups`, Restore), CI von package-lock.json entkoppelt,
+  jsdom-Test-Env restauriert, release.sh skippt leere Releases.
+- **v1.4.6** — Datenverlust-ROOT-CAUSE gefixt (useImages Debounce-Write
+  auf loadTriggered+Dirty-Flag gated, Merge-on-Load) + Windows
+  Command-Injection-Härtung (cmd.exe-Escaping statt shell:true) +
+  cli-auth EINVAL-Fix. Quelle: externes Review, umgesetzt via PR #59.
+- **v1.4.7** — derselbe Wipe-Vektor in useSettings / useComparison /
+  useIdeas geschlossen ("Reload frisst Watermark" endgültig tot).
+- **v1.5.0** — Agentic Tools: die AI kann Tools aufrufen (Higgsfield-
+  Generation im Agent-Loop), Trending überarbeitet, lokale Saves +
+  Watermark-Re-Apply.
+- **v1.5.1** — Director-Pipeline (Trend-Search → Draft → Self-Critique
+  → Refine) als Opt-in.
+- **v1.5.2** — Higgsfield-CLI wird im Installer mitgeliefert (zero setup).
+- **v1.6.0** — **M2**: Director ist DEFAULT-Pipeline-Pfad, mit
+  Guardrails aus 17-Agent-Adversarial-Review (Kosten-Caps $0.50/Run,
+  3/4-min-Timeouts, Skip-Abort, Plausibilitäts-Gate). Trending läuft
+  über Serper.dev (Fallback Brave → DDG); authentifizierte CLI zählt
+  als "connected". Tests: 2037 passed / 14 skipped, tsc+cargo clean.
+
+**Milestone-Zählung:** M1 = PR #65 (Pipeline/Higgsfield-Bugfixes),
+M2 = PR #66 (Director-Default). **Nächster Meilenstein: M3.**
+
+## §22 — ROADMAP (Stand 2026-06-11)
+
+### Jetzt (M3)
+
+1. **Deferred Finding aus dem v1.6.0-Adversarial-Review:** 1 bestätigtes
+   Finding mit "seconds-wide trigger window" wurde explizit auf M3
+   verschoben (siehe docs/changelog-highlights/1.6.0.md, Test summary).
+   Das Finding ist NIRGENDS als Issue dokumentiert — zuerst
+   rekonstruieren (PR-#66-Review-Artefakte) und als Issue anlegen.
+2. **PR-Triage:** #67 Vercel Web Analytics (neu, reviewen),
+   ~9 Dependabot-Bumps (Tauri-Crates + GitHub-Actions, teils seit
+   02.06. offen — mergen oder schließen), #29 alter CI-Fix und #11
+   (vermutlich obsolet — prüfen + schließen).
+
+### Als Nächstes
+
+3. **Roadmap-Prozess:** Meilensteine/Findings als GitHub-Issues +
+   Milestones pflegen statt nur in PR-Texten/Agent-Sessions — dieses
+   Dokument bei jedem Release um einen §-Eintrag ergänzen (oder per
+   release.sh-Hook erzwingen).
+4. **README-Release-Tabelle** vom Release-Script pflegen lassen
+   (`lib/release-history.ts` existiert dafür bereits).
+
+### Später / Kandidaten
+
+5. **Tombstone-Merge:** deleteImage während eines in-flight Loads kann
+   durch den byId-Union-Merge "auferstehen" (bekannte Rest-Lücke aus
+   v1.4.6, sehr unwahrscheinliches Timing).
+6. **Installer-/Updater-Robustheit:** NSIS-Hang-Historie (§14.1) und
+   WebView2Loader-Bundling gelegentlich neu bewerten.
+7. **Headless-Smoke-Test-Strategie** für die Tauri-Builds (§14.5).
+
+---
+
 *— end of handoff. You have the full picture. Build something good. —*
 
