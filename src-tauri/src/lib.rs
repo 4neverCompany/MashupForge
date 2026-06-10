@@ -1133,6 +1133,42 @@ pub fn run() {
                 .stdout(Stdio::from(sidecar_log_file))
                 .stderr(Stdio::from(sidecar_log_file_err));
 
+            // V1.6: bundled Higgsfield CLI (Windows). When the installer ships
+            // resources/higgsfield-cli (staged by scripts/install-higgsfield-cli.ps1
+            // -Dest src-tauri/resources/higgsfield-cli -NoEnv), point the provider
+            // adapter at it via HIGGSFIELD_BIN — UNLESS the user already set
+            // HIGGSFIELD_BIN themselves (an explicit per-user install wins). The
+            // npm .cmd shim resolves `node` via PATH, so we also prepend the
+            // bundled Node dir so the shim finds OUR Node runtime instead of
+            // relying on a system Node being present.
+            #[cfg(target_os = "windows")]
+            {
+                if std::env::var_os("HIGGSFIELD_BIN").is_none() {
+                    if let Some(hf_root) = find_resource_subdir(&resource_dir, "higgsfield-cli") {
+                        let shim = hf_root
+                            .join("node_modules")
+                            .join(".bin")
+                            .join("higgsfield.cmd");
+                        if shim.exists() {
+                            cmd.env("HIGGSFIELD_BIN", &shim);
+                            startup_log_line(
+                                &log_dir,
+                                &format!("bundled higgsfield CLI -> {}", shim.display()),
+                            );
+                        } else {
+                            startup_log_line(
+                                &log_dir,
+                                &format!("higgsfield-cli resource present but shim missing at {}", shim.display()),
+                            );
+                        }
+                    }
+                }
+                if let Some(node_dir) = node_bin.parent() {
+                    let prev = std::env::var("PATH").unwrap_or_default();
+                    cmd.env("PATH", format!("{};{}", node_dir.display(), prev));
+                }
+            }
+
             // Suppress the flashing console window on Windows release spawn.
             #[cfg(target_os = "windows")]
             {

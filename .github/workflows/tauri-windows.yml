@@ -142,6 +142,15 @@ jobs:
         shell: pwsh
         run: scripts/fetch-camofox-browser.ps1
 
+      - name: Stage Higgsfield CLI into Tauri resources
+        # V1.6: bundle @higgsfield/cli so every installer user gets the
+        # agentic Higgsfield path with zero setup. -NoEnv = install only (no
+        # user env var on the CI runner); lib.rs points the sidecar's
+        # HIGGSFIELD_BIN at the bundled shim at runtime (unless the user set
+        # their own). Bundled via resources/**/* (tauri.conf.json).
+        shell: pwsh
+        run: scripts/install-higgsfield-cli.ps1 -Dest src-tauri/resources/higgsfield-cli -NoEnv
+
       - name: Copy standalone into Tauri resources
         shell: pwsh
         run: scripts/copy-standalone-to-resources.ps1
