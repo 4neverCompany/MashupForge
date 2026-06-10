@@ -1,5 +1,18 @@
 # MashupForge — Handoff & Project Summary
 
+> ## ⚠️ STALE — current handoff lives in [`docs/handoff/`](./docs/handoff/)
+>
+> This file is the **historical** v1.0.x-era handoff (last updated
+> 2026-06-04, "you are picking up v1.0.9" — the app is on **v1.6.0+**).
+> Kept for archeology only. For the CURRENT project state, open:
+>
+> - [`docs/handoff/README.md`](./docs/handoff/README.md) — navigation
+> - [`docs/handoff/ROADMAP.md`](./docs/handoff/ROADMAP.md) — **start here:
+>   "▶ NÄCHSTER EINSTIEG" tells the next agent exactly where to continue**
+> - [`docs/handoff/STATE.md`](./docs/handoff/STATE.md) — what's live
+> - [`docs/handoff/ACTIVE-CONTEXT.md`](./docs/handoff/ACTIVE-CONTEXT.md) — in flight
+> - [`docs/handoff/SESSION-LOG.md`](./docs/handoff/SESSION-LOG.md) — chronology
+
 **Date:** 2026-06-04
 **For:** MiniMax Code desktop agent (or any successor)
 **Maintained by:** Mavis (the agent that built the v1.0.0 → v1.0.4 stack)
