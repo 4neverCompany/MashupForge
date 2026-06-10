@@ -22,8 +22,10 @@ cd "$REPO_ROOT"
 #   gh workflow run tauri-windows.yml
 guard_prev_tag="$(git tag --list 'v*' --sort=-version:refname | head -n 1 || true)"
 if [ -n "${guard_prev_tag}" ]; then
+  # `!?` admits breaking-change subjects (feat!: / fix(scope)!:);
+  # `revert` counts as releasable — a revert-only release is real.
   releasable="$(git log "${guard_prev_tag}..HEAD" --no-merges --pretty='%s' \
-    | grep -E '^(feat|fix|refactor|perf|docs|test)(\([^)]+\))?:' \
+    | grep -E '^(feat|fix|refactor|perf|docs|test|revert)(\([^)]+\))?!?:' \
     | grep -Ev '^[a-z]+\((release|changelog)\)' \
     || true)"
   if [ -z "${releasable}" ] && [ "${ALLOW_EMPTY_RELEASE:-0}" != "1" ]; then
@@ -111,13 +113,15 @@ echo "Generating changelog since ${prev_tag}..."
 # re-run flow (backfilling a highlights file) must keep working, so on
 # re-run we REMOVE the existing block for this version first and then
 # insert the regenerated one — idempotent instead of duplicating.
-if grep -qE "^## \\[${VERSION}\\]" CHANGELOG.md; then
+# Fixed-string matching throughout — dots in VERSION are regex
+# metacharacters, so a regex match on "1.4.5" would also hit "1x4y5".
+if grep -qF "## [${VERSION}]" CHANGELOG.md; then
   echo "Heading ## [${VERSION}] already in CHANGELOG.md — replacing it (re-run)."
   dedup_tmp="$(mktemp)"
   awk -v ver="${VERSION}" '
-    BEGIN { skip = 0 }
+    BEGIN { skip = 0; hdr = "## [" ver "]" }
     /^## / {
-      if ($0 ~ ("^## \\\\[" ver "\\\\]")) { skip = 1; next }
+      if (index($0, hdr) == 1) { skip = 1; next }
       skip = 0
     }
     skip == 0 { print }

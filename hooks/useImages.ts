@@ -49,6 +49,19 @@ export function useImages() {
     savedImagesRef.current = savedImages;
   }, [savedImages]);
 
+  // V1.4.5-HYDRATION-FAIL: latched when the store load THROWS (as
+  // opposed to loading an empty library). While latched, the debounced
+  // direct store-write below is disabled — writing the in-memory array
+  // over a store we never managed to read would wipe the library.
+  const hydrationFailedRef = useRef(false);
+  // V1.4.5: true while the async load is running. Belt-and-suspenders
+  // for the debounce timer: effect ordering already cancels a timer
+  // scheduled in the one commit where loadTriggered flipped but
+  // isImagesLoaded is still stale-true; this ref makes the timer
+  // callback itself refuse to fire mid-hydration, independent of
+  // React's scheduling.
+  const loadInFlightRef = useRef(false);
+
   // V1.2.1: studio mount is no longer blocked by image I/O. isLoaded
   // flips to true immediately; the actual data load is gated on the
   // Gallery view calling requestLoad().
@@ -85,6 +98,7 @@ export function useImages() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsImagesLoaded(false);
     let cancelled = false;
+    loadInFlightRef.current = true;
     const loadImages = async () => {
       try {
         const storedImages = localStorage.getItem('mashup_saved_images');
@@ -137,8 +151,18 @@ export function useImages() {
           if (idbImages && !cancelled) setSavedImages(prev => mergeById(idbImages.map(normalizeOnLoad), prev));
         }
       } catch {
-        // silent — savedImages remains empty
+        // V1.4.5-HYDRATION-FAIL: hydration threw (IDB unavailable /
+        // corrupted). savedImages stays empty — but it must NOT be
+        // treated as a successful empty hydration: a later mutation
+        // would arm the debounced store-write and overwrite the full
+        // library with just that mutation. Latch the failure; the
+        // debounce effect refuses direct store writes for the rest
+        // of the session. Mutations still reach localStorage via the
+        // beforeunload flush, and the next launch's load path merges
+        // them on top of the (intact) store.
+        hydrationFailedRef.current = true;
       } finally {
+        loadInFlightRef.current = false;
         if (!cancelled) setIsImagesLoaded(true);
       }
     };
@@ -180,7 +204,13 @@ export function useImages() {
   useEffect(() => {
     if (!loadTriggered || !isImagesLoaded) return;
     if (!dirtyRef.current) return;
+    // V1.4.5-HYDRATION-FAIL: never write the store when hydration
+    // failed — the in-memory array is missing the (unreadable but
+    // possibly intact) library. localStorage flush + next-launch
+    // merge keeps the mutations instead.
+    if (hydrationFailedRef.current) return;
     const timer = setTimeout(() => {
+      if (loadInFlightRef.current || hydrationFailedRef.current) return;
       void set('mashup_saved_images', savedImages).catch(() => {});
       // Auto-backup to Documents folder (survives reinstall)
       void autoBackupImages(savedImages);

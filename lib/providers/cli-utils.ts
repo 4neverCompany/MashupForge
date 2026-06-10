@@ -436,9 +436,18 @@ export interface ShimSpawnPlan {
  * Windows .cmd/.bat shims become an explicit
  * `cmd.exe /d /s /c "<escaped command line>"` with
  * `windowsVerbatimArguments` so Node performs no additional mangling.
+ *
+ * `needsShell` is injectable so the win32 escaping branch is testable
+ * on the Ubuntu CI runners (spawnNeedsShell is platform-gated and
+ * would otherwise leave this security-critical path with zero CI
+ * coverage). Production callers use the default.
  */
-export function buildWindowsShimSpawn(binary: string, args: string[]): ShimSpawnPlan {
-  if (!spawnNeedsShell(binary)) {
+export function buildWindowsShimSpawn(
+  binary: string,
+  args: string[],
+  needsShell: boolean = spawnNeedsShell(binary),
+): ShimSpawnPlan {
+  if (!needsShell) {
     return { file: binary, args, windowsVerbatimArguments: false };
   }
   const commandLine = [

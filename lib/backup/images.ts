@@ -22,7 +22,9 @@ export interface BackupMetadata {
 }
 
 function isTauriWithFS(): boolean {
-  return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in (window as any) || '__TAURI__' in (window as any))
+  if (typeof window === 'undefined') return false
+  const w = window as unknown as { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown }
+  return w.__TAURI_INTERNALS__ !== undefined || w.__TAURI__ !== undefined
 }
 
 async function getBackupDir(): Promise<string | null> {

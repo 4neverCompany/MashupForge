@@ -45,4 +45,61 @@ describe('buildWindowsShimSpawn', () => {
     expect(plan.file).toBe('mmx.cmd')
     expect(plan.windowsVerbatimArguments).toBe(false)
   })
+
+  // The win32 escaping branch, exercised on EVERY platform via the
+  // injectable `needsShell` param — spawnNeedsShell() is platform-
+  // gated, so without injection the security-critical branch would
+  // have zero coverage on the Ubuntu CI runners.
+  describe('win32 escaping branch (needsShell injected)', () => {
+    it('spawns cmd.exe /d /s /c with a quoted, escaped command line', () => {
+      const plan = buildWindowsShimSpawn('mmx.cmd', ['--prompt', 'hello'], true)
+      expect(plan.file.toLowerCase()).toContain('cmd')
+      expect(plan.args.slice(0, 3)).toEqual(['/d', '/s', '/c'])
+      expect(plan.args).toHaveLength(4)
+      expect(plan.args[3]).toMatch(/^".*"$/)
+      expect(plan.windowsVerbatimArguments).toBe(true)
+    })
+
+    it('neutralizes cmd metacharacters in a hostile prompt', () => {
+      const hostile = 'cute cat" & del /q C:\\* & echo "'
+      const plan = buildWindowsShimSpawn('higgsfield.cmd', ['--prompt', hostile], true)
+      const line = plan.args[3]!
+      // No unescaped & may survive — every one must be caret-escaped.
+      expect(line).not.toMatch(/[^^]&/)
+      // The embedded quote must not terminate the argument: every
+      // literal " inside the payload is backslash-escaped (and the
+      // backslash itself caret-escaped for the .cmd double-parse).
+      expect(line).toContain('\\^^')
+    })
+
+    it('neutralizes pipes and redirects', () => {
+      const plan = buildWindowsShimSpawn(
+        'mmx.cmd',
+        ['--prompt', 'a | curl evil > out < in'],
+        true,
+      )
+      const line = plan.args[3]!
+      expect(line).not.toMatch(/[^^]\|/)
+      expect(line).not.toMatch(/[^^]>/)
+      expect(line).not.toMatch(/[^^]</)
+    })
+
+    it('caret-escapes % so %ENVVAR% cannot expand', () => {
+      const plan = buildWindowsShimSpawn('mmx.cmd', ['--prompt', '%PATH%'], true)
+      const line = plan.args[3]!
+      expect(line).not.toMatch(/[^^]%/)
+    })
+
+    it('binary path with spaces stays a single token', () => {
+      const plan = buildWindowsShimSpawn(
+        'C:\\Program Files\\mmx\\mmx.cmd',
+        ['--version'],
+        true,
+      )
+      const line = plan.args[3]!
+      // The binary is the first escaped token; the space inside it is
+      // caret-escaped within its quotes, so cmd treats it as one token.
+      expect(line.startsWith('"^"C:\\Program^ Files\\mmx\\mmx.cmd^"')).toBe(true)
+    })
+  })
 })

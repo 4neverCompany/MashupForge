@@ -133,6 +133,38 @@ describe('useImages — V1.4.5 debounce-write wipe protection', () => {
     expect(written.map(i => i.id).sort()).toEqual(['img-a', 'img-c'])
   })
 
+  it('hydration FAILURE never lets a mutation overwrite the store (V1.4.5-HYDRATION-FAIL)', async () => {
+    // The store read throws (IDB unavailable / corrupted) — distinct
+    // from "store is empty". A mutation after the failed load must NOT
+    // arm the debounced store-write: the in-memory array is missing
+    // the (possibly intact) library, so writing it back would wipe.
+    getMock.mockImplementationOnce(async () => {
+      throw new Error('IDB unavailable')
+    })
+    const { result } = renderHook(() => useImages())
+    await act(async () => {
+      result.current.requestLoad()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    // Hydration failed silently — memory is empty, store untouched.
+    expect(result.current.savedImages).toHaveLength(0)
+    await act(async () => {
+      result.current.saveImage(img('img-new'))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    // Without the latch the debounce would write ['img-new'] over the
+    // full library. The store must remain intact.
+    expect(setMock).not.toHaveBeenCalled()
+    expect(storeData['mashup_saved_images']).toEqual(libraryInStore)
+    // The mutation itself is still preserved in memory (and reaches
+    // localStorage via the beforeunload flush path).
+    expect(result.current.savedImages.map(i => i.id)).toEqual(['img-new'])
+  })
+
   it('in-memory mutation made during an in-flight load survives the hydration commit', async () => {
     // Slow down the store read so the mutation lands mid-load.
     let release: (v: unknown) => void = () => {}
