@@ -58,8 +58,17 @@ export function useImages() {
       // visible? Actually no — the studio can render with empty state.
       // We set isImagesLoaded=true so isLoaded (in MashupContext) is
       // not stuck on this. The Gallery view re-triggers the load.
-      setIsImagesLoaded(true);
-      return;
+      //
+      // react-hooks/set-state-in-effect: deferred via queueMicrotask
+      // (project convention, see HiggsfieldConnection.tsx). Stale-
+      // guarded: if loadTriggered flips before the microtask fires,
+      // the cleanup runs first and this must NOT set loaded=true over
+      // the in-flight load's `false` (the V1.4.5 data-loss gate).
+      let stale = false;
+      queueMicrotask(() => {
+        if (!stale) setIsImagesLoaded(true);
+      });
+      return () => { stale = true; };
     }
     // V1.4.5-DATALOSS-ROOTCAUSE: while the real load is in flight,
     // isImagesLoaded must be FALSE so the debounced store-write below
@@ -67,6 +76,13 @@ export function useImages() {
     // Before this, isImagesLoaded stayed true from the !loadTriggered
     // branch above, so a mutation made during the load window could
     // overwrite the store with just that mutation.
+    //
+    // Deliberately synchronous (NOT queueMicrotask-deferred like the
+    // branch above): the gate must close in the same commit, before
+    // any mutation effect can schedule a debounced write against the
+    // not-yet-hydrated array. Documented project exception, same as
+    // KebabMenu.tsx / CarouselApprovalCard.tsx.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsImagesLoaded(false);
     let cancelled = false;
     const loadImages = async () => {

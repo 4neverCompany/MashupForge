@@ -31,7 +31,9 @@ jobs:
             echo "Installed with bun"
           else
             echo "::warning::bun install failed, falling back to npm"
-            npm ci
+            # `npm install`, not `npm ci` — there is no package-lock.json
+            # anymore (bun.lock is the single lockfile since v1.4.4).
+            npm install
           fi
 
       - name: Cache Next.js build
@@ -56,7 +58,7 @@ jobs:
         with:
           bun-version: latest
       - run: |
-          bun install --frozen-lockfile 2>/dev/null || npm ci
+          bun install --frozen-lockfile 2>/dev/null || npm install
       - run: npx tsc --noEmit
 
   lint:
@@ -72,7 +74,7 @@ jobs:
         with:
           bun-version: latest
       - run: |
-          bun install --frozen-lockfile 2>/dev/null || npm ci
+          bun install --frozen-lockfile 2>/dev/null || npm install
       - run: npm run lint
 
   test:
@@ -88,7 +90,7 @@ jobs:
         with:
           bun-version: latest
       - run: |
-          bun install --frozen-lockfile 2>/dev/null || npm ci
+          bun install --frozen-lockfile 2>/dev/null || npm install
       - run: npm test
 
   bundle-size:
@@ -104,7 +106,7 @@ jobs:
         with:
           bun-version: latest
       - run: |
-          bun install --frozen-lockfile 2>/dev/null || npm ci
+          bun install --frozen-lockfile 2>/dev/null || npm install
       - run: npm run build
       - run: node scripts/check-bundle-size.mjs
 

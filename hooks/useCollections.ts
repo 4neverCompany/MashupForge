@@ -19,8 +19,14 @@ export function useCollections(settings: UserSettings) {
 
   useEffect(() => {
     if (!loadTriggered) {
-      setIsCollectionsLoaded(true);
-      return;
+      // react-hooks/set-state-in-effect: deferred via queueMicrotask
+      // (project convention), stale-guarded against a loadTriggered
+      // flip before the microtask fires.
+      let stale = false;
+      queueMicrotask(() => {
+        if (!stale) setIsCollectionsLoaded(true);
+      });
+      return () => { stale = true; };
     }
     let cancelled = false;
     const loadCollections = async () => {
