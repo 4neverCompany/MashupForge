@@ -130,6 +130,49 @@ export function applyV040AutoApproveMigration<T extends { pipelineAutoApprove?: 
   };
 }
 
+/**
+ * V1.6: Director-default migration.
+ *
+ * The agentic Director pipeline shipped opt-in in v1.5.0 and became
+ * the DEFAULT path in v1.6.0 (roadmap decision, 2026-06-10: "Default
+ * machen, sobald M1 stabil ist"). Because useSettings persists the
+ * full merged settings object, every pre-v1.6 user has
+ * `useDirectorPipeline: false` written into their store from the old
+ * default — flipping `defaultSettings` alone would never reach them.
+ *
+ * This shim runs on every settings load (same slot as the V040
+ * migration above) and turns the Director on UNLESS the user has
+ * explicitly touched the toggle: the Settings switch stamps
+ * `directorPipelineUserSet: true` on every click (from v1.6.0 on),
+ * and a stamped choice — on OR off — is never overridden again.
+ *
+ * Idempotent + referential-equality friendly: returns the input
+ * reference unchanged when the Director is already on or the user
+ * has made an explicit choice.
+ */
+export function applyV160DirectorDefaultMigration<
+  T extends { useDirectorPipeline?: boolean; directorPipelineUserSet?: boolean },
+>(settings: T): T {
+  if (settings.directorPipelineUserSet === true) return settings;
+  if (settings.useDirectorPipeline === true) return settings;
+  return { ...settings, useDirectorPipeline: true };
+}
+
+/**
+ * Composition of every load-time settings migration, applied by
+ * useSettings on each hydration path. Order: oldest first, so later
+ * migrations see the post-migration state of earlier ones.
+ */
+export function applySettingsMigrations<
+  T extends {
+    pipelineAutoApprove?: AutoApproveMap;
+    useDirectorPipeline?: boolean;
+    directorPipelineUserSet?: boolean;
+  },
+>(settings: T): T {
+  return applyV160DirectorDefaultMigration(applyV040AutoApproveMigration(settings));
+}
+
 /** Hard timeout error thrown by the per-idea race in usePipelineDaemon. */
 export class IdeaTimeoutError extends Error {
   readonly kind = 'timeout' as const;

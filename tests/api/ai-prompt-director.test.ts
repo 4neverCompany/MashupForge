@@ -284,6 +284,33 @@ describe('POST /api/ai/prompt — director mode no provider', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /api/ai/prompt — director mode provider error', () => {
+  it('returns 502 when the model finalizes with the DIRECTOR_FAILED sentinel', async () => {
+    // The system prompt instructs the model to finalize unrecoverable
+    // tool failures with "DIRECTOR_FAILED: <reason>". Such a run ends
+    // "naturally" (finishReason stop, non-empty text) — the route must
+    // still refuse to hand it to the client as a usable prompt.
+    generateTextMock.mockImplementation(async () => {
+      return {
+        text: 'DIRECTOR_FAILED: trending_search unavailable after two attempts.',
+        steps: [],
+        finishReason: 'stop',
+      };
+    });
+
+    const res = await promptPost(
+      makePost({
+        mode: 'director',
+        ideaConcept: 'Darth Vader in Iron Man suit',
+        niches: ['Marvel'],
+      }),
+    );
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/Director failed/);
+    expect(body.error).toMatch(/trending_search unavailable/);
+  });
+
   it('returns 502 with the real error when the provider throws and no prompt is produced', async () => {
     generateTextMock.mockImplementation(async () => {
       // Simulate a provider failure (e.g. MiniMax 404 on a bad

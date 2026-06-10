@@ -362,17 +362,25 @@ export interface UserSettings {
    * Settings → AI Engine (see SettingsModal). Default false so
    * existing users' output doesn't change. */
   antiAiLook?: boolean;
-  /** V1.6: opt-in agentic "Director" pipeline. When true, the pipeline's
+  /** V1.6: agentic "Director" pipeline. When true, the pipeline's
    * idea→prompt step routes through the multi-step tool-use loop
    * (trending_search → generate_prompt → critique → refine) via
    * `/api/ai/prompt` mode:director instead of sending the idea concept
-   * to the image model verbatim. Off by default — the fast verbatim
-   * path stays the standard pipeline. Any Director failure falls back
-   * to the verbatim concept so the pipeline never stalls. Requires at
-   * least one agentNiche (the Director route validates 1-6 niches) and
-   * a configured text-AI provider (MINIMAX_API_KEY / OPENAI_API_KEY).
-   * The control lives in Settings → AI Engine. */
+   * to the image model verbatim. Shipped opt-in in v1.5.0; the DEFAULT
+   * path since v1.6.0 (`applyV160DirectorDefaultMigration` flips
+   * stored `false` values from the old default unless the user
+   * explicitly chose — see `directorPipelineUserSet`). Any Director
+   * failure falls back to the verbatim concept so the pipeline never
+   * stalls. Requires at least one agentNiche (the Director route
+   * validates 1-6 niches) and a configured text-AI provider
+   * (MINIMAX_API_KEY / OPENAI_API_KEY). The control lives in
+   * Settings → AI Engine. */
   useDirectorPipeline?: boolean;
+  /** V1.6: stamped `true` whenever the user clicks the Director
+   * toggle in Settings. An explicit choice — on OR off — is never
+   * overridden by a future default migration. Absent for users who
+   * never touched the switch (they follow the current default). */
+  directorPipelineUserSet?: boolean;
   /** V1.0.7-PROMPT-ENG-A2/A3: optional camera-angle slug from the
    * 14-angle catalog in `lib/camera-angles.ts`. When set, the
    * `buildEnhancedPrompt` composer appends a structured MCSLA
@@ -1077,7 +1085,10 @@ export const defaultSettings: UserSettings = {
   // can toggle on/off.
   activeSkills: ['banana-pro-director'],
   antiAiLook: false,
-  useDirectorPipeline: false,
+  // V1.6: Director is the default pipeline path (was opt-in in v1.5.0).
+  // Existing stores are flipped by applyV160DirectorDefaultMigration;
+  // explicit user choices carry directorPipelineUserSet and win.
+  useDirectorPipeline: true,
   cameraAngle: undefined,
   higgsfieldMonthlyCreditCap: undefined,
   watermark: {

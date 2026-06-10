@@ -86,7 +86,7 @@ export function buildDirectorSystemPrompt(context: PlanContext): string {
     '- Every tool call MUST match the JSON schema declared by the tool (the AI SDK enforces this; the route will surface a 4xx if you slip).',
     '- critique_prompt is the quality gate. If score < 0.7, regenerate the draft at most twice — do not loop forever.',
     '- The final assistant text is what the user sees. It MUST be the prompt draft (40-150 words), not a summary, not JSON, not a markdown fence.',
-    '- If a tool returns an error part, you may try once more with adjusted input. If it still fails, surface the issue in the final text and finalize.',
+    '- If a tool returns an error part, you may try once more with adjusted input. If it still fails AND you cannot produce a usable prompt, finalize with exactly "DIRECTOR_FAILED: <one short sentence naming the issue>" — never a free-form apology. (The pipeline detects this sentinel and falls back to the verbatim concept; an undetected explanation would be sent to the image model as the prompt.)',
   ].join('\n');
 }
 

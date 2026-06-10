@@ -5,6 +5,8 @@ import {
   isPlatformAutoApproved,
   resolvePipelinePostStatus,
   applyV040AutoApproveMigration,
+  applyV160DirectorDefaultMigration,
+  applySettingsMigrations,
 } from '@/lib/pipeline-daemon-utils';
 
 describe('isPlatformAutoApproved', () => {
@@ -94,5 +96,81 @@ describe('applyV040AutoApproveMigration (V040-HOTFIX-001)', () => {
     const out = applyV040AutoApproveMigration(input as { someOtherField: number; watermark: { enabled: boolean }; pipelineAutoApprove?: Record<string, boolean> });
     expect(out.someOtherField).toBe(42);
     expect(out.watermark).toEqual({ enabled: true });
+  });
+});
+
+describe('applyV160DirectorDefaultMigration (V1.6 — Director default)', () => {
+  it('flips a stored false from the old opt-in default to true', () => {
+    // The pre-v1.6 store state for every user who never touched the
+    // toggle: explicit false from the old defaultSettings merge.
+    const out = applyV160DirectorDefaultMigration({ useDirectorPipeline: false });
+    expect(out.useDirectorPipeline).toBe(true);
+  });
+
+  it('turns the Director on when the field is absent (pre-v1.5 stores)', () => {
+    const out = applyV160DirectorDefaultMigration({} as { useDirectorPipeline?: boolean });
+    expect(out.useDirectorPipeline).toBe(true);
+  });
+
+  it('is a referential no-op when the Director is already on', () => {
+    const input = { useDirectorPipeline: true };
+    expect(applyV160DirectorDefaultMigration(input)).toBe(input);
+  });
+
+  it('never overrides an explicit user opt-out (directorPipelineUserSet)', () => {
+    const input = { useDirectorPipeline: false, directorPipelineUserSet: true };
+    const out = applyV160DirectorDefaultMigration(input);
+    expect(out).toBe(input);
+    expect(out.useDirectorPipeline).toBe(false);
+  });
+
+  it('is idempotent — a second pass returns the first pass unchanged', () => {
+    const once = applyV160DirectorDefaultMigration({ useDirectorPipeline: false });
+    const twice = applyV160DirectorDefaultMigration(once);
+    expect(twice).toBe(once);
+  });
+
+  it('preserves all other fields on the migrated payload', () => {
+    const input = { someOtherField: 42, useDirectorPipeline: false };
+    const out = applyV160DirectorDefaultMigration(input);
+    expect(out.someOtherField).toBe(42);
+  });
+});
+
+describe('applySettingsMigrations (composition)', () => {
+  it('applies both the V040 and V160 migrations in one pass', () => {
+    const out = applySettingsMigrations({ useDirectorPipeline: false } as {
+      useDirectorPipeline?: boolean;
+      directorPipelineUserSet?: boolean;
+      pipelineAutoApprove?: Record<string, boolean>;
+    });
+    expect(out.useDirectorPipeline).toBe(true);
+    expect(out.pipelineAutoApprove).toEqual({
+      instagram: true,
+      pinterest: true,
+      twitter: true,
+      discord: true,
+    });
+  });
+
+  it('is a referential no-op when nothing needs migrating', () => {
+    const input = {
+      useDirectorPipeline: true,
+      pipelineAutoApprove: { instagram: false },
+    };
+    expect(applySettingsMigrations(input)).toBe(input);
+  });
+
+  it('respects an explicit Director opt-out while still migrating auto-approve', () => {
+    const out = applySettingsMigrations({
+      useDirectorPipeline: false,
+      directorPipelineUserSet: true,
+    } as {
+      useDirectorPipeline?: boolean;
+      directorPipelineUserSet?: boolean;
+      pipelineAutoApprove?: Record<string, boolean>;
+    });
+    expect(out.useDirectorPipeline).toBe(false);
+    expect(out.pipelineAutoApprove).toBeDefined();
   });
 });
