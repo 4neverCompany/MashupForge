@@ -459,6 +459,105 @@ size grows slightly (the bundled CLI is a single small npm package).
   end-to-end
 
 ---
+
+### 🎬 Highlights
+
+
+#### 🎬 Highlights
+
+### The agentic Director is now the default pipeline path
+
+Every pipeline idea is now planned by the multi-step Director loop
+(trend search → draft → self-critique → refine) instead of being sent
+to the image model verbatim. You'll notice richer, more deliberate
+prompts — and a small per-idea text-AI cost (a few cents, hard-capped
+at $0.50 per run). The fast verbatim path is one click away:
+**Settings → AI Engine → Agentic Director pipeline → off**. Your
+explicit choice — on or off — is remembered permanently and never
+overridden by future updates.
+
+The default flip ships with serious guardrails (found by an
+adversarial review before release):
+
+- **No money loops.** A successful Director prompt is reused when an
+  idea retries; after 2 failed attempts the idea falls back to the
+  verbatim path for the session. Continuous mode can no longer re-bill
+  the same idea cycle after cycle.
+- **Bounded and abortable.** Director runs are capped at 3 minutes
+  client-side / 4 minutes server-side, and **Skip idea** now cancels
+  the in-flight run immediately (and stops the billing).
+- **No garbage prompts.** A failed run can no longer smuggle its error
+  explanation into image generation — implausible output is detected
+  and the pipeline falls back to your original concept.
+
+### Trending search works again (Serper.dev)
+
+DuckDuckGo started bot-blocking the free scrape path, which is why
+"No trending data found" kept coming back. Trending now uses
+**Serper.dev (Google results)** as the default backend with a
+Serper → Brave → DuckDuckGo fallback chain. Paste a `SERPER_API_KEY`
+in **Settings → AI Engine** (free 2,500 credits at serper.dev) and
+both the trending feed and the Director's trend research return real
+results. Camofox, when running, is still tried first.
+
+### Director "empty prompt" fixed for MiniMax
+
+The Director's internal tools called MiniMax through the wrong OpenAI
+API surface (Responses API instead of chat-completions), so every run
+came back empty — the "🎬 Director unavailable (empty prompt)" error.
+Fixed; real failures now surface their actual cause instead of a
+generic message.
+
+### Higgsfield: an authenticated CLI counts as connected
+
+If the bundled Higgsfield CLI is authenticated (`higgsfield auth
+login` once, or a pasted CLI token), the Studio panel and the
+image/video routes now use it directly — no more "Connect Higgsfield
+in Settings" dead-end when OAuth isn't set up. Video generation gains
+the same CLI support as images.
+
+### Small but visible
+
+- Dropdown menus in the Studio Generate panel are no longer
+  white-on-white (native dark color-scheme).
+- Caption fallbacks post your short concept again instead of a wall of
+  prompt jargon.
+- Settings hydration failures now keep your stored data safe and tell
+  you, instead of silently risking a wipe.
+
+#### 🔧 Breaking changes
+
+none — but note the behavior change: the Director is ON by default.
+Switch it off in Settings → AI Engine if you prefer the fast verbatim
+path; the choice sticks.
+
+#### 📋 Migration notes
+
+No action required — auto-update applies everything on next launch.
+Recommended: add a `SERPER_API_KEY` in Settings → AI Engine so
+trending has a reliable backend.
+
+#### 🧪 Test summary
+
+- `cargo check` clean · `tsc --noEmit` clean · ESLint 0 errors
+- vitest fully green: 2037 passed, 14 skipped (+27 new tests across
+  the migration, the plausibility gate, Serper, and the Director
+  error paths)
+- 17-agent adversarial review of the default flip: 14 raw findings,
+  9 confirmed, 8 fixed pre-release (1 deferred to M3 with a
+  seconds-wide trigger window)
+
+#### 🙏 Credits
+
+Review hardening powered by a multi-agent adversarial workflow
+(3 lenses × refutation pass) — the money-loop blocker and the
+apology-as-prompt hole were caught before a single user paid for them.
+
+---
+## [1.6.0] — 2026-06-10
+
+_Internal-only release; no user-facing changes since v1.5.2._
+
 ## [1.5.2] — 2026-06-10
 
 ### Added
