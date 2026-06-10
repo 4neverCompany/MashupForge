@@ -19,9 +19,17 @@ vi.mock('ai', async () => {
 });
 
 // Mock the OpenAI adapter so we don't try to instantiate a real client.
+// The real `createOpenAI()` returns a callable that ALSO carries
+// transport methods (`.chat`, `.responses`, …). The Director tools use
+// `openai.chat(id)` (MiniMax only speaks /v1/chat/completions), so the
+// stub must expose `.chat` too.
 vi.mock('@ai-sdk/openai', () => ({
   createOpenAI: () => {
-    return (modelId: string) => ({ modelId, _stub: true });
+    const make = (modelId: string) => ({ modelId, _stub: true });
+    const callable = (modelId: string) => make(modelId);
+    callable.chat = (modelId: string) => make(modelId);
+    callable.responses = (modelId: string) => make(modelId);
+    return callable;
   },
 }));
 

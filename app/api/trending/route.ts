@@ -61,9 +61,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getErrorMessage } from '@/lib/errors';
+import { readDesktopConfigValue } from '@/lib/desktop-env';
 import { withCamofoxHealth, camofoxSearch } from '@/lib/camofox';
 import { CAMOFOX_MACROS, type CamofoxMacro } from '@/lib/camofox/macros';
-import { webSearch, type WebSearchResult } from '@/lib/web-search';
+import { webSearch, type WebSearchOptions, type WebSearchResult } from '@/lib/web-search';
 
 interface TrendingRequest {
   tags?: string[];
@@ -143,6 +144,33 @@ function parseRelativeDate(raw: string | undefined): number | null {
 }
 
 /**
+ * Resolve a web-search API key. Prefers the value hydrated into
+ * `process.env` at server boot (covers the Vercel/web build), then
+ * falls back to a live read of the desktop `config.json` so a key the
+ * user just pasted in Settings takes effect without a restart.
+ */
+function resolveSearchKey(name: string): string {
+  return (process.env[name] ?? readDesktopConfigValue(name) ?? '').trim();
+}
+
+/**
+ * Build the web-search provider chain options from configured keys.
+ * Serper.dev is the new default backend (V1.6 — M1.4): DDG's
+ * HTML-scrape endpoint now bot-blocks automated traffic, so an
+ * unkeyed `webSearch` returned nothing — the root of the recurring
+ * "No trending data found". With a Serper (or Brave) key the chain
+ * Serper → Brave → DDG produces real results again.
+ */
+function buildSearchOptions(): WebSearchOptions | undefined {
+  const serperApiKey = resolveSearchKey('SERPER_API_KEY');
+  const braveApiKey = resolveSearchKey('BRAVE_API_KEY');
+  const opts: WebSearchOptions = {};
+  if (serperApiKey) opts.serperApiKey = serperApiKey;
+  if (braveApiKey) opts.braveApiKey = braveApiKey;
+  return opts.serperApiKey || opts.braveApiKey ? opts : undefined;
+}
+
+/**
  * Map a camofox result to a TrendResult. Skips hits older than
  * 30 days if camofox returned a parseable date.
  */
@@ -186,11 +214,14 @@ async function fetchCamofox(query: string, macro: CamofoxMacro): Promise<TrendRe
     );
     let results = camofoxResults;
     // Backstop: if camofox produced nothing (down OR up-but-empty),
-    // fall through to the DDG/Brave scrape. This is what makes
-    // trending work on a machine without a running camofox sidecar.
+    // fall through to the Serper → Brave → DDG chain. This is what
+    // makes trending work on a machine without a running camofox
+    // sidecar. Passing the configured keys is essential — an unkeyed
+    // call only reaches DDG, which now bot-blocks (the recurring
+    // "No trending data found" bug).
     if (results.length === 0) {
       try {
-        results = await webSearch(query, 8);
+        results = await webSearch(query, 8, undefined, buildSearchOptions());
       } catch {
         results = [];
       }

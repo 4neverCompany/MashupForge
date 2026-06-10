@@ -745,6 +745,44 @@ async function handleDirectorMode(body: Record<string, unknown>): Promise<Respon
       );
     }
 
+    // A configured provider that errored out and produced no prompt
+    // used to fall through to the 200 below as `{ prompt: '' }`, which
+    // the client surfaced as the opaque "🎬 Director unavailable
+    // (empty prompt)". Surface the real cause (the loop's last error
+    // step — e.g. a provider 404 from a bad model id, an auth failure,
+    // or a network timeout) as a 502 so the UI shows what actually
+    // failed. The pipeline still falls back to the verbatim concept
+    // (requestDirectorPrompt never throws), but the reason is now real.
+    if (result.truncatedBy === 'error' && !result.finalPrompt.trim()) {
+      const lastError = [...result.steps]
+        .reverse()
+        .find(
+          (s) =>
+            s.type === 'error'
+            && typeof s.reasoning === 'string'
+            && s.reasoning.trim().length > 0,
+        );
+      const detail = lastError?.reasoning?.trim() || 'the Director loop produced no prompt';
+      return new Response(
+        JSON.stringify({
+          error: `Director failed: ${detail}`,
+          runId: result.runId,
+          modelId: result.modelId,
+          provider: result.provider,
+          truncatedBy: result.truncatedBy,
+        }),
+        {
+          status: 502,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Director-Run-Id': result.runId,
+            'X-AI-Provider': result.provider,
+            'X-AI-Model': result.modelId,
+          },
+        },
+      );
+    }
+
     return new Response(
       JSON.stringify({
         prompt: result.finalPrompt,

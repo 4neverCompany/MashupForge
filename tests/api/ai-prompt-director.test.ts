@@ -276,3 +276,41 @@ describe('POST /api/ai/prompt — director mode no provider', () => {
     expect(body.error).toMatch(/No AI provider configured/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Provider error surfacing (M1.1) — a configured provider that errors out
+// must NOT return a silent 200 {prompt:''}; it returns a 502 carrying the
+// loop's real error message so the UI can show what actually failed.
+// ---------------------------------------------------------------------------
+
+describe('POST /api/ai/prompt — director mode provider error', () => {
+  it('returns 502 with the real error when the provider throws and no prompt is produced', async () => {
+    generateTextMock.mockImplementation(async () => {
+      // Simulate a provider failure (e.g. MiniMax 404 on a bad
+      // model id / Responses-API mismatch). The loop catches this,
+      // records an `error` step, and returns an empty finalPrompt.
+      throw new Error('MiniMax 404: model not found');
+    });
+
+    const res = await promptPost(
+      makePost({
+        mode: 'director',
+        ideaConcept: 'Darth Vader in Iron Man suit',
+        niches: ['Marvel'],
+      }),
+    );
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as {
+      error: string;
+      provider: string;
+      truncatedBy: string;
+    };
+    expect(body.error).toMatch(/Director failed/);
+    expect(body.error).toMatch(/MiniMax 404/);
+    expect(body.provider).toBe('minimax');
+    expect(body.truncatedBy).toBe('error');
+    // The run id is still exposed so the client can fetch the step log.
+    expect(res.headers.get('X-Director-Run-Id')).toMatch(/^run_/);
+  });
+});

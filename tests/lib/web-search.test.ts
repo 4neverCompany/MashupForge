@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   parseDdgHtml,
   parseBraveJson,
+  parseSerperJson,
   validateQuery,
   clampCount,
   webSearch,
   webSearchBrave,
+  webSearchSerper,
   extractTrendingTags,
 } from '@/lib/web-search';
 
@@ -223,6 +225,82 @@ describe('webSearchBrave (fetch mocked)', () => {
   });
 });
 
+describe('parseSerperJson', () => {
+  it('maps organic[] (link/snippet) to the uniform shape', () => {
+    const out = parseSerperJson(
+      {
+        organic: [
+          { title: 'A', link: 'https://a.example/', snippet: 'sa' },
+          { title: 'B', link: 'https://b.example/', snippet: 'sb' },
+        ],
+      },
+      5,
+    );
+    expect(out).toEqual([
+      { title: 'A', url: 'https://a.example/', snippet: 'sa' },
+      { title: 'B', url: 'https://b.example/', snippet: 'sb' },
+    ]);
+  });
+
+  it('skips entries without an http(s) link or title, and honours count', () => {
+    const out = parseSerperJson(
+      {
+        organic: [
+          { title: 'ok', link: 'https://ok.example/', snippet: 's' },
+          { title: 'no-url', snippet: 's' },
+          { title: '', link: 'https://empty.example/', snippet: 's' },
+          { title: 'ftp', link: 'ftp://x/', snippet: 's' },
+          { title: 'second', link: 'https://second.example/', snippet: 's' },
+        ],
+      },
+      1,
+    );
+    expect(out).toEqual([{ title: 'ok', url: 'https://ok.example/', snippet: 's' }]);
+  });
+
+  it('returns [] for malformed payloads', () => {
+    expect(parseSerperJson(null, 5)).toEqual([]);
+    expect(parseSerperJson({}, 5)).toEqual([]);
+    expect(parseSerperJson({ organic: 'nope' }, 5)).toEqual([]);
+  });
+});
+
+describe('webSearchSerper (fetch mocked)', () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('POSTs to serper with the X-API-KEY header and parses organic[]', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({ organic: [{ title: 'T', link: 'https://x.example/', snippet: 'D' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const out = await webSearchSerper('hello', 3, 'my-key');
+    expect(out).toEqual([{ title: 'T', url: 'https://x.example/', snippet: 'D' }]);
+    expect(spy).toHaveBeenCalledOnce();
+    const [url, init] = spy.mock.calls[0];
+    expect(String(url)).toContain('google.serper.dev');
+    expect((init as RequestInit).method).toBe('POST');
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers['X-API-KEY']).toBe('my-key');
+    expect(String((init as RequestInit).body)).toContain('hello');
+  });
+
+  it('returns [] when no key is supplied (no fetch)', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch');
+    expect(await webSearchSerper('q', 5, undefined)).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('returns [] on non-2xx and on network rejection', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('boom', { status: 500 }));
+    expect(await webSearchSerper('q', 5, 'key')).toEqual([]);
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('network'));
+    expect(await webSearchSerper('q', 5, 'key')).toEqual([]);
+  });
+});
+
 describe('webSearch provider routing (fetch mocked)', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -230,6 +308,12 @@ describe('webSearch provider routing (fetch mocked)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  const serperOk = () =>
+    new Response(
+      JSON.stringify({ organic: [{ title: 'Serper', link: 'https://s.example/', snippet: 'sdesc' }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
 
   const braveOk = () =>
     new Response(
@@ -247,6 +331,41 @@ describe('webSearch provider routing (fetch mocked)', () => {
        </div>`,
       { status: 200, headers: { 'Content-Type': 'text/html' } },
     );
+
+  it('prefers Serper when a serperApiKey is set (the new default)', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(serperOk());
+    const out = await webSearch('q', 5, undefined, { serperApiKey: 's', braveApiKey: 'b' });
+    expect(out.length).toBe(1);
+    expect(out[0].title).toBe('Serper');
+    expect(spy).toHaveBeenCalledOnce();
+    expect(String(spy.mock.calls[0][0])).toContain('google.serper.dev');
+  });
+
+  it('falls Serper → Brave → DDG, stopping at the first non-empty', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('{"organic":[]}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(braveOk());
+    const out = await webSearch('q', 5, undefined, { serperApiKey: 's', braveApiKey: 'b' });
+    expect(out.length).toBe(1);
+    expect(out[0].title).toBe('Brave');
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(String(spy.mock.calls[0][0])).toContain('google.serper.dev');
+    expect(String(spy.mock.calls[1][0])).toContain('brave.com');
+  });
+
+  it('falls all the way to DDG when both Serper and Brave are empty', async () => {
+    const spy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('{"organic":[]}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response('{"web":{"results":[]}}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(ddgOk());
+    const out = await webSearch('q', 5, undefined, { serperApiKey: 's', braveApiKey: 'b' });
+    expect(out.length).toBe(1);
+    expect(out[0].title).toBe('DDG');
+    expect(spy).toHaveBeenCalledTimes(3);
+    expect(String(spy.mock.calls[2][0])).toContain('duckduckgo.com');
+  });
 
   it('prefers Brave when provider=brave and key set', async () => {
     const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(braveOk());

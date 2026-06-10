@@ -131,24 +131,32 @@ export async function POST(req: Request): Promise<Response> {
   const referenceImageUrl = asString(body.referenceImageUrl);
   const seed = asInt(body.seed);
 
-  // Auth: prefer CLI token (V1.3.6-CLI-TOKEN) over OAuth. The CLI
-  // token is what the user sets in Settings → HiggsfieldConnection
-  // when the OAuth flow doesn't work for them (browser doesn't
-  // hand off the deep link, or the user doesn't want to do OAuth).
-  // When a CLI token is present, we use the Higgsfield CLI binary
-  // path (HiggsfieldCliAdapter.generateImage) which writes the
-  // token to a temp credentials.json for the @higgsfield/cli call.
-  //
-  // The CLI token path is the one that actually WORKS for the
-  // most users — OAuth requires browser-OS-WebView2 dance that
-  // keeps failing in Tauri; the CLI token is just an API key.
+  // Auth strategy (V1.6 — M1.2): the CLI path is the one that works
+  // for most users, so we prefer it. We use the CLI when EITHER the
+  // user pasted a CLI token (explicit override, wins over OAuth) OR
+  // OAuth isn't connected but the CLI binary is available — i.e. the
+  // user ran `higgsfield auth login` once, or the bundled CLI is
+  // present (v1.5.2+). Only when OAuth IS connected and no token was
+  // pasted do we use the OAuth/MCP path. This removes the
+  // "Connect Higgsfield in Settings" dead-end the route used to hit
+  // even when a perfectly good cached-creds CLI was sitting right
+  // there. The token, when present, is written to a temp
+  // credentials.json by HiggsfieldCliAdapter; an absent token makes
+  // the adapter use the CLI's own cached credentials.
   const cliToken = asString(body.higgsfieldCliToken);
-  if (cliToken) {
+  const clientId = readDesktopConfigValue('HIGGSFIELD_OAUTH_CLIENT_ID');
+  const oauthAuth = clientId ? await getValidAccessToken({ clientId }) : null;
+
+  const { setProviderRuntimeConfig, getProvider } = await import('@/lib/providers/registry');
+  // Rebuild the higgsfield singleton with (or without) the pasted
+  // token so the adapter picks up the right credentials source.
+  setProviderRuntimeConfig(cliToken ? { higgsfieldCliToken: cliToken } : {});
+  const higgsfield = getProvider('higgsfield');
+  const useCli = cliToken ? true : (!oauthAuth && (await higgsfield.isAvailable()));
+
+  if (useCli) {
     try {
-      const { setProviderRuntimeConfig, getProvider } = await import('@/lib/providers/registry');
-      setProviderRuntimeConfig({ higgsfieldCliToken: cliToken });
-      const adapter = getProvider('higgsfield');
-      const ref = await adapter.generateImage({
+      const ref = await higgsfield.generateImage({
         prompt,
         model: modelSlug,
         aspectRatio: aspectRatio,
@@ -177,25 +185,34 @@ export async function POST(req: Request): Promise<Response> {
         { status: 502 },
       );
     } catch (e) {
+      const msg = getErrorMessage(e);
+      // A CLI that's present but not logged in surfaces an auth
+      // error here. Map it to a 401 with an explicit remedy instead
+      // of leaking raw CLI stderr as an opaque 502.
+      const authish = /auth|unauthor|401|credential|token|login/i.test(msg);
       return NextResponse.json(
-        { error: `Higgsfield CLI call failed: ${getErrorMessage(e)}` },
-        { status: 502 },
+        {
+          error: authish
+            ? `Higgsfield CLI is installed but not authenticated. Run \`higgsfield auth login\` once, or paste a CLI token in Settings → AI Engine. (${msg})`
+            : `Higgsfield CLI call failed: ${msg}`,
+        },
+        { status: authish ? 401 : 502 },
       );
     }
   }
 
-  // No CLI token — fall back to OAuth.
-  const clientId = readDesktopConfigValue('HIGGSFIELD_OAUTH_CLIENT_ID');
+  // OAuth/MCP path — reached only when OAuth is connected and no CLI
+  // token was pasted.
   if (!clientId) {
     return NextResponse.json(
-      { error: 'Higgsfield not configured. Visit Settings → AI Engine to connect your Higgsfield account.' },
+      { error: 'Higgsfield not connected. Run `higgsfield auth login` once, paste a CLI token, or connect your account in Settings → AI Engine.' },
       { status: 401 },
     );
   }
-  const auth = await getValidAccessToken({ clientId });
+  const auth = oauthAuth;
   if (!auth) {
     return NextResponse.json(
-      { error: 'Higgsfield account not connected. Click "Connect Higgsfield" in Settings → AI Engine.' },
+      { error: 'Higgsfield account not connected. Run `higgsfield auth login`, paste a CLI token, or click "Connect Higgsfield" in Settings → AI Engine.' },
       { status: 401 },
     );
   }

@@ -64,13 +64,17 @@ async function resolveTextModel(opts: { override?: string }): Promise<ResolvedTe
       baseURL: 'https://api.minimaxi.chat/v1',
     });
     const modelId = opts.override || process.env.VERCEL_AI_MODEL || 'MiniMax-M3';
-    return { provider: 'minimax', model: openai(modelId), modelId };
+    // MiniMax only implements /v1/chat/completions — the default `openai(id)`
+    // callable targets the Responses API (/v1/responses) which 404s there and
+    // makes the Director return an empty prompt. `openai.chat(id)` pins the
+    // chat-completions transport. Mirrors lib/agent-loop/index.ts.
+    return { provider: 'minimax', model: openai.chat(modelId), modelId };
   }
   if (process.env.OPENAI_API_KEY) {
     const { createOpenAI } = await import('@ai-sdk/openai');
     const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const modelId = opts.override || 'gpt-4o-mini';
-    return { provider: 'openai', model: openai(modelId), modelId };
+    return { provider: 'openai', model: openai.chat(modelId), modelId };
   }
   return null;
 }

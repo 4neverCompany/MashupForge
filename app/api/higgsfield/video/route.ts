@@ -48,6 +48,9 @@ interface RequestBody {
   startImageUrl?: unknown;
   endImageUrl?: unknown;
   sound?: unknown;
+  /** V1.6 (M1.2): optional Higgsfield CLI token (parity with the
+   *  image route). When set, the server uses the CLI binary path. */
+  higgsfieldCliToken?: unknown;
 }
 
 function asString(v: unknown): string | undefined {
@@ -98,17 +101,80 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
+  const duration = asInt(body.duration);
+  const startImageUrl = asString(body.startImageUrl);
+
+  // Auth strategy (V1.6 — M1.2): mirror the image route. Prefer the
+  // CLI when the user pasted a token, or when OAuth isn't connected
+  // but the CLI binary is available (cached `higgsfield auth login`
+  // creds / bundled CLI). The CLI's generateVideo supports the core
+  // params (prompt, model, duration, start frame); the MCP-only
+  // flags (mode/genre/end frame/sound/resolution) are dropped on the
+  // CLI path. Only when OAuth is connected and no token was pasted
+  // do we use the OAuth/MCP path below.
+  const cliToken = asString(body.higgsfieldCliToken);
   const clientId = readDesktopConfigValue('HIGGSFIELD_OAUTH_CLIENT_ID');
+  const oauthAuth = clientId ? await getValidAccessToken({ clientId }) : null;
+
+  const { setProviderRuntimeConfig, getProvider } = await import('@/lib/providers/registry');
+  setProviderRuntimeConfig(cliToken ? { higgsfieldCliToken: cliToken } : {});
+  const higgsfield = getProvider('higgsfield');
+  const useCli = cliToken ? true : (!oauthAuth && (await higgsfield.isAvailable()));
+
+  if (useCli) {
+    try {
+      const ref = await higgsfield.generateVideo({
+        prompt,
+        model: modelSlug,
+        ...(duration !== undefined ? { durationSec: duration } : {}),
+        ...(startImageUrl ? { imageUrl: startImageUrl } : {}),
+      });
+      if (ref.kind === 'video' && ref.url) {
+        return NextResponse.json({
+          completed: true,
+          videoUrl: ref.url,
+          requestId: ref.jobId,
+          model: modelSlug,
+          enhancedPrompt: prompt,
+        });
+      }
+      if (ref.kind === 'job' && ref.jobId) {
+        return NextResponse.json({
+          completed: false,
+          requestId: ref.jobId,
+          model: modelSlug,
+        });
+      }
+      return NextResponse.json(
+        { error: 'Higgsfield CLI returned no video URL or job id' },
+        { status: 502 },
+      );
+    } catch (e) {
+      const msg = getErrorMessage(e);
+      const authish = /auth|unauthor|401|credential|token|login/i.test(msg);
+      return NextResponse.json(
+        {
+          error: authish
+            ? `Higgsfield CLI is installed but not authenticated. Run \`higgsfield auth login\` once, or paste a CLI token in Settings → AI Engine. (${msg})`
+            : `Higgsfield CLI video call failed: ${msg}`,
+        },
+        { status: authish ? 401 : 502 },
+      );
+    }
+  }
+
+  // OAuth/MCP path — reached only when OAuth is connected and no CLI
+  // token was pasted.
   if (!clientId) {
     return NextResponse.json(
-      { error: 'Higgsfield not configured. Visit Settings → AI Engine to connect.' },
+      { error: 'Higgsfield not connected. Run `higgsfield auth login` once, paste a CLI token, or connect your account in Settings → AI Engine.' },
       { status: 401 },
     );
   }
-  const auth = await getValidAccessToken({ clientId });
+  const auth = oauthAuth;
   if (!auth) {
     return NextResponse.json(
-      { error: 'Higgsfield account not connected. Click "Connect Higgsfield" in Settings → AI Engine.' },
+      { error: 'Higgsfield account not connected. Run `higgsfield auth login`, paste a CLI token, or click "Connect Higgsfield" in Settings → AI Engine.' },
       { status: 401 },
     );
   }
@@ -118,7 +184,6 @@ export async function POST(req: Request): Promise<Response> {
     prompt,
   };
   if (aspectRatio) toolArgs.aspect_ratio = aspectRatio;
-  const duration = asInt(body.duration);
   if (duration !== undefined) toolArgs.duration = duration;
   const resolution = asString(body.resolution);
   if (resolution && (resolution === '480p' || resolution === '720p' || resolution === '1080p')) {
@@ -130,7 +195,6 @@ export async function POST(req: Request): Promise<Response> {
   }
   const genre = asString(body.genre);
   if (genre) toolArgs.genre = genre;
-  const startImageUrl = asString(body.startImageUrl);
   if (startImageUrl) {
     toolArgs.start_image = startImageUrl;
   }
