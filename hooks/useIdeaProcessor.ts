@@ -31,6 +31,7 @@ import { generateNegativePrompt } from '@/lib/negative-prompts';
 import { extractTrademarkNames } from '@/lib/extract-trademark-names';
 import { setOutcome } from '@/lib/trademark-outcomes';
 import { computeViralityScoreServer } from '@/lib/actions/virality';
+import { requestDirectorPrompt } from '@/lib/director-pipeline';
 import type { WriteCheckpointBase } from './usePipelineDaemon';
 import { useDesktopConfig } from './useDesktopConfig';
 
@@ -116,31 +117,51 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
 
   const expandIdeaToPrompt = useCallback(
     async (idea: Idea, _trendingContext?: string): Promise<string> => {
-      // IMG-INVEST-001 PART 2 (2026-05-23): no our-side prompt
-      // enhancement in Pipeline mode. The idea's concept (and optional
+      // IMG-INVEST-001 PART 2 (2026-05-23): the DEFAULT (fast) path does
+      // NO our-side prompt enhancement. The idea's concept (and optional
       // context) goes to Leonardo VERBATIM; Leonardo's API-side
       // prompt_enhance=ON expands the short concept into a full image
-      // prompt. We deliberately do NOT call streamAIToString here.
-      //
-      // Smart-suggestion (style/quality/aspect ratio) is unaffected:
-      // it lives in suggestParametersAI further down the
-      // triggerImageGeneration path and is a parameter picker, not a
-      // prompt rewriter.
-      //
-      // The trademark blocklist hint that used to be injected into the
-      // LLM system prompt is no longer load-bearing — the post-flight
-      // TRADEMARK-STAGED-PIPELINE retry in useImageGeneration's
-      // submitWithOneRetry still substitutes blocked names if Leonardo
-      // moderation fires, and the per-model blocklist (Issue 2) learns
-      // from each failure to suppress future attempts.
+      // prompt. Smart-suggestion (style/quality/aspect ratio) lives in
+      // suggestParametersAI further down the triggerImageGeneration path.
       const trimmedConcept = idea.concept.trim();
       const trimmedContext = idea.context?.trim();
-      if (trimmedConcept && trimmedContext) {
-        return `${trimmedConcept}. ${trimmedContext}`;
+      const verbatim =
+        trimmedConcept && trimmedContext
+          ? `${trimmedConcept}. ${trimmedContext}`
+          : trimmedConcept || idea.concept;
+
+      // V1.6: opt-in agentic "Director" pipeline. When the user has
+      // enabled it AND at least one niche is configured (the Director
+      // route validates 1-6 niches), route the idea→prompt step through
+      // the multi-step tool-use loop (trending_search → generate_prompt
+      // → critique → refine) and use its final prompt. The Director's
+      // plan is prompt-ONLY (it ends with the final prompt as assistant
+      // text; image generation still happens later via
+      // triggerImageGeneration) and is bounded by a server-side budget +
+      // step cap. ANY failure (no provider, route 4xx, empty prompt)
+      // falls back to the verbatim concept so the pipeline never stalls.
+      const s = getSettings();
+      const niches = (s.agentNiches ?? []).filter(Boolean);
+      if (s.useDirectorPipeline && niches.length >= 1 && trimmedConcept.length >= 3) {
+        addLog('director', idea.id, 'success', '🎬 Director mode: planning prompt via agentic tool loop…');
+        const outcome = await requestDirectorPrompt({
+          ideaConcept: trimmedConcept,
+          niches,
+          genres: s.agentGenres ?? [],
+          model: s.activeTextModel,
+          activeSkills: s.activeSkills ?? [],
+        });
+        if (outcome.ok) {
+          const costStr = typeof outcome.cost === 'number' ? `, $${outcome.cost.toFixed(3)}` : '';
+          addLog('director', idea.id, 'success', `🎬 Director prompt ready (${outcome.truncatedBy ?? 'natural'}${costStr}).`);
+          return outcome.prompt;
+        }
+        addLog('director', idea.id, 'error', `🎬 Director unavailable (${outcome.reason}) — using the concept verbatim.`);
       }
-      return trimmedConcept || idea.concept;
+
+      return verbatim;
     },
-    [],
+    [getSettings, addLog],
   );
 
   const processIdea = useCallback(
