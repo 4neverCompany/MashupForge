@@ -44,8 +44,10 @@ export function CameraAnglePicker({ value, onChange, compact = false }: CameraAn
       {!compact && (
         <div className="flex items-start justify-between gap-3">
           <p className="text-[11px] text-zinc-500 leading-relaxed flex-1">
-            Optional. Pick one camera angle to fold into the MCSLA director protocol —
-            the angle&apos;s lens + tilt + intent get appended to the prompt. Off by default.
+            Optional <span className="text-zinc-400">lock</span>. Leave empty and the AI
+            picks a fitting angle per image; pick one here to force that angle on every
+            image in a batch. The chosen angle&apos;s lens + tilt + intent fold into the
+            MCSLA director protocol.
             Source: <span className="text-zinc-400">banana-pro-director-camera-angles.md</span>.
           </p>
           {selected && (

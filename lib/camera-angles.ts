@@ -107,3 +107,42 @@ export const CAMERA_ANGLE_REGISTER_LABELS: Record<CameraAngleRegister, string> =
   'dutch': 'Dutch Angles — tension & unease',
   'intent': 'Psychological Intent — OTS, POV, Macro',
 };
+
+// ─── V1.7.0-M2.1: contextual (AI-chosen) camera angle ───────────────────────
+//
+// Until v1.6.0 the camera angle was a single global `settings.cameraAngle`
+// applied to every image in a batch — a noir close-up and a wide battle
+// scene got the identical angle. M2.1 lets the idea-generation model pick a
+// fitting angle PER prompt. The Settings picker is redefined from "the global
+// value" to a "Default / Lock": when the user pins an angle there it wins;
+// when it's empty the AI's per-item choice is used.
+
+/** Compact menu of all valid angle ids + their emotional intent, injected
+ *  into the idea-generation prompt so the model picks from the real catalog
+ *  (and we can validate its choice by id). */
+export function buildCameraAngleMenu(): string {
+  return CAMERA_ANGLES
+    .map((a) => `- ${a.id} (${a.register}): ${a.intent}`)
+    .join('\n');
+}
+
+/** True when `id` is one of the 14 catalog slugs. */
+export function isCameraAngleId(id: unknown): id is string {
+  return typeof id === 'string' && CAMERA_ANGLES.some((a) => a.id === id);
+}
+
+/**
+ * Resolve the angle that should actually drive the MCSLA `C:` fragment.
+ * Precedence: a non-empty `settingAngle` is a user LOCK and always wins;
+ * otherwise the AI's per-item `itemAngle` is used (when it's a valid id);
+ * otherwise undefined (no fragment). Invalid ids are ignored, never passed
+ * through to the composer.
+ */
+export function resolveEffectiveCameraAngle(
+  settingAngle: string | undefined,
+  itemAngle: string | undefined,
+): string | undefined {
+  if (isCameraAngleId(settingAngle)) return settingAngle;
+  if (isCameraAngleId(itemAngle)) return itemAngle;
+  return undefined;
+}
