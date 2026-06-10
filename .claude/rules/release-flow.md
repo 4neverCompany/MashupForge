@@ -33,6 +33,15 @@ Those three stay as-is; the convention applies going forward.) The
 `release.sh` empty-bump guard already blocks a no-op release; this rule is
 about not over-releasing real-but-small changes.
 
+**Squash-merge titles MUST be conventional-commit formatted** (`feat: …`,
+`fix(scope): …`). The empty-bump guard and the CHANGELOG auto-gen parse
+commit SUBJECTS on main — a squash commit titled after a prose PR title
+("M1: Pipeline fixes…") is invisible to both, and the guard will falsely
+abort a real release (happened on v1.6.0, 2026-06-10; shipped via
+`ALLOW_EMPTY_RELEASE=1` — the highlights file carried the story). Either
+make the PR title conventional, or pass one at merge time:
+`gh pr merge N --squash --subject "feat: …"`.
+
 ---
 
 `scripts/release.sh <ver>` bumps **all** version files in one shot — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock` — plus refreshes `bun.lock` and regenerates `CHANGELOG.md` from conventional-commit subjects, committing as `chore(release): v<ver>`.
