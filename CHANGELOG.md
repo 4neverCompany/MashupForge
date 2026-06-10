@@ -409,6 +409,62 @@ defaults off, so behavior is identical until you turn it on.
   failures (local-only, unrelated)
 
 ---
+
+### 🎬 Highlights
+
+
+#### 🎬 Highlights
+
+### Higgsfield works out of the box now
+
+The Higgsfield CLI is now **bundled with the installer** — no global npm
+install, no setup script, and **no OAuth window**. After updating:
+
+1. Open **Settings → Higgsfield** and paste a CLI token from your
+   Higgsfield dashboard (or run `higgsfield auth login` once in your
+   normal browser).
+2. That's it — the agentic Director pipeline and the manual Studio
+   panel generate through the bundled CLI.
+
+If you previously installed the CLI yourself (e.g. via
+`scripts/install-higgsfield-cli.ps1`), your own install keeps priority:
+the app only uses the bundled copy when you haven't pointed
+`HIGGSFIELD_BIN` somewhere else.
+
+### Developer-experience fixes (also in this release)
+
+- The local SQLite storage tests now skip gracefully when the native
+  `better-sqlite3` binding isn't built — local `vitest run` and the
+  pre-commit hook are green again (no more `--no-verify`). CI keeps
+  full coverage.
+- 8 dead `eslint-disable` directives removed; stray pnpm artifacts
+  gitignored; the dangling `v1.4.4` tag deleted.
+- One-shot per-user CLI install script
+  (`scripts/install-higgsfield-cli.ps1`) for dev machines.
+
+#### 🔧 Breaking changes
+
+none
+
+#### 📋 Migration notes
+
+No action required — auto-update applies it on next launch. Installer
+size grows slightly (the bundled CLI is a single small npm package).
+
+#### 🧪 Test summary
+
+- `cargo check` clean · `tsc --noEmit` clean · ESLint 0 errors
+- vitest fully green locally (2008 passed, 14 skipped) and on CI
+- The tag build for this release exercises the new CLI-staging step
+  end-to-end
+
+---
+## [1.5.2] — 2026-06-10
+
+### Added
+- **higgsfield:** bundle the Higgsfield CLI into the Windows installer (#64)
+- **higgsfield:** one-shot CLI install script (no global npm, no OAuth window) (#63)
+
 ## [1.5.1] — 2026-06-10
 
 ### Added
