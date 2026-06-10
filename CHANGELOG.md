@@ -368,6 +368,52 @@ on update; everything persists until you delete it).
 - Optional self-healing restore-on-empty in the persistence layer
 
 ---
+
+### 🎬 Highlights
+
+
+#### 🎬 Highlights
+
+### Try the fully-agentic pipeline (experimental, opt-in)
+
+A new **Settings → AI Engine → "Agentic Director pipeline"** toggle (off by
+default). When enabled, the pipeline plans each idea's prompt with a
+multi-step tool loop — **trend search → draft → self-critique → refine →
+final prompt** — instead of sending the idea concept to the image model
+verbatim. This builds on the v1.5.0 tool-calling fix, so MiniMax actually
+drives the loop and the trending + Higgsfield CLI tools run inside it.
+
+**Safe to try:**
+- Your existing fast pipeline is unchanged when the toggle is off.
+- The Director only produces the *prompt* — image generation still happens
+  the normal way afterward — and it's capped at $0.50 / 8 steps per idea.
+- Any failure (no AI key, route error, empty result) falls back to the
+  verbatim concept automatically; the pipeline never stalls.
+- Requires at least one Content Pillar and a text-AI key (MiniMax/OpenAI).
+  Watch the pipeline log for the `🎬 Director` lines when it's planning.
+
+#### 🔧 Breaking changes
+
+none
+
+#### 📋 Migration notes
+
+No action required — auto-update applies it on next launch. The new toggle
+defaults off, so behavior is identical until you turn it on.
+
+#### 🧪 Test summary
+
+- `tsc --noEmit` clean · ESLint 0 errors · `next build` green
+- 7 new `requestDirectorPrompt` tests (success + every fallback path)
+- Full suite green except the 14 known `tauri-sqlite` native-binding
+  failures (local-only, unrelated)
+
+---
+## [1.5.1] — 2026-06-10
+
+### Added
+- opt-in agentic Director pipeline toggle (#61)
+
 ## [1.5.0] — 2026-06-10
 
 ### Added
