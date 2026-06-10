@@ -255,6 +255,19 @@ export async function processIdea(
   let expandedPrompt: string;
   let readyImages: GeneratedImage[];
 
+  // V1.6: caption-failure fallback text. Must NOT be expandedPrompt —
+  // with the Director as the default path that is 40-150 words of
+  // camera/lighting prompt jargon, not caption material (it would land
+  // in ScheduledPost.caption and get posted on approval). Use the short
+  // verbatim concept(+context) instead, matching the resume path's
+  // documented choice of idea.concept for caption fallbacks.
+  const conceptTrimmed = idea.concept.trim();
+  const contextTrimmed = idea.context?.trim();
+  const captionFallback =
+    conceptTrimmed && contextTrimmed
+      ? `${conceptTrimmed}. ${contextTrimmed}`
+      : conceptTrimmed || idea.concept;
+
   if (resuming) {
     // V050-001: credit-preserving resume. Images already exist in the
     // gallery from the prior interrupted run — skip status flip, trending,
@@ -329,6 +342,10 @@ export async function processIdea(
       addLog('prompt-expand', idea.id, 'error', 'Failed to expand prompt');
       throw e;
     }
+    // V1.6: with the Director as default, expand can take minutes — an
+    // idea the user skipped (or that timed out) during the call must
+    // not proceed to spend image credits on a result nobody wants.
+    checkSkip(isSkipRequested);
 
     // Step d — generate images (fatal on failure)
     // MODEL-PRESELECT-FIX (2026-05-21): was hardcoded
@@ -408,12 +425,12 @@ export async function processIdea(
           savePipelineImage(withCaption);
           addLog('caption', idea.id, 'success', `[carousel] Caption generated`);
         } else {
-          sharedCaption = expandedPrompt;
+          sharedCaption = captionFallback;
           addLog('caption', idea.id, 'error', '[carousel] Caption returned empty — using prompt as fallback');
         }
       } catch (e) {
         if (e instanceof SkipIdeaSignal) throw e;
-        sharedCaption = expandedPrompt;
+        sharedCaption = captionFallback;
         addLog('caption', idea.id, 'error', '[carousel] Caption failed — using prompt as fallback');
       }
     }
@@ -548,10 +565,10 @@ export async function processIdea(
           addLog('caption', idea.id, 'success', `[${modelLabel}] Caption generated`);
           okCount++;
         } else if (r.status === 'fulfilled') {
-          captionedImages[i] = { ...img, postCaption: expandedPrompt };
+          captionedImages[i] = { ...img, postCaption: captionFallback };
           addLog('caption', idea.id, 'error', `[${modelLabel}] Caption returned empty — using prompt as fallback`);
         } else {
-          captionedImages[i] = { ...img, postCaption: expandedPrompt };
+          captionedImages[i] = { ...img, postCaption: captionFallback };
           addLog('caption', idea.id, 'error', `[${modelLabel}] Caption failed — using prompt as fallback`);
         }
       }
@@ -582,11 +599,11 @@ export async function processIdea(
           savePipelineImage(withCaption);
           addLog('caption', idea.id, 'success', `[${modelLabel}] Caption generated in ${Date.now() - t0}ms`);
         } else {
-          captionedImages[0] = { ...img, postCaption: expandedPrompt };
+          captionedImages[0] = { ...img, postCaption: captionFallback };
           addLog('caption', idea.id, 'error', `[${modelLabel}] Caption returned empty — using prompt as fallback`);
         }
       } catch {
-        captionedImages[0] = { ...img, postCaption: expandedPrompt };
+        captionedImages[0] = { ...img, postCaption: captionFallback };
         addLog('caption', idea.id, 'error', `[${modelLabel}] Caption failed — using prompt as fallback`);
       }
     }

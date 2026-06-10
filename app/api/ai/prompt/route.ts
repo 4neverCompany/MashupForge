@@ -346,7 +346,9 @@ export async function POST(req: Request): Promise<Response> {
   // instead of an SSE stream. The streaming path
   // below is unchanged.
   if (mode === 'director') {
-    return handleDirectorMode(body);
+    // V1.6: thread the request abort so a client cancel (Skip idea /
+    // client-side timeout) actually stops the paid server-side loop.
+    return handleDirectorMode(body, req.signal);
   }
 
   if (typeof message !== 'string' || !message.trim()) {
@@ -648,7 +650,15 @@ export async function POST(req: Request): Promise<Response> {
 //   - 503: no AI provider configured
 //   - 500: unexpected error (with a sanitised message)
 // ---------------------------------------------------------------------------
-async function handleDirectorMode(body: Record<string, unknown>): Promise<Response> {
+// V1.6: server-side wall-clock ceiling for one Director run. The loop's
+// step/budget caps are evaluated only BETWEEN completed steps — a hung
+// provider connection records no step and can run forever without this.
+const DIRECTOR_SERVER_TIMEOUT_MS = 240_000;
+
+async function handleDirectorMode(
+  body: Record<string, unknown>,
+  clientSignal?: AbortSignal,
+): Promise<Response> {
   const { ideaConcept, niches, genres, skillContext, userId, model } = body;
 
   if (typeof ideaConcept !== 'string' || !ideaConcept.trim()) {
@@ -664,8 +674,13 @@ async function handleDirectorMode(body: Record<string, unknown>): Promise<Respon
     );
   }
 
-  const cleanNiches = sanitizeStringArray(niches);
-  const cleanGenres = sanitizeStringArray(genres);
+  // V1.6: clamp per-item length to the agent loop's 80-char Zod limit
+  // so a long Content Pillar yields a truncated-but-working run instead
+  // of an opaque 500 (the loop throws on schema violations). Mirrors
+  // the client-side clamp in lib/director-pipeline.ts for direct API
+  // callers.
+  const cleanNiches = sanitizeStringArray(niches).map((s) => s.slice(0, 80));
+  const cleanGenres = sanitizeStringArray(genres).map((s) => s.slice(0, 80));
 
   if (cleanNiches.length === 0) {
     return new Response(
@@ -719,6 +734,14 @@ async function handleDirectorMode(body: Record<string, unknown>): Promise<Respon
     // (which only stub `streamText`) from failing on the
     // missing `tool` export.
     const { runDirectorLoop } = await import('@/lib/agent-loop');
+    // V1.6: bound the run in wall-clock time AND honour a client
+    // abort. Without this, a hung provider connection never records a
+    // step (so the step/budget stop conditions never fire) and a
+    // client that gave up keeps paying for a result nobody reads.
+    const timeoutSignal = AbortSignal.timeout(DIRECTOR_SERVER_TIMEOUT_MS);
+    const loopSignal = clientSignal
+      ? AbortSignal.any([clientSignal, timeoutSignal])
+      : timeoutSignal;
     const result = await runDirectorLoop({
       niches: cleanNiches,
       genres: cleanGenres,
@@ -728,6 +751,7 @@ async function handleDirectorMode(body: Record<string, unknown>): Promise<Respon
       ...(modelOverride ? { modelId: modelOverride } : {}),
       ...(maxSteps !== undefined ? { maxSteps } : {}),
       ...(budgetUsd !== undefined ? { budgetUsd } : {}),
+      signal: loopSignal,
     });
 
     // Map "no provider configured" to a 503 so the
@@ -766,6 +790,33 @@ async function handleDirectorMode(body: Record<string, unknown>): Promise<Respon
       return new Response(
         JSON.stringify({
           error: `Director failed: ${detail}`,
+          runId: result.runId,
+          modelId: result.modelId,
+          provider: result.provider,
+          truncatedBy: result.truncatedBy,
+        }),
+        {
+          status: 502,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Director-Run-Id': result.runId,
+            'X-AI-Provider': result.provider,
+            'X-AI-Model': result.modelId,
+          },
+        },
+      );
+    }
+
+    // V1.6: failure sentinel. The system prompt (lib/agent-loop/plan.ts)
+    // instructs the model to finalize unrecoverable tool failures with
+    // "DIRECTOR_FAILED: <reason>". Such a run finishes "naturally"
+    // (finishReason stop, prompt non-empty) so neither guard above
+    // fires — but returning it as a 200 prompt would send a failure
+    // message to the image models. Map it to a 502 carrying the reason.
+    if (/^DIRECTOR_FAILED\b/i.test(result.finalPrompt.trim())) {
+      return new Response(
+        JSON.stringify({
+          error: `Director failed: ${result.finalPrompt.trim().slice(0, 300)}`,
           runId: result.runId,
           modelId: result.modelId,
           provider: result.provider,

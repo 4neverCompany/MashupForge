@@ -196,6 +196,22 @@ export function useSettings() {
               // Merge into the store value. localStorage is a
               // patch; store is authoritative for absent keys.
               const storeValue = (idbIsObj ? idbSettings : {}) as Partial<UserSettings>;
+              // V1.6 marker-pair guard: if the snapshot carries
+              // useDirectorPipeline but NOT directorPipelineUserSet
+              // while the store HAS the marker, the snapshot's value
+              // can only be a stale migration artifact — the sole
+              // writer of the pair (the Settings toggle) stamps both
+              // keys atomically. Without this, a one-commit-stale
+              // crash-recovery snapshot could overwrite an explicit
+              // Director opt-out AND inherit the store's marker,
+              // durably recording a "user choice" the user never made.
+              if (
+                'useDirectorPipeline' in parsed
+                && !('directorPipelineUserSet' in parsed)
+                && storeValue.directorPipelineUserSet === true
+              ) {
+                delete parsed.useDirectorPipeline;
+              }
               // mergeSettings expects UserSettings-shaped input;
               // pass the defaultSettings as the base so the
               // type system is happy AND the merge preserves any
@@ -237,14 +253,26 @@ export function useSettings() {
             if (!cancelled) setSettings(prev => replayPendingOps(applySettingsMigrations(prev)));
           }
         }
+        // V1.6: hydratedOnceRef now means "hydration SUCCEEDED", not
+        // "load attempt finished" — it only flips here, at the end of
+        // the try block. After a FAILED load the state is still
+        // defaults-shaped (now including Director ON), and arming the
+        // persist gates would let any later edit write that payload
+        // over the user's entire store — the V1.4.7 wipe family.
+        hydratedOnceRef.current = true;
       } catch {
-        // silent — settings fall back to defaults
+        // Failed hydration: keep the persist gates closed (debounce
+        // write, cleanup snapshot, beforeunload flush all check
+        // hydratedOnceRef) and surface the failure instead of
+        // silently dropping every subsequent edit.
+        if (!cancelled) {
+          setSaveState({
+            kind: 'error',
+            message: 'Settings failed to load — changes are not being saved. Restart the app.',
+          });
+        }
       } finally {
         loadInFlightRef.current = false;
-        // V1.4.7: the localStorage writers stay disabled until this
-        // flips — a defaults-shaped state must never become a
-        // crash-recovery patch that outranks the store on next load.
-        hydratedOnceRef.current = true;
         if (!cancelled) setIsSettingsLoaded(true);
       }
     };
@@ -268,9 +296,27 @@ export function useSettings() {
     const timer = setTimeout(() => {
       // Belt-and-suspenders: refuse to fire mid-hydration regardless
       // of React's effect/cleanup ordering.
-      if (loadInFlightRef.current || !hydratedOnceRef.current) return;
+      if (loadInFlightRef.current) return;
+      if (!hydratedOnceRef.current) {
+        // Load finished but hydration FAILED (V1.6): don't leave the
+        // user staring at a perpetual "saving…" pill — say why.
+        setSaveState({
+          kind: 'error',
+          message: 'Settings failed to load — changes are not being saved. Restart the app.',
+        });
+        return;
+      }
       set('mashup_settings', settings).then(
-        () => setSaveState({ kind: 'saved', at: Date.now() }),
+        () => {
+          // V1.6: the canonical write supersedes any crash-recovery
+          // snapshot the debounce-cleanup wrote earlier. Remove it so
+          // a stale (one-commit-old) snapshot can never outrank this
+          // state as an "in-flight patch" on the next load — the
+          // mechanism that could resurrect a migration-fabricated
+          // Director=true over a just-persisted explicit opt-out.
+          try { localStorage.removeItem('mashup_settings'); } catch { /* ignore */ }
+          setSaveState({ kind: 'saved', at: Date.now() });
+        },
         (err) => setSaveState({
           kind: 'error',
           message: err instanceof Error ? err.message : 'Settings save failed',

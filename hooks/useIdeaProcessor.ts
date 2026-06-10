@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { streamAIToString } from '@/lib/aiClient';
 import {
   type Idea,
@@ -92,6 +92,13 @@ function findNextAvailableSlot(
   return { date: slot.date, time: slot.time, reason };
 }
 
+// V1.6 Director-default guards (see directorRunsRef below): client-side
+// wall-clock cap for one Director run — well under the daemon's 10-min
+// per-idea timeout so image gen + captioning keep their budget — and the
+// per-idea failure cap after which the session stops paying for retries.
+const DIRECTOR_CLIENT_TIMEOUT_MS = 180_000;
+const DIRECTOR_MAX_FAILURES = 2;
+
 /**
  * Per-idea processor hook. Owns no state — builds a ProcessIdeaDeps bag
  * from daemon-supplied live readers + caller-supplied primitives and
@@ -115,8 +122,19 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
   // creds saved in the Desktop tab see "No platforms configured".
   const { isDesktop, credentials: desktopCreds } = useDesktopConfig();
 
+  // V1.6 Director-default guards: the Director costs real money per run
+  // (server-side budget up to $0.50), and continuous mode resets failed
+  // ideas back to 'idea' and re-picks them next cycle with zero sleep.
+  // Without a memo, any post-Director failure (image-gen error, idea
+  // timeout) re-fires a fresh PAID tool loop for the SAME idea on every
+  // cycle, indefinitely. The memo caps per-idea spend at one successful
+  // run (reused across retries) OR DIRECTOR_MAX_FAILURES failed
+  // attempts (then the idea falls back to verbatim permanently for this
+  // session). Session-scoped by design — an app restart retries.
+  const directorRunsRef = useRef(new Map<string, { prompt?: string; failures: number }>());
+
   const expandIdeaToPrompt = useCallback(
-    async (idea: Idea, _trendingContext?: string): Promise<string> => {
+    async (idea: Idea, _trendingContext?: string, signal?: AbortSignal): Promise<string> => {
       // IMG-INVEST-001 PART 2 (2026-05-23): the DEFAULT (fast) path does
       // NO our-side prompt enhancement. The idea's concept (and optional
       // context) goes to Leonardo VERBATIM; Leonardo's API-side
@@ -145,19 +163,48 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
       const s = getSettings();
       const niches = (s.agentNiches ?? []).filter(Boolean);
       if (s.useDirectorPipeline && niches.length >= 1 && trimmedConcept.length >= 3) {
+        const memo = directorRunsRef.current.get(idea.id) ?? { failures: 0 };
+        if (memo.prompt) {
+          // Retry of an idea whose Director run already succeeded
+          // (e.g. image gen failed and continuous mode re-picked it):
+          // reuse the already-paid prompt instead of spending again.
+          addLog('director', idea.id, 'success', '🎬 Director prompt reused from this session (no extra cost).');
+          return memo.prompt;
+        }
+        if (memo.failures >= DIRECTOR_MAX_FAILURES) {
+          addLog('director', idea.id, 'error', `🎬 Director skipped after ${memo.failures} failed attempts — using the concept verbatim.`);
+          return verbatim;
+        }
+
         addLog('director', idea.id, 'success', '🎬 Director mode: planning prompt via agentic tool loop…');
-        const outcome = await requestDirectorPrompt({
-          ideaConcept: trimmedConcept,
-          niches,
-          genres: s.agentGenres ?? [],
-          model: s.activeTextModel,
-          activeSkills: s.activeSkills ?? [],
-        });
+        // V1.6: bound the Director in wall-clock time and make Skip
+        // responsive. The per-idea daemon timeout (10 min) used to be
+        // spent almost entirely on image gen; an unbounded Director
+        // fetch could eat it whole — and skipAbort couldn't cancel the
+        // in-flight call. The combined signal aborts the fetch on
+        // EITHER the user's skip or the client-side cap; the server
+        // (handleDirectorMode) honours the abort and stops billing.
+        const timeoutSignal = AbortSignal.timeout(DIRECTOR_CLIENT_TIMEOUT_MS);
+        const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+        const outcome = await requestDirectorPrompt(
+          {
+            ideaConcept: trimmedConcept,
+            niches,
+            genres: s.agentGenres ?? [],
+            model: s.activeTextModel,
+            activeSkills: s.activeSkills ?? [],
+          },
+          { signal: combinedSignal },
+        );
         if (outcome.ok) {
+          memo.prompt = outcome.prompt;
+          directorRunsRef.current.set(idea.id, memo);
           const costStr = typeof outcome.cost === 'number' ? `, $${outcome.cost.toFixed(3)}` : '';
           addLog('director', idea.id, 'success', `🎬 Director prompt ready (${outcome.truncatedBy ?? 'natural'}${costStr}).`);
           return outcome.prompt;
         }
+        memo.failures += 1;
+        directorRunsRef.current.set(idea.id, memo);
         addLog('director', idea.id, 'error', `🎬 Director unavailable (${outcome.reason}) — using the concept verbatim.`);
       }
 
@@ -215,7 +262,11 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
           if (data.success && data.summary) return data.summary;
           return '';
         },
-        expandIdeaToPrompt,
+        // V1.6: thread the per-idea skip signal into the Director call
+        // so "Skip idea" (and the idea timeout) abort the in-flight
+        // fetch instead of letting it run — and bill — to completion.
+        expandIdeaToPrompt: (ideaArg, trendingCtx) =>
+          expandIdeaToPrompt(ideaArg, trendingCtx, skipSignal),
         triggerImageGeneration: async (prompt, modelIds, trendingContext) => {
           // Run the deterministic param-suggest rule engine for this
           // idea's prompt so the pipeline uses the same style / aspect /
