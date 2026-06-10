@@ -298,6 +298,17 @@ export function ManualGenerationPanel({ onImageGenerated }: { onImageGenerated?:
   const [result, setResult] = useState<GeneratedImage | null>(null)
   const [elapsed, setElapsed] = useState(0)
 
+  // V1.6 (M1.2): Higgsfield counts as "connected" when EITHER the
+  // OAuth flow completed, OR a CLI token is set, OR the local CLI
+  // binary is installed AND authenticated (bundled CLI / cached
+  // `higgsfield auth login` creds). We probe the CLI-auth endpoint
+  // when the provider is higgsfield so the guard + label reflect the
+  // CLI reality instead of the OAuth-only flag — which is what made
+  // the panel show "not connected" and refuse to generate even when
+  // a working CLI was right there.
+  const [cliReady, setCliReady] = useState(false)
+  const higgsfieldReady = settings.higgsfieldConnected || Boolean(cliToken) || cliReady
+
   // Provider-aware model list
   const availableModels = useMemo(() => getModelList(provider, mode), [provider, mode])
   const selectedModel = useMemo(
@@ -355,6 +366,24 @@ export function ManualGenerationPanel({ onImageGenerated }: { onImageGenerated?:
     return () => clearInterval(interval)
   }, [generating])
 
+  // V1.6 (M1.2): probe the local Higgsfield CLI auth state when the
+  // provider is higgsfield. `binaryAvailable && authenticated` means
+  // the user can generate via the CLI even without OAuth.
+  useEffect(() => {
+    if (provider !== 'higgsfield') return
+    let cancelled = false
+    fetch('/api/higgsfield/cli-auth')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { binaryAvailable?: boolean; authenticated?: boolean } | null) => {
+        if (cancelled || !d) return
+        setCliReady(Boolean(d.binaryAvailable && d.authenticated))
+      })
+      .catch(() => {
+        if (!cancelled) setCliReady(false)
+      })
+    return () => { cancelled = true }
+  }, [provider])
+
   // ------------------------------------------------------------------
   // Generate
   // ------------------------------------------------------------------
@@ -364,8 +393,10 @@ export function ManualGenerationPanel({ onImageGenerated }: { onImageGenerated?:
       setError('Prompt is required')
       return
     }
-    if (provider === 'higgsfield' && !settings.higgsfieldConnected) {
-      setError('Connect Higgsfield in Settings before generating.')
+    if (provider === 'higgsfield' && !higgsfieldReady) {
+      setError(
+        'Higgsfield isn’t ready. Run `higgsfield auth login` once, paste a CLI token, or connect your account in Settings → AI Engine.',
+      )
       return
     }
 
@@ -431,6 +462,9 @@ export function ManualGenerationPanel({ onImageGenerated }: { onImageGenerated?:
         // mode === 'video'
         body.model = modelId
         if (provider === 'higgsfield') {
+          // V1.6 (M1.2): forward the CLI token so the video route can
+          // use the CLI path (parity with the image branch).
+          if (cliToken) body.higgsfieldCliToken = cliToken
           res = await fetch('/api/higgsfield/video', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -514,7 +548,7 @@ export function ManualGenerationPanel({ onImageGenerated }: { onImageGenerated?:
     resolution,
     negativePrompt,
     referenceImageUrl,
-    settings.higgsfieldConnected,
+    higgsfieldReady,
     selectedModel,
     cliToken,
     onImageGenerated,
@@ -569,7 +603,7 @@ export function ManualGenerationPanel({ onImageGenerated }: { onImageGenerated?:
           >
             <option value="higgsfield">
               Higgsfield
-              {settings.higgsfieldConnected
+              {higgsfieldReady
                 ? ' (connected)'
                 : ' (not connected)'}
             </option>
