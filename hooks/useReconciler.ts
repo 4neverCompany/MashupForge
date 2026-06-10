@@ -79,7 +79,7 @@ export function useReconciler(): UseReconcilerState {
 
     try {
       // Synchronous init for IDB. The IDB driver is sync to construct.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
+       
       const { IdbPostLifecycleStorage } = require('@/lib/post-lifecycle/storage/idb');
       const storage: PostLifecycleStorage = new IdbPostLifecycleStorage();
       reconcilerRef.current = new Reconciler(storage);

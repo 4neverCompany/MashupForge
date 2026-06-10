@@ -75,7 +75,7 @@ vi.mock('ai', async (importOriginal) => {
 // the mock is wired before the module evaluates.
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+ 
 import * as aiMock from 'ai';
 import {
   runDirectorLoop,

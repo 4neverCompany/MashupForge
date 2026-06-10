@@ -20,7 +20,6 @@
  */
 
 // @vitest-environment node
-import Database from 'better-sqlite3';
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import { BetterSqlite3Driver } from './better-sqlite3-driver';
@@ -35,6 +34,38 @@ import {
   transition,
   type ImageBlob,
 } from '../';
+
+// V1.5.2: detect whether better-sqlite3's NATIVE binding is loadable in
+// this environment, WITHOUT a static `import` (better-sqlite3 requires the
+// binding at module-load time, so a static import would crash the whole
+// test file before any guard could run). We load it dynamically inside a
+// try/catch: CI (and any machine that compiled the binding) gets the real
+// module and runs the full suite; a dev box where the binding was never
+// built — e.g. a stray pnpm store that skipped the native build — flips
+// the skip flag instead of hard-failing `vitest run` (which was forcing
+// `--no-verify` on every local commit). Binding availability is an
+// ENVIRONMENT property, not a code-correctness one. CI keeps full coverage.
+type BetterSqlite3Ctor = typeof import('better-sqlite3');
+let Database: BetterSqlite3Ctor | null = null;
+let sqliteAvailable = true;
+try {
+  const mod = await import('better-sqlite3');
+  // better-sqlite3 is CommonJS (`export = Database`); the dynamic import
+  // surfaces the constructor as `.default` under esModuleInterop, or as
+  // the namespace itself otherwise — accept either.
+  Database = (mod as { default?: BetterSqlite3Ctor }).default ?? (mod as unknown as BetterSqlite3Ctor);
+  new Database(':memory:').close();
+} catch {
+  sqliteAvailable = false;
+   
+  console.warn(
+    '[tauri-sqlite.test] better-sqlite3 native binding unavailable — skipping '
+      + 'SQLite storage tests locally. Run `npm rebuild better-sqlite3` (or a clean '
+      + '`bun install`) to enable them. CI builds the binding and runs them.',
+  );
+}
+/** describe() on a machine with the binding, describe.skip() without it. */
+const describeSqlite = sqliteAvailable ? describe : describe.skip;
 
 const TEST_DATA = new ArrayBuffer(8);
 
@@ -56,14 +87,16 @@ async function makeStorage(): Promise<{
 }> {
   // Each test gets a fresh in-memory database. better-sqlite3
   // creates a new database per `new Database(':memory:')` call, so
-  // there's no cross-test contamination.
-  const raw = new Database(':memory:');
+  // there's no cross-test contamination. `Database!` is safe: these
+  // tests only run inside `describeSqlite`, which is skipped when the
+  // binding (and thus `Database`) is unavailable.
+  const raw = new Database!(':memory:');
   const driver = new BetterSqlite3Driver(raw);
   const storage = await TauriSqliteStorage.open(driver);
   return { storage, driver };
 }
 
-describe('TauriSqliteStorage: schema migration on open', () => {
+describeSqlite('TauriSqliteStorage: schema migration on open', () => {
   it('creates posts and blobs tables on first open', async () => {
     const { driver } = await makeStorage();
     // Use the underlying better-sqlite3 to inspect the schema. We
@@ -90,7 +123,7 @@ describe('TauriSqliteStorage: schema migration on open', () => {
   });
 });
 
-describe('TauriSqliteStorage: atomicity contract', () => {
+describeSqlite('TauriSqliteStorage: atomicity contract', () => {
   it('savePostWithBlob writes both post and blob atomically', async () => {
     const { storage } = await makeStorage();
     const id = PostId('post_atomic01');
@@ -172,7 +205,7 @@ describe('TauriSqliteStorage: atomicity contract', () => {
     //
     // We do this by wrapping the better-sqlite3 driver and
     // forcing an error on the second statement.
-    const raw = new Database(':memory:');
+    const raw = new Database!(':memory:');
     const baseDriver = new BetterSqlite3Driver(raw);
     // Bootstrap the schema by opening the storage once.
     await TauriSqliteStorage.open(baseDriver);
@@ -237,7 +270,7 @@ describe('TauriSqliteStorage: atomicity contract', () => {
   });
 });
 
-describe('TauriSqliteStorage: round-trip and queries', () => {
+describeSqlite('TauriSqliteStorage: round-trip and queries', () => {
   it('preserves all PostRecord fields through write + read', async () => {
     const { storage } = await makeStorage();
     const id = PostId('post_roundtrip');
@@ -294,7 +327,7 @@ describe('TauriSqliteStorage: round-trip and queries', () => {
   });
 });
 
-describe('TauriSqliteStorage: cascade delete', () => {
+describeSqlite('TauriSqliteStorage: cascade delete', () => {
   it('deletePost removes the post and cascades the blob via FK', async () => {
     const { storage } = await makeStorage();
     const id = PostId('post_delete01');
@@ -339,7 +372,7 @@ describe('TauriSqliteStorage: cascade delete', () => {
   });
 });
 
-describe('TauriSqliteStorage: touchBlobVerifiedAt', () => {
+describeSqlite('TauriSqliteStorage: touchBlobVerifiedAt', () => {
   it('updates only the last_verified_at field on the blob', async () => {
     const { storage } = await makeStorage();
     const id = PostId('post_touch001');
@@ -365,7 +398,7 @@ describe('TauriSqliteStorage: touchBlobVerifiedAt', () => {
 
 // ── The v0.9.41 regression gate ─────────────────────────────────────────
 
-describe('v0.9.41 regression: SQLite storage prevents the bug at write time', () => {
+describeSqlite('v0.9.41 regression: SQLite storage prevents the bug at write time', () => {
   it('savePostWithBlob rejects a post with imageBlobId but no blob', async () => {
     const { storage } = await makeStorage();
     const postId = PostId('post_v0941_sqlite');
