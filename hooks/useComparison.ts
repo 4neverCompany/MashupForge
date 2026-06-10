@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 // BUG-DEV-012: persisted through `@/lib/persistence` so the last comparison
 // result survives a folder move on Windows (WebView2 IndexedDB fix).
 import { get, set } from '@/lib/persistence';
@@ -52,6 +52,16 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
   // V1.2.1: lazy load — see useImages.ts for the full rationale.
   const [loadTriggered, setLoadTriggered] = useState(false);
 
+  // V1.4.7-COMPARISON-WIPE: dirty flag + in-flight guard, same pattern
+  // as useImages/useSettings/useIdeas. Only real mutations arm the
+  // persist effect below; hydration commits don't.
+  const dirtyRef = useRef(false);
+  const loadInFlightRef = useRef(false);
+  const markDirty = () => {
+    dirtyRef.current = true;
+    setLoadTriggered(true);
+  };
+
   const clearComparisonError = () => setComparisonError(null);
 
   useEffect(() => {
@@ -65,7 +75,12 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
       });
       return () => { stale = true; };
     }
+    // V1.4.7: close the persist gate while the real load runs.
+    // Documented project exception — same as useImages/useSettings.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsComparisonLoaded(false);
     let cancelled = false;
+    loadInFlightRef.current = true;
     const load = async () => {
       try {
         const idbComparisonResults = await get('mashup_comparison_results');
@@ -73,6 +88,7 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
       } catch {
         // silent — comparison results remain empty
       } finally {
+        loadInFlightRef.current = false;
         if (!cancelled) setIsComparisonLoaded(true);
       }
     };
@@ -80,11 +96,20 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
     return () => { cancelled = true; };
   }, [loadTriggered]);
 
+  // V1.4.7-COMPARISON-WIPE: this effect was gated ONLY on
+  // isComparisonLoaded — which the mount microtask flips to true while
+  // comparisonResults is still `[]`. Every Studio mount immediately
+  // wrote `[]` over the stored comparison results (no debounce, no
+  // dirty check): a deterministic wipe of the comparison library.
+  // Now gated like the other persistence hooks: a real mutation must
+  // have happened (dirtyRef), the store must have been hydrated
+  // (loadTriggered + isComparisonLoaded), and never mid-hydration.
   useEffect(() => {
-    if (isComparisonLoaded) {
-      set('mashup_comparison_results', comparisonResults);
-    }
-  }, [comparisonResults, isComparisonLoaded]);
+    if (!isComparisonLoaded || !loadTriggered) return;
+    if (!dirtyRef.current) return;
+    if (loadInFlightRef.current) return;
+    set('mashup_comparison_results', comparisonResults);
+  }, [comparisonResults, isComparisonLoaded, loadTriggered]);
 
   const generateComparison = async (
     prompt: string,
@@ -94,6 +119,8 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
   ): Promise<GeneratedImage[]> => {
     setIsGenerating(true);
     setComparisonError(null);
+    // V1.4.7: generation mutates comparisonResults — arm the persist.
+    markDirty();
     const comparisonId = `comp-group-${Date.now()}`;
     const readyImages: GeneratedImage[] = [];
 
@@ -450,6 +477,7 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
     const winnerImg = comparisonResults.find(img => img.id === id);
     if (!winnerImg || !winnerImg.url) return;
 
+    markDirty();
     setComparisonResults(prev => prev.map(img => {
       if (img.id === id) {
         return { ...img, winner: true };
@@ -479,11 +507,13 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
   };
 
   const clearComparison = () => {
+    markDirty();
     setComparisonResults([]);
     set('mashup_comparison_results', []);
   };
 
   const deleteComparisonResult = (id: string) => {
+    markDirty();
     setComparisonResults(prev => {
       const updated = prev.filter(img => img.id !== id);
       set('mashup_comparison_results', updated);

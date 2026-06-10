@@ -85,6 +85,50 @@ export function useSettings() {
     settingsRef.current = settings;
   }, [settings]);
 
+  // V1.4.7-SETTINGS-WIPE: useSettings had the same wipe vector that PR #59
+  // closed in useImages — the debounced store write (and BOTH localStorage
+  // writers) were gated only on isSettingsLoaded, which the !loadTriggered
+  // branch flips to true on Studio mount while `settings` is still
+  // defaultSettings. Any settings commit before hydration finished then
+  // persisted near-defaults over the user's stored settings, and the
+  // unmount-cleanup poisoned localStorage with defaults that the next
+  // load treats as "in-flight edits" and merges OVER the store (patch
+  // wins) — the "watermark resets on reload" report.
+  //
+  //   - dirtyRef:        only updateSettings/clearSettings arm the
+  //                      persist paths; hydration commits don't.
+  //   - loadInFlightRef: true while the async load runs; the debounce
+  //                      timer refuses to fire mid-hydration.
+  //   - hydratedOnceRef: localStorage writers refuse until the real
+  //                      settings have hydrated at least once — a
+  //                      defaults-shaped snapshot must never become a
+  //                      crash-recovery "patch".
+  //   - pendingOpsRef:   mutations made before hydration are recorded
+  //                      and replayed ON TOP of the hydrated state, so
+  //                      neither side clobbers the other.
+  const dirtyRef = useRef(false);
+  const loadInFlightRef = useRef(false);
+  const hydratedOnceRef = useRef(false);
+  const pendingOpsRef = useRef<Array<
+    | { type: 'patch'; patch: Partial<UserSettings> }
+    | { type: 'clear'; keys: (keyof UserSettings)[] }
+  >>([]);
+
+  // Replay pre-hydration mutations on top of a hydrated base state.
+  const replayPendingOps = useCallback((base: UserSettings): UserSettings => {
+    let next = base;
+    for (const op of pendingOpsRef.current) {
+      if (op.type === 'patch') {
+        next = mergeSettings(next, op.patch);
+      } else {
+        const clone = { ...next } as Record<string, unknown>;
+        for (const key of op.keys) delete clone[key as string];
+        next = clone as unknown as UserSettings;
+      }
+    }
+    return next;
+  }, []);
+
   // PROP-010: load path. Defensive `typeof === 'object'` guard rejects any
   // corrupted/non-object value left over from the pre-fix race that could
   // have written `undefined` into the store.
@@ -99,7 +143,16 @@ export function useSettings() {
       });
       return () => { stale = true; };
     }
+    // V1.4.7-SETTINGS-WIPE: close the persist gate while the real load
+    // runs — isSettingsLoaded stayed true from the mount microtask
+    // above, so a settings commit during the load window could persist
+    // near-defaults over the store. Deliberately synchronous (the gate
+    // must close in the same commit) — documented project exception,
+    // same as the useImages load effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsSettingsLoaded(false);
     let cancelled = false;
+    loadInFlightRef.current = true;
     const loadSettings = async () => {
       try {
         const storedSettings = localStorage.getItem('mashup_settings');
@@ -154,62 +207,68 @@ export function useSettings() {
               );
               await set('mashup_settings', merged);
               localStorage.removeItem('mashup_settings');
-              if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, merged)));
+              if (!cancelled) setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(mergeSettings(prev, merged))));
             } else {
               // empty object — clear and load from store
               localStorage.removeItem('mashup_settings');
               if (idbIsObj && !cancelled) {
-                setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>)));
+                setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>))));
               } else if (!cancelled) {
-                setSettings(prev => applyV040AutoApproveMigration(prev));
+                setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(prev)));
               }
             }
           } else {
             const idbSettings = await get('mashup_settings');
             if (idbSettings && typeof idbSettings === 'object') {
-              if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>)));
+              if (!cancelled) setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>))));
             } else {
-              if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(prev));
+              if (!cancelled) setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(prev)));
             }
           }
         } else {
           const idbSettings = await get('mashup_settings');
           if (idbSettings && typeof idbSettings === 'object') {
-            if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>)));
+            if (!cancelled) setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>))));
           } else {
             // Fresh install with no saved settings still gets the explicit
             // auto-everywhere map written so the PipelinePanel checkbox grid
             // shows the active state immediately rather than waiting for
             // the user's first toggle to materialize the field.
-            if (!cancelled) setSettings(prev => applyV040AutoApproveMigration(prev));
+            if (!cancelled) setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(prev)));
           }
         }
       } catch {
         // silent — settings fall back to defaults
       } finally {
+        loadInFlightRef.current = false;
+        // V1.4.7: the localStorage writers stay disabled until this
+        // flips — a defaults-shaped state must never become a
+        // crash-recovery patch that outranks the store on next load.
+        hydratedOnceRef.current = true;
         if (!cancelled) setIsSettingsLoaded(true);
       }
     };
     loadSettings();
     return () => { cancelled = true; };
-  }, [loadTriggered]);
+  }, [loadTriggered, replayPendingOps]);
 
   // PROP-010: persist after every committed state change, debounced 300ms.
   // Debounce prevents an IDB write on every keystroke in text fields while
   // still guaranteeing the final value is persisted. The cleanup cancels any
   // pending timer so rapid updates coalesce into a single write.
-  // First post-load render is the merged-from-storage commit, not a user
-  // edit — skip flagging "Saving…" for it. Subsequent renders are real
-  // changes and drive the saveState lifecycle.
-  const skipFirstSaveRef = useRef(true);
+  //
+  // V1.4.7-SETTINGS-WIPE: gated on loadTriggered + isSettingsLoaded +
+  // dirtyRef (real user edit pending). Hydration commits don't arm it,
+  // so the (former) skipFirstSaveRef "skip the post-load echo" hack is
+  // no longer needed — any run of this effect IS a pending save.
   useEffect(() => {
-    if (!isSettingsLoaded) return;
-    if (skipFirstSaveRef.current) {
-      skipFirstSaveRef.current = false;
-      return;
-    }
+    if (!loadTriggered || !isSettingsLoaded) return;
+    if (!dirtyRef.current) return;
     setSaveState({ kind: 'saving' });
     const timer = setTimeout(() => {
+      // Belt-and-suspenders: refuse to fire mid-hydration regardless
+      // of React's effect/cleanup ordering.
+      if (loadInFlightRef.current || !hydratedOnceRef.current) return;
       set('mashup_settings', settings).then(
         () => setSaveState({ kind: 'saved', at: Date.now() }),
         (err) => setSaveState({
@@ -226,13 +285,20 @@ export function useSettings() {
     // `beforeunload` doesn't fire on Next.js soft route changes.
     // Hard reload still goes through `beforeunload`; this
     // cleanup covers the soft-nav case.
+    //
+    // V1.4.7-SETTINGS-WIPE: only once hydrated. Before hydration,
+    // settingsRef.current is defaults-shaped; writing it here poisoned
+    // localStorage, and the next load's merge let that snapshot WIN
+    // over the store (patch semantics) — the "watermark resets on
+    // reload" bug.
     return () => {
       clearTimeout(timer);
+      if (!hydratedOnceRef.current || loadInFlightRef.current) return;
       try {
         localStorage.setItem('mashup_settings', JSON.stringify(settingsRef.current));
       } catch { /* storage quota — silent */ }
     };
-  }, [settings, isSettingsLoaded]);
+  }, [settings, isSettingsLoaded, loadTriggered]);
 
   // Flush-on-unload safety net for the 300ms debounce window. Writes
   // synchronously to localStorage on beforeunload; the load path already
@@ -253,6 +319,12 @@ export function useSettings() {
   useEffect(() => {
     if (!isSettingsLoaded || !loadTriggered) return;
     const flush = () => {
+      // V1.4.7-SETTINGS-WIPE: only flush a REAL pending edit of the
+      // hydrated state. A defaults-shaped snapshot (pre-hydration) or
+      // a no-edit session must never land in localStorage — the next
+      // load treats localStorage as an in-flight patch that outranks
+      // the store.
+      if (!dirtyRef.current || !hydratedOnceRef.current) return;
       try {
         localStorage.setItem('mashup_settings', JSON.stringify(settingsRef.current));
       } catch { /* storage quota — silent */ }
@@ -271,8 +343,20 @@ export function useSettings() {
   ) => {
     setSettings((prev) => {
       const patch = typeof newSettings === 'function' ? newSettings(prev) : newSettings;
+      // V1.4.7-SETTINGS-WIPE: record pre-hydration edits so the load
+      // path can replay them ON TOP of the hydrated state (instead of
+      // the hydration commit silently reverting them). Recording the
+      // RESOLVED patch is idempotent under StrictMode double-invoke.
+      if (!hydratedOnceRef.current) {
+        pendingOpsRef.current.push({ type: 'patch', patch });
+      }
       return mergeSettings(prev, patch);
     });
+    // A real user edit: arm the persist paths and make sure the store
+    // hydrates NOW so the eventual write contains the full settings,
+    // not defaults + this one field.
+    dirtyRef.current = true;
+    setLoadTriggered(true);
   }, []);
 
   // V1.1.1-CAMERA-ANGLE-CLEAR: explicit key-removal path. `mergeSettings`
@@ -287,12 +371,19 @@ export function useSettings() {
   // all advanced settings" button can use the same primitive.
   const clearSettings = useCallback((keys: (keyof UserSettings)[]) => {
     setSettings((prev) => {
+      // V1.4.7-SETTINGS-WIPE: see updateSettings — replayed after
+      // hydration so the cleared key stays cleared.
+      if (!hydratedOnceRef.current) {
+        pendingOpsRef.current.push({ type: 'clear', keys });
+      }
       const next = { ...prev } as Record<string, unknown>;
       for (const key of keys) {
         delete next[key as string];
       }
       return next as unknown as UserSettings;
     });
+    dirtyRef.current = true;
+    setLoadTriggered(true);
   }, []);
 
   return { settings, updateSettings, clearSettings, isSettingsLoaded, saveState, requestLoad: () => setLoadTriggered(true) };
