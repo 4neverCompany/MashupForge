@@ -280,13 +280,15 @@ async function resolveTextModel(opts: { override?: string }): Promise<ResolvedTe
       baseURL: 'https://api.minimaxi.chat/v1',
     });
     const modelId = opts.override || process.env.VERCEL_AI_MODEL || 'MiniMax-M3';
-    return { model: openai(modelId), modelId };
+    // MiniMax only implements /v1/chat/completions; `openai.chat(id)` pins that
+    // transport (the bare `openai(id)` callable hits the Responses API and 404s).
+    return { model: openai.chat(modelId), modelId };
   }
   if (process.env.OPENAI_API_KEY) {
     const { createOpenAI } = await import('@ai-sdk/openai');
     const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const modelId = opts.override || 'gpt-4o-mini';
-    return { model: openai(modelId), modelId };
+    return { model: openai.chat(modelId), modelId };
   }
   return null;
 }

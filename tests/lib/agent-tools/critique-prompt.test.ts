@@ -15,8 +15,16 @@ vi.mock('ai', async () => {
     tool: actual.tool,
   };
 });
+// The stub callable must expose `.chat` because the tool uses
+// `openai.chat(id)` (MiniMax only speaks /v1/chat/completions).
 vi.mock('@ai-sdk/openai', () => ({
-  createOpenAI: () => (modelId: string) => ({ modelId, _stub: true }),
+  createOpenAI: () => {
+    const make = (modelId: string) => ({ modelId, _stub: true });
+    const callable = (modelId: string) => make(modelId);
+    callable.chat = (modelId: string) => make(modelId);
+    callable.responses = (modelId: string) => make(modelId);
+    return callable;
+  },
 }));
 
 import {
