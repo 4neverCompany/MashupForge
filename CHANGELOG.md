@@ -296,6 +296,83 @@ after that they stick.
 - ESLint 0 errors · `tsc --noEmit` clean
 
 ---
+
+### 🎬 Highlights
+
+
+> A feature release: the AI can finally call tools (Higgsfield generation
+> included), trending search has a resilient fallback, approved images
+> land on disk as real files, and you can re-stamp a watermark anytime.
+
+#### 🎬 Highlights
+
+### The AI can actually use its tools now
+
+The agent loop built MiniMax through the AI SDK's `/v1/responses` adapter,
+but MiniMax only speaks `/v1/chat/completions` — so the very first tool
+call 404'd and **no tool ever ran**. That's fixed. Combined with the
+Higgsfield wiring below, the MashupForge AI can now genuinely search
+trends and generate through Higgsfield as part of its loop.
+
+### Trending no longer comes up empty
+
+`/api/trending` was camofox-only — if the camofox sidecar wasn't running
+on your machine, you got "No trending data found" every time. It now
+falls back to a DuckDuckGo/Brave web search, so trends work with or
+without camofox.
+
+### Higgsfield generation in the agent (via CLI)
+
+`generate_image` and `generate_video` were placeholders. They're now
+wired to the Higgsfield CLI: images return immediately; video polls the
+async job and returns the finished URL. (If the CLI isn't authenticated,
+you'll get a clear "run `higgsfield auth login`" message.)
+
+### Approved images are saved locally
+
+When you approve a post, its (watermarked) image is now written to disk —
+both internally and to a discoverable **`Documents\MashupForge\Images`**
+folder — so every approved post exists as a real local file.
+
+### Re-apply watermark anywhere
+
+A new **Re-apply watermark** action in Captioning, Post-Ready, and
+Gallery re-stamps an image with your current watermark settings. It
+composites onto the original clean image, so re-applying never stacks
+watermarks. (Videos are skipped.)
+
+#### 🔧 Breaking changes
+
+none
+
+#### 📋 Migration notes
+
+No action required — auto-update applies it on next launch. Updating
+preserves all your data (this was verified end-to-end: nothing is wiped
+on update; everything persists until you delete it).
+
+#### 🧪 Test summary
+
+- `tsc --noEmit` clean · ESLint 0 errors · `next build` green (all routes
+  < 300 KB gzipped first-load JS)
+- New tests: trending fallback, wired Higgsfield image+video tools,
+  watermark re-apply guards
+- Full suite green except the 14 known `tauri-sqlite` native-binding
+  failures (local-only, unrelated)
+
+#### 🔭 Follow-ups (not in this release)
+
+- Higgsfield **MCP** server (interactive OAuth + curated tools) as a
+  flag-gated secondary to the CLI
+- Routing the pipeline through the agentic Director by default (opt-in)
+- Optional self-healing restore-on-empty in the persistence layer
+
+---
+## [1.5.0] — 2026-06-10
+
+### Added
+- **v1.5:** trending tool-call fix + Higgsfield CLI tools + local image save + watermark re-apply (#60)
+
 ## [1.4.7] — 2026-06-10
 
 ### Fixed
