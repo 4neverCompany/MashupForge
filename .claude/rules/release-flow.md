@@ -12,6 +12,29 @@ paths:
 
 # MashupForge release flow
 
+## Batch releases — DON'T tag every change (convention, 2026-06-10)
+
+Each tag triggers a ~20-minute Tauri Windows build AND pushes a forced
+auto-update to every desktop user. So **do not cut a release per PR.** The
+agreed rhythm (Maurice, 2026-06-10):
+
+1. **Merge** finished PRs to `main` as they go green (CI on the PR is the
+   gate). Merging is cheap and does NOT trigger a desktop build — only a
+   pushed `v*.*.*` tag does.
+2. **Accumulate** related work on `main`. When a coherent bundle is ready —
+   a feature + its fixes, or the end of a work session — **propose ONE
+   release** and **wait for Maurice's explicit OK** before tagging.
+3. Only then run `scripts/release.sh <ver>` + push the tag.
+
+Do NOT tag proactively. A single release that bundles 3–5 merged PRs is the
+target, not 5 separate releases. (2026-06-10 shipped v1.5.0→v1.5.2 as three
+separate builds in one day — that's exactly what this convention prevents.
+Those three stay as-is; the convention applies going forward.) The
+`release.sh` empty-bump guard already blocks a no-op release; this rule is
+about not over-releasing real-but-small changes.
+
+---
+
 `scripts/release.sh <ver>` bumps **all** version files in one shot — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock` — plus refreshes `bun.lock` and regenerates `CHANGELOG.md` from conventional-commit subjects, committing as `chore(release): v<ver>`.
 
 Before v0.9.40 the script didn't touch `Cargo.lock`, which caused two separate release breakages (v0.9.37 and v0.9.40). A `cargo update -p app` step now runs inside the script after the version bumps so the lockfile's `app` entry tracks `Cargo.toml`.
