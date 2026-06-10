@@ -243,12 +243,25 @@ export async function resolveDirectorModel(
       baseURL: 'https://api.minimaxi.chat/v1',
     });
     const modelId = modelOverride || process.env.VERCEL_AI_MODEL || 'MiniMax-M3';
-    return { model: openai(modelId), modelId, provider: 'minimax' };
+    // V1.5-DIRECTOR-MINIMAX-TOOLCALL: use `.chat()` (chat completions),
+    // NOT the default callable. The @ai-sdk/openai v6 default callable
+    // targets the OpenAI Responses API (/v1/responses), which MiniMax
+    // does NOT implement — so `openai(modelId)` 404s on the very first
+    // model call and the ToolLoopAgent never executes a single tool
+    // (this was the root cause of "the AI can't tool-call"). MiniMax
+    // implements /v1/chat/completions WITH function/tool-calling
+    // (MiniMax-M3 supports tools/tool_choice), which is exactly what
+    // `.chat(modelId)` targets. The streaming route's hand-rolled
+    // streamMinimaxChat hits the same endpoint but passes no tools;
+    // here we keep the SDK so the agent loop gets real tool-calling.
+    return { model: openai.chat(modelId), modelId, provider: 'minimax' };
   }
   if (process.env.OPENAI_API_KEY) {
     const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const modelId = modelOverride || 'gpt-4o-mini';
-    return { model: openai(modelId), modelId, provider: 'openai' };
+    // OpenAI also goes through chat completions for consistent
+    // tool-calling behaviour across both providers.
+    return { model: openai.chat(modelId), modelId, provider: 'openai' };
   }
   return null;
 }
