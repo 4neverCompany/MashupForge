@@ -362,6 +362,17 @@ export interface UserSettings {
    * Settings → AI Engine (see SettingsModal). Default false so
    * existing users' output doesn't change. */
   antiAiLook?: boolean;
+  /** V1.6: opt-in agentic "Director" pipeline. When true, the pipeline's
+   * idea→prompt step routes through the multi-step tool-use loop
+   * (trending_search → generate_prompt → critique → refine) via
+   * `/api/ai/prompt` mode:director instead of sending the idea concept
+   * to the image model verbatim. Off by default — the fast verbatim
+   * path stays the standard pipeline. Any Director failure falls back
+   * to the verbatim concept so the pipeline never stalls. Requires at
+   * least one agentNiche (the Director route validates 1-6 niches) and
+   * a configured text-AI provider (MINIMAX_API_KEY / OPENAI_API_KEY).
+   * The control lives in Settings → AI Engine. */
+  useDirectorPipeline?: boolean;
   /** V1.0.7-PROMPT-ENG-A2/A3: optional camera-angle slug from the
    * 14-angle catalog in `lib/camera-angles.ts`. When set, the
    * `buildEnhancedPrompt` composer appends a structured MCSLA
@@ -1066,6 +1077,7 @@ export const defaultSettings: UserSettings = {
   // can toggle on/off.
   activeSkills: ['banana-pro-director'],
   antiAiLook: false,
+  useDirectorPipeline: false,
   cameraAngle: undefined,
   higgsfieldMonthlyCreditCap: undefined,
   watermark: {
