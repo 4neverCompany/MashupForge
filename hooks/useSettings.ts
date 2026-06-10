@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 // mashupforge.json` and survive folder moves.
 import { get, set } from '@/lib/persistence';
 import { type UserSettings, defaultSettings } from '../types/mashup';
-import { applyV040AutoApproveMigration } from '../lib/pipeline-daemon-utils';
+import { applySettingsMigrations } from '../lib/pipeline-daemon-utils';
 
 // Deep-merge a loaded payload into the current settings, preserving defaults
 // for any fields that are missing or explicitly undefined in the payload.
@@ -207,34 +207,34 @@ export function useSettings() {
               );
               await set('mashup_settings', merged);
               localStorage.removeItem('mashup_settings');
-              if (!cancelled) setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(mergeSettings(prev, merged))));
+              if (!cancelled) setSettings(prev => replayPendingOps(applySettingsMigrations(mergeSettings(prev, merged))));
             } else {
               // empty object — clear and load from store
               localStorage.removeItem('mashup_settings');
               if (idbIsObj && !cancelled) {
-                setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>))));
+                setSettings(prev => replayPendingOps(applySettingsMigrations(mergeSettings(prev, idbSettings as Partial<UserSettings>))));
               } else if (!cancelled) {
-                setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(prev)));
+                setSettings(prev => replayPendingOps(applySettingsMigrations(prev)));
               }
             }
           } else {
             const idbSettings = await get('mashup_settings');
             if (idbSettings && typeof idbSettings === 'object') {
-              if (!cancelled) setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>))));
+              if (!cancelled) setSettings(prev => replayPendingOps(applySettingsMigrations(mergeSettings(prev, idbSettings as Partial<UserSettings>))));
             } else {
-              if (!cancelled) setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(prev)));
+              if (!cancelled) setSettings(prev => replayPendingOps(applySettingsMigrations(prev)));
             }
           }
         } else {
           const idbSettings = await get('mashup_settings');
           if (idbSettings && typeof idbSettings === 'object') {
-            if (!cancelled) setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(mergeSettings(prev, idbSettings as Partial<UserSettings>))));
+            if (!cancelled) setSettings(prev => replayPendingOps(applySettingsMigrations(mergeSettings(prev, idbSettings as Partial<UserSettings>))));
           } else {
             // Fresh install with no saved settings still gets the explicit
             // auto-everywhere map written so the PipelinePanel checkbox grid
             // shows the active state immediately rather than waiting for
             // the user's first toggle to materialize the field.
-            if (!cancelled) setSettings(prev => replayPendingOps(applyV040AutoApproveMigration(prev)));
+            if (!cancelled) setSettings(prev => replayPendingOps(applySettingsMigrations(prev)));
           }
         }
       } catch {

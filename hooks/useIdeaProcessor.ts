@@ -130,11 +130,13 @@ export function useIdeaProcessor(deps: UseIdeaProcessorDeps) {
           ? `${trimmedConcept}. ${trimmedContext}`
           : trimmedConcept || idea.concept;
 
-      // V1.6: opt-in agentic "Director" pipeline. When the user has
-      // enabled it AND at least one niche is configured (the Director
-      // route validates 1-6 niches), route the idea→prompt step through
-      // the multi-step tool-use loop (trending_search → generate_prompt
-      // → critique → refine) and use its final prompt. The Director's
+      // V1.6: agentic "Director" pipeline — the default path since
+      // v1.6.0 (opt-in in v1.5.0; users can switch it off in Settings →
+      // AI Engine). When enabled AND at least one niche is configured
+      // (the Director route validates 1-6 niches), route the idea→prompt
+      // step through the multi-step tool-use loop (trending_search →
+      // generate_prompt → critique → refine) and use its final prompt.
+      // The Director's
       // plan is prompt-ONLY (it ends with the final prompt as assistant
       // text; image generation still happens later via
       // triggerImageGeneration) and is bounded by a server-side budget +

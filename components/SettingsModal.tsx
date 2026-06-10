@@ -1977,22 +1977,26 @@ export function SettingsModal({
               </button>
             </div>
 
-            {/* V1.6: opt-in agentic Director pipeline. */}
+            {/* V1.6: agentic Director pipeline — the default path since
+                v1.6.0 (shipped opt-in in v1.5.0). Every click stamps
+                directorPipelineUserSet so the explicit choice survives
+                future default migrations. */}
             <div className="flex items-center justify-between bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
               <div className="flex-1 min-w-0 pr-4">
                 <div className="text-sm text-zinc-300">
                   Agentic Director pipeline
-                  <span className="ml-2 align-middle text-[10px] uppercase tracking-wide text-amber-400/90 bg-amber-400/10 border border-amber-400/20 rounded px-1.5 py-0.5">
-                    experimental
+                  <span className="ml-2 align-middle text-[10px] uppercase tracking-wide text-[#00e6ff]/90 bg-[#00e6ff]/10 border border-[#00e6ff]/20 rounded px-1.5 py-0.5">
+                    default
                   </span>
                 </div>
                 <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">
-                  Let the AI plan each pipeline prompt with a multi-step tool loop
+                  The AI plans each pipeline prompt with a multi-step tool loop
                   (trend search → draft → self-critique → refine) instead of sending
                   the idea verbatim. Needs at least one Content Pillar and a text-AI
                   key (MiniMax / OpenAI); each idea spends a few cents. Falls back to
-                  the fast path automatically if the Director is unavailable. Off by
-                  default.
+                  the fast verbatim path automatically if the Director is
+                  unavailable. On by default — switch off to always use the fast
+                  path.
                 </p>
               </div>
               <button
@@ -2001,7 +2005,10 @@ export function SettingsModal({
                 aria-checked={settings.useDirectorPipeline === true}
                 aria-label="Enable the agentic Director pipeline"
                 onClick={() =>
-                  updateSettings({ useDirectorPipeline: !(settings.useDirectorPipeline === true) })
+                  updateSettings({
+                    useDirectorPipeline: !(settings.useDirectorPipeline === true),
+                    directorPipelineUserSet: true,
+                  })
                 }
                 className={`w-12 h-6 rounded-full transition-colors shrink-0 ${settings.useDirectorPipeline === true ? 'bg-[#00e6ff]' : 'bg-zinc-700'} relative`}
               >
