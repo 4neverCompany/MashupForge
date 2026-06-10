@@ -135,6 +135,26 @@
   --font-mono: "NEXUS MONO", "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
+/* ── Dark-mode native form controls (V1.6 — M1.3) ───────────────────
+ * The app is dark-only. Without `color-scheme: dark`, Windows/WebView2
+ * (and Chromium) render native <select> dropdown popups with a
+ * light-theme option list — white-ish text on a white background, so
+ * the options are unreadable. That's the "Generate dropdown is
+ * visually buggy" Studio bug: the closed control is styled by Tailwind
+ * classes, but the OPEN popup list is drawn by the OS and ignores
+ * them. `color-scheme: dark` opts every native control (selects,
+ * scrollbars, date/number pickers) into the dark rendering path. We
+ * also pin <option> colors so the popup list stays legible on engines
+ * that under-honour color-scheme. */
+:root {
+  color-scheme: dark;
+}
+select option,
+select optgroup {
+  background-color: #0a0a0a;
+  color: #ffffff;
+}
+
 @layer utilities {
   @reference "tailwindcss";
 
