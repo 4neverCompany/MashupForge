@@ -532,3 +532,66 @@ describe('resolveDirectorModel', () => {
     expect(r?.modelId).toBe('mock');
   });
 });
+
+// ---------------------------------------------------------------------------
+// V1.7.0-DIRECTOR-PROMPT-FIX: report-scaffolding must not leak into the prompt
+// ---------------------------------------------------------------------------
+
+describe('runDirectorLoop — final prompt extraction (report scaffolding)', () => {
+  it('returns the clean generate_prompt draft, NOT the chatty terminal report', async () => {
+    // Reproduces the real bug: the model wrote a whole report as its
+    // terminal text (<think> block, iteration log, "Final prompt
+    // (copy-paste ready):", "Niches anchored", "Ready to feed to
+    // generate_image — just say the word"). The OLD code returned that
+    // entire blob as finalPrompt. The fix prefers the validated draft.
+    const cleanDraft =
+      'Low-angle hero shot of the Justice League in 1980s anime cel-shading, ' +
+      'neon rim lighting, VHS grain, chromatic aberration.';
+    const chattyReport =
+      '<think> Score 0.767 — clears the 0.7 bar. The user asked me to return ' +
+      'the final prompt, not generate. </think>\n\n' +
+      '✅ **Director plan complete — final prompt approved (score 0.767).**\n\n' +
+      '**Iteration log**\n- Draft 1 → 0.633 → rejected\n- Draft 2 → 0.767 → approved\n\n' +
+      '**Final prompt (copy-paste ready):**\n> ' + cleanDraft + '\n\n' +
+      '**Niches anchored:** Multiverse ✓ · Retro ✓\n\n' +
+      'Ready to feed to `generate_image` — just say the word and I will fire the render.';
+
+    generateTextMock.mockImplementation(async (opts: { onStepFinish?: (s: unknown) => Promise<void> | void }) => {
+      const s = makeStepResult({
+        stepNumber: 0,
+        text: chattyReport,
+        toolCalls: [{ toolName: 'generate_prompt', input: {} }],
+        toolResults: [{ toolName: 'generate_prompt', input: {}, output: { draft: cleanDraft, usedSkills: [], modelId: 'MiniMax-M3' } }],
+        usage: { inputTokens: 50, outputTokens: 50 },
+        finishReason: 'stop',
+      });
+      await opts.onStepFinish?.(s);
+      return { text: chattyReport, steps: [s], finishReason: 'stop' };
+    });
+
+    const result = await runDirectorLoop(baseInput);
+    expect(result.finalPrompt).toBe(cleanDraft);
+    expect(result.finalPrompt).not.toContain('<think>');
+    expect(result.finalPrompt).not.toContain('Iteration log');
+    expect(result.finalPrompt).not.toContain('Ready to feed');
+  });
+
+  it('text-only fallback strips <think> reasoning from the terminal text', async () => {
+    generateTextMock.mockImplementation(async (opts: { onStepFinish?: (s: unknown) => Promise<void> | void }) => {
+      const s = makeStepResult({
+        stepNumber: 0,
+        text: '<think> deciding on the angle… </think>\nA lone astronaut on a crimson dune at golden hour.',
+        toolCalls: [],
+        toolResults: [],
+        usage: { inputTokens: 5, outputTokens: 5 },
+        finishReason: 'stop',
+      });
+      await opts.onStepFinish?.(s);
+      return { text: '<think> deciding on the angle… </think>\nA lone astronaut on a crimson dune at golden hour.', steps: [s], finishReason: 'stop' };
+    });
+
+    const result = await runDirectorLoop(baseInput);
+    expect(result.finalPrompt).toBe('A lone astronaut on a crimson dune at golden hour.');
+    expect(result.finalPrompt).not.toContain('<think>');
+  });
+});
