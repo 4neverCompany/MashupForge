@@ -21,6 +21,9 @@ import {
 } from '../types/mashup';
 import { pickDefaultImageModel, pickHiggsfieldModelForCycle, getImageModel, type ImageProvider } from '../lib/image-models';
 import { persistImageToDisk } from '../lib/images/storage';
+// V1.7.0-M2.1: contextual camera angle — AI picks a fitting angle per item,
+// settings.cameraAngle acts as an optional lock. See lib/camera-angles.ts.
+import { buildCameraAngleMenu, isCameraAngleId, resolveEffectiveCameraAngle } from '../lib/camera-angles';
 import { applyWatermark } from '../lib/watermark';
 
 function getModelName(id: string): string {
@@ -34,6 +37,10 @@ interface GeneratedItem {
   selectedNiches?: string[];
   selectedGenres?: string[];
   negativePrompt?: string;
+  // V1.7.0-M2.1: per-item camera angle chosen by the idea model from the
+  // 14-slug catalog. Validated against the catalog at parse time; an
+  // invalid/absent value falls back to settings.cameraAngle.
+  cameraAngle?: string;
 }
 
 function pickStringArray(value: unknown): string[] | undefined {
@@ -42,7 +49,8 @@ function pickStringArray(value: unknown): string[] | undefined {
   return strs.length > 0 ? strs : undefined;
 }
 
-function parseGeneratedItems(raw: string): GeneratedItem[] {
+// V1.7.0-M2.1: exported for unit tests (per-item cameraAngle validation).
+export function parseGeneratedItems(raw: string): GeneratedItem[] {
   return extractJsonArrayFromLLM(raw)
     .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
     .map((item) => ({
@@ -52,6 +60,10 @@ function parseGeneratedItems(raw: string): GeneratedItem[] {
       selectedNiches: pickStringArray(item.selectedNiches),
       selectedGenres: pickStringArray(item.selectedGenres),
       negativePrompt: typeof item.negativePrompt === 'string' ? item.negativePrompt : undefined,
+      // V1.7.0-M2.1: only accept a catalog slug; anything else (model
+      // hallucinated a label, free text, etc.) is dropped so the composer
+      // never sees an unresolvable angle.
+      cameraAngle: isCameraAngleId(item.cameraAngle) ? item.cameraAngle : undefined,
     }))
     .filter((item) => item.prompt.length > 0);
 }
@@ -838,7 +850,8 @@ Keep it under 100 words. Return ONLY the negative prompt text, nothing else.`,
         tags?: string[],
         selectedNiches?: string[],
         selectedGenres?: string[],
-        negativePrompt?: string
+        negativePrompt?: string,
+        cameraAngle?: string
       }[] = [];
       const ensureTags = async (prompt: string, existingTags?: string[]) => {
         if (existingTags && existingTags.length > 0) return existingTags;
@@ -886,6 +899,10 @@ Return ONLY a JSON array of 4 objects, each with:
 - "selectedNiches": array of strings
 - "selectedGenres": array of strings
 - "negativePrompt": string — 15 words max, CONTEXT-AWARE to the prompt's subject. Pick from: character art → "bad anatomy, wrong proportions, extra fingers, mutated hands"; landscapes → "overexposed, washed out, text, watermark, signature"; action scenes → "motion blur, static pose, flat lighting"; dark/grimdark → "bright colors, cartoon style, flat shading". Always include the core technical defects (blurry, low quality, deformed).
+- "cameraAngle": string — the ONE camera-angle id from the catalog below that best fits THIS prompt's mood and subject. Use the id exactly as written (e.g. "low-angle-30"), not the label. Vary it across the 4 prompts where it suits them.
+
+CAMERA ANGLE CATALOG (pick the id that matches the emotional intent):
+${buildCameraAngleMenu()}
 
 Random Seed: ${Math.random()}`,
           { mode: 'idea', provider: settings.activeAiAgent, model: settings.activeTextModel, niches: settings.agentNiches, genres: settings.agentGenres, activeSkills: settings.activeSkills }
@@ -1003,14 +1020,14 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
             // user-supplied negativePrompt below (Leonardo takes a single
             // `negative_prompt` string).
             antiAiLook: settings.antiAiLook === true,
-            // V1.0.7-PROMPT-ENG-A2/A3: forward the user-picked camera
-            // angle slug (from `lib/camera-angles.ts`) into the MCSLA
-            // `C:` fragment. The composer resolves the slug to its
-            // full prompt fragment. Undefined when the user hasn't
-            // picked an angle — the fragment is dropped entirely.
-            mcsla: settings.cameraAngle
-              ? { camera: { angle: settings.cameraAngle } }
-              : undefined,
+            // V1.7.0-M2.1: forward the EFFECTIVE camera angle. A pinned
+            // settings.cameraAngle is a user lock and wins; otherwise the
+            // idea model's per-item choice (item.cameraAngle) is used.
+            // resolveEffectiveCameraAngle drops anything not in the catalog.
+            mcsla: (() => {
+              const angle = resolveEffectiveCameraAngle(settings.cameraAngle, item.cameraAngle);
+              return angle ? { camera: { angle } } : undefined;
+            })(),
           });
 
           const fallbackStyleUuids = (() => {
@@ -1460,12 +1477,14 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
           styleName: modelStyle,
           aspectRatio: currentAspectRatio,
           count: 1,
-          // V1.0.7-PROMPT-ENG-A2/A3: reroll path also forwards the
-          // camera angle (otherwise switching models in the reroll
-          // dropdown would silently drop the angle hint).
-          mcsla: settings.cameraAngle
-            ? { camera: { angle: settings.cameraAngle } }
-            : undefined,
+          // V1.0.7-PROMPT-ENG-A2/A3 + V1.7.0-M2.1: reroll forwards the
+          // pinned settings angle (a reroll has no per-item context).
+          // Routed through the resolver so a stale/invalid stored slug
+          // can't reach the composer.
+          mcsla: (() => {
+            const angle = resolveEffectiveCameraAngle(settings.cameraAngle, undefined);
+            return angle ? { camera: { angle } } : undefined;
+          })(),
         });
 
         const fallbackStyleUuids = (() => {
