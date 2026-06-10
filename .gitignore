@@ -53,3 +53,8 @@ skills-lock.json
 # local better-sqlite3 binding failures). Keep them out of the repo.
 pnpm-lock.yaml
 pnpm-workspace.yaml
+
+# Higgsfield CLI staged for installer bundling by
+# scripts/install-higgsfield-cli.ps1 -Dest src-tauri/resources/higgsfield-cli
+# (a fetched node_modules artifact, like resources/node and resources/camofox).
+src-tauri/resources/higgsfield-cli/
