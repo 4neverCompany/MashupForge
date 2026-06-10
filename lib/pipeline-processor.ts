@@ -361,7 +361,17 @@ export async function processIdea(
     // a regression sneaking in via the default-on-first-launch path.
     const selectedIds = getEnabledModelIds();
     const fallbackIds = LEONARDO_MODELS.filter((m) => m.id !== 'nano-banana').map((m) => m.id);
-    const allModelIds = (selectedIds.length > 0 ? selectedIds : fallbackIds).filter((id) => id !== 'nano-banana');
+    const leonardoMinimaxIds = (selectedIds.length > 0 ? selectedIds : fallbackIds).filter((id) => id !== 'nano-banana');
+    // V1.7.0-PIPELINE-HIGGSFIELD: when the user has enabled Higgsfield and
+    // configured at least one model, add those `higgsfield:<slug>` ids to
+    // the generation set so the pipeline ACTUALLY uses Higgsfield (it
+    // previously couldn't — generateComparison only knew Leonardo/MiniMax,
+    // so a Higgsfield-toggled run silently produced Leonardo images). The
+    // comparison path now routes these ids to the real Higgsfield backend.
+    const higgsfieldIds = (settings.higgsfieldEnabled && settings.higgsfieldImageModels?.length)
+      ? settings.higgsfieldImageModels.map((slug) => `higgsfield:${slug}`)
+      : [];
+    const allModelIds = [...leonardoMinimaxIds, ...higgsfieldIds];
     if (allModelIds.length === 0) {
       // User deselected every image model in Studio Mode. Pipeline can't
       // generate anything; bail with an actionable error instead of
