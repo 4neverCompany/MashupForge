@@ -47,6 +47,8 @@
         { "path": "$APPDATA/**" },
         { "path": "$DOCUMENT/MashupForge Backups" },
         { "path": "$DOCUMENT/MashupForge Backups/**" },
+        { "path": "$DOCUMENT/MashupForge/Images" },
+        { "path": "$DOCUMENT/MashupForge/Images/**" },
         { "path": "$CONFIG/MashupForge/config.json" }
       ]
     }
