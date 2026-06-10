@@ -16,12 +16,12 @@ import {
   type GeneratedImage,
   type GenerateOptions,
   type UserSettings,
-  type WatermarkSettings,
   LEONARDO_MODELS,
   getLeonardoDimensions,
 } from '../types/mashup';
 import { pickDefaultImageModel, pickHiggsfieldModelForCycle, getImageModel, type ImageProvider } from '../lib/image-models';
 import { persistImageToDisk } from '../lib/images/storage';
+import { applyWatermark } from '../lib/watermark';
 
 function getModelName(id: string): string {
   return getImageModel(id)?.name || id;
@@ -56,93 +56,11 @@ function parseGeneratedItems(raw: string): GeneratedItem[] {
     .filter((item) => item.prompt.length > 0);
 }
 
-export async function applyWatermark(baseImageSrc: string, settings: WatermarkSettings, channelName?: string): Promise<string> {
-  if (!settings.enabled) return baseImageSrc;
-  if (!settings.image && !channelName) return baseImageSrc;
-
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        resolve(baseImageSrc);
-        return;
-      }
-
-      ctx.drawImage(img, 0, 0);
-      ctx.globalAlpha = settings.opacity || 0.8;
-
-      // 8% padding (up from 3%) gives watermarks more breathing room
-      // even if Instagram applies minor adjustments to the padded image.
-      const padding = canvas.width * 0.08;
-
-      if (settings.image) {
-        const wm = new Image();
-        wm.crossOrigin = "anonymous";
-        wm.onload = () => {
-          const wmWidth = canvas.width * (settings.scale || 0.15);
-          const wmHeight = (wm.height / wm.width) * wmWidth;
-
-          let x = 0, y = 0;
-          switch (settings.position) {
-            case 'top-left': x = padding; y = padding; break;
-            case 'top-right': x = canvas.width - wmWidth - padding; y = padding; break;
-            case 'bottom-left': x = padding; y = canvas.height - wmHeight - padding; break;
-            case 'bottom-right': x = canvas.width - wmWidth - padding; y = canvas.height - wmHeight - padding; break;
-            case 'center': x = (canvas.width - wmWidth) / 2; y = (canvas.height - wmHeight) / 2; break;
-          }
-
-          ctx.drawImage(wm, x, y, wmWidth, wmHeight);
-          // POST-413-FIX (2026-05-21): was 'image/png' which produced
-          // multi-megabyte data URLs (a 4K canvas → 20-30MB PNG). Vercel's
-          // 4.5MB serverless body limit then rejected /api/social/post
-          // before our route ran (HTTP 413, plain-text body, not JSON).
-          // JPEG at 0.92 is visually indistinguishable for photographic
-          // output and ~70% smaller. The composite has no transparency
-          // at this point (watermark already alpha-blended into canvas)
-          // so dropping PNG's alpha channel costs nothing.
-          resolve(canvas.toDataURL('image/jpeg', 0.92));
-        };
-        wm.onerror = () => resolve(baseImageSrc);
-        wm.src = settings.image;
-      } else if (channelName) {
-        const fontSize = canvas.width * (settings.scale || 0.05);
-        ctx.font = `bold ${fontSize}px sans-serif`;
-        ctx.fillStyle = 'white';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-
-        ctx.shadowColor = 'rgba(0,0,0,0.8)';
-        ctx.shadowBlur = 4;
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 2;
-
-        const metrics = ctx.measureText(channelName);
-        const textWidth = metrics.width;
-        const textHeight = fontSize;
-
-        let x = 0, y = 0;
-        switch (settings.position) {
-          case 'top-left': x = padding; y = padding; break;
-          case 'top-right': x = canvas.width - textWidth - padding; y = padding; break;
-          case 'bottom-left': x = padding; y = canvas.height - textHeight - padding; break;
-          case 'bottom-right': x = canvas.width - textWidth - padding; y = canvas.height - textHeight - padding; break;
-          case 'center': x = (canvas.width - textWidth) / 2; y = (canvas.height - textHeight) / 2; break;
-        }
-
-        ctx.fillText(channelName, x, y);
-        // POST-413-FIX (2026-05-21): see image-watermark branch above.
-        resolve(canvas.toDataURL('image/jpeg', 0.92));
-      }
-    };
-    img.onerror = () => resolve(baseImageSrc);
-    img.src = baseImageSrc.startsWith('http') ? `/api/proxy-image?url=${encodeURIComponent(baseImageSrc)}` : (baseImageSrc.startsWith('data:') ? baseImageSrc : `data:image/jpeg;base64,${baseImageSrc}`);
-  });
-}
+// V1.5: applyWatermark moved to lib/watermark.ts (it has no hook/React
+// dependencies — a pure canvas op). Imported for this hook's own
+// generation path AND re-exported so every existing importer
+// (MashupContext, useComparison, …) keeps working unchanged.
+export { applyWatermark };
 
 /**
  * Submit-and-poll helper used by both the main generate loop and
@@ -1294,6 +1212,10 @@ Return ONLY a JSON array of objects (one per input idea, in the same order), eac
           setImages(prev => prev.map(img => img.id === placeholders[i].id ? {
             id: newImageId,
             url: finalUrl,
+            // V1.5: remember the CLEAN pre-watermark source so the
+            // "Re-apply watermark" action composites onto it instead of
+            // the already-watermarked url (no double-stacking).
+            originalUrl: success.url,
             localPath,
             prompt: activePrompt,
             tags: generatedTags,

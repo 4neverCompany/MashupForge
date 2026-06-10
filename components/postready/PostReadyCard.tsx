@@ -23,6 +23,7 @@ import {
   MinusCircle,
   RefreshCw,
   Send,
+  Stamp,
   X,
 } from 'lucide-react';
 import { AspectPreview } from './AspectPreview';
@@ -73,6 +74,9 @@ export interface PostReadyCardProps {
   onCopy: () => void;
   onRegen: () => void;
   onUnready: () => void;
+  /** V1.5: re-apply the current watermark to this image. Omitted for
+   *  videos (the parent only passes it for images). */
+  onReapplyWatermark?: () => void;
   /** Unschedule — drop the ScheduledPost without rejecting the image.
    *  Only offered when there is an active (non-posted) schedule. */
   onCancelSchedule?: () => void;
@@ -137,6 +141,7 @@ export function PostReadyCard({
   onRegen,
   onUnready,
   onCancelSchedule,
+  onReapplyWatermark,
 }: PostReadyCardProps) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [captionExpanded, setCaptionExpanded] = useState(false);
@@ -394,6 +399,16 @@ export function PostReadyCard({
                     onSelect: onRegen,
                   },
                 ];
+                // V1.5: re-apply the current watermark (images only).
+                if (onReapplyWatermark && !img.isVideo) {
+                  out.push({
+                    kind: 'item',
+                    id: 'reapply-watermark',
+                    label: 'Re-apply watermark',
+                    icon: Stamp,
+                    onSelect: onReapplyWatermark,
+                  });
+                }
                 if (onCancelSchedule && kind === 'scheduled') {
                   out.push({
                     kind: 'item',
