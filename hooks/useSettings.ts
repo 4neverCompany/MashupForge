@@ -90,8 +90,14 @@ export function useSettings() {
   // have written `undefined` into the store.
   useEffect(() => {
     if (!loadTriggered) {
-      setIsSettingsLoaded(true);
-      return;
+      // react-hooks/set-state-in-effect: deferred via queueMicrotask
+      // (project convention), stale-guarded against a loadTriggered
+      // flip before the microtask fires.
+      let stale = false;
+      queueMicrotask(() => {
+        if (!stale) setIsSettingsLoaded(true);
+      });
+      return () => { stale = true; };
     }
     let cancelled = false;
     const loadSettings = async () => {

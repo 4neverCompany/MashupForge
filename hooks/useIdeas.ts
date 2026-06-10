@@ -14,8 +14,14 @@ export function useIdeas() {
 
   useEffect(() => {
     if (!loadTriggered) {
-      setIsIdeasLoaded(true);
-      return;
+      // react-hooks/set-state-in-effect: deferred via queueMicrotask
+      // (project convention), stale-guarded against a loadTriggered
+      // flip before the microtask fires.
+      let stale = false;
+      queueMicrotask(() => {
+        if (!stale) setIsIdeasLoaded(true);
+      });
+      return () => { stale = true; };
     }
     let cancelled = false;
     const load = async () => {

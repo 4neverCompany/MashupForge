@@ -18,6 +18,17 @@ function normalizeOnLoad(img: GeneratedImage): GeneratedImage {
   return { ...img, tags, status };
 }
 
+// V1.4.5-DATALOSS-ROOTCAUSE: id-union merge, `patch` wins on collisions.
+// Used by the load path to fold freshly-loaded store data UNDER any
+// in-memory mutations that happened before hydration finished (e.g. a
+// Studio-generated image saved before the user ever visited Gallery).
+function mergeById(base: GeneratedImage[], patch: GeneratedImage[]): GeneratedImage[] {
+  const byId = new Map<string, GeneratedImage>();
+  for (const img of base) byId.set(img.id, img);
+  for (const img of patch) byId.set(img.id, img);
+  return Array.from(byId.values());
+}
+
 export function useImages() {
   const [savedImages, setSavedImages] = useState<GeneratedImage[]>([]);
   const [isImagesLoaded, setIsImagesLoaded] = useState(false);
@@ -38,6 +49,19 @@ export function useImages() {
     savedImagesRef.current = savedImages;
   }, [savedImages]);
 
+  // V1.4.5-HYDRATION-FAIL: latched when the store load THROWS (as
+  // opposed to loading an empty library). While latched, the debounced
+  // direct store-write below is disabled — writing the in-memory array
+  // over a store we never managed to read would wipe the library.
+  const hydrationFailedRef = useRef(false);
+  // V1.4.5: true while the async load is running. Belt-and-suspenders
+  // for the debounce timer: effect ordering already cancels a timer
+  // scheduled in the one commit where loadTriggered flipped but
+  // isImagesLoaded is still stale-true; this ref makes the timer
+  // callback itself refuse to fire mid-hydration, independent of
+  // React's scheduling.
+  const loadInFlightRef = useRef(false);
+
   // V1.2.1: studio mount is no longer blocked by image I/O. isLoaded
   // flips to true immediately; the actual data load is gated on the
   // Gallery view calling requestLoad().
@@ -47,10 +71,34 @@ export function useImages() {
       // visible? Actually no — the studio can render with empty state.
       // We set isImagesLoaded=true so isLoaded (in MashupContext) is
       // not stuck on this. The Gallery view re-triggers the load.
-      setIsImagesLoaded(true);
-      return;
+      //
+      // react-hooks/set-state-in-effect: deferred via queueMicrotask
+      // (project convention, see HiggsfieldConnection.tsx). Stale-
+      // guarded: if loadTriggered flips before the microtask fires,
+      // the cleanup runs first and this must NOT set loaded=true over
+      // the in-flight load's `false` (the V1.4.5 data-loss gate).
+      let stale = false;
+      queueMicrotask(() => {
+        if (!stale) setIsImagesLoaded(true);
+      });
+      return () => { stale = true; };
     }
+    // V1.4.5-DATALOSS-ROOTCAUSE: while the real load is in flight,
+    // isImagesLoaded must be FALSE so the debounced store-write below
+    // cannot fire against a not-yet-hydrated (empty or partial) array.
+    // Before this, isImagesLoaded stayed true from the !loadTriggered
+    // branch above, so a mutation made during the load window could
+    // overwrite the store with just that mutation.
+    //
+    // Deliberately synchronous (NOT queueMicrotask-deferred like the
+    // branch above): the gate must close in the same commit, before
+    // any mutation effect can schedule a debounced write against the
+    // not-yet-hydrated array. Documented project exception, same as
+    // KebabMenu.tsx / CarouselApprovalCard.tsx.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsImagesLoaded(false);
     let cancelled = false;
+    loadInFlightRef.current = true;
     const loadImages = async () => {
       try {
         const storedImages = localStorage.getItem('mashup_saved_images');
@@ -77,7 +125,7 @@ export function useImages() {
               // firing before the user visited Gallery. Clear
               // localStorage and load from the store.
               localStorage.removeItem('mashup_saved_images');
-              if (idbImages && !cancelled) setSavedImages(idbImages.map(normalizeOnLoad));
+              if (idbImages && !cancelled) setSavedImages(prev => mergeById(idbImages.map(normalizeOnLoad), prev));
             } else {
               // Merge: store first, localStorage on top. If the
               // localStorage is a partial (e.g. an in-flight
@@ -87,25 +135,34 @@ export function useImages() {
               // For images, "merge" is union by id (later wins).
               // The in-flight localStorage edit supersedes the
               // store version of the same id.
-              const byId = new Map<string, GeneratedImage>();
-              for (const img of storeValue) byId.set(img.id, img);
-              for (const img of images) byId.set(img.id, img);
-              const merged = Array.from(byId.values());
+              const merged = mergeById(storeValue, images);
               await set('mashup_saved_images', merged);
               localStorage.removeItem('mashup_saved_images');
-              if (!cancelled) setSavedImages(merged);
+              // V1.4.5: fold the merged result UNDER any in-memory
+              // mutations that happened while the load was in flight.
+              if (!cancelled) setSavedImages(prev => mergeById(merged, prev));
             }
           } catch {
             const idbImages = await get('mashup_saved_images');
-            if (idbImages && !cancelled) setSavedImages(idbImages.map(normalizeOnLoad));
+            if (idbImages && !cancelled) setSavedImages(prev => mergeById(idbImages.map(normalizeOnLoad), prev));
           }
         } else {
           const idbImages = await get('mashup_saved_images');
-          if (idbImages && !cancelled) setSavedImages(idbImages.map(normalizeOnLoad));
+          if (idbImages && !cancelled) setSavedImages(prev => mergeById(idbImages.map(normalizeOnLoad), prev));
         }
       } catch {
-        // silent — savedImages remains empty
+        // V1.4.5-HYDRATION-FAIL: hydration threw (IDB unavailable /
+        // corrupted). savedImages stays empty — but it must NOT be
+        // treated as a successful empty hydration: a later mutation
+        // would arm the debounced store-write and overwrite the full
+        // library with just that mutation. Latch the failure; the
+        // debounce effect refuses direct store writes for the rest
+        // of the session. Mutations still reach localStorage via the
+        // beforeunload flush, and the next launch's load path merges
+        // them on top of the (intact) store.
+        hydrationFailedRef.current = true;
       } finally {
+        loadInFlightRef.current = false;
         if (!cancelled) setIsImagesLoaded(true);
       }
     };
@@ -113,19 +170,53 @@ export function useImages() {
     return () => { cancelled = true; };
   }, [loadTriggered]);
 
+  // V1.4.5-DATALOSS-ROOTCAUSE: dirty flag — only a REAL mutation (one of
+  // the mutators below) arms the debounced store-write. Hydration commits
+  // from the load effect do NOT set it, so loading can never trigger a
+  // write-back of its own result (or of the initial `[]`).
+  const dirtyRef = useRef(false);
+  const markDirty = () => {
+    dirtyRef.current = true;
+    // First mutation outside Gallery (pipeline / useIdeaProcessor in
+    // Studio): hydrate the store NOW so the debounced write below has
+    // the full library in memory to write back. The load path merges
+    // the store data UNDER the in-memory mutation (mergeById, in-memory
+    // wins), so the new image survives and nothing is clobbered.
+    setLoadTriggered(true);
+  };
+
   // PROP-020: single debounced IDB write coalesces rapid mutations
   // (bulk tag-select, approveAll, carousel-group delete) into one write
   // 200ms after the last change, instead of N concurrent writes per
   // mutator. Mirrors the PROP-010 pattern in useSettings.
+  //
+  // V1.4.5-DATALOSS-ROOTCAUSE: this effect was the actual wipe vector
+  // behind every "images gone since v1.2.5" report. It was gated ONLY on
+  // `isImagesLoaded` — which the !loadTriggered branch above sets to true
+  // immediately on Studio mount, while `savedImages` is still the initial
+  // `[]`. 200ms later the effect wrote that `[]` (or a lone Studio-
+  // generated image) over the full library in the Tauri store. The
+  // v1.2.7/v1.2.8/v1.4.4 fixes only patched the localStorage/beforeunload
+  // path; this direct store-write path was untouched. Now gated on all of:
+  //   - loadTriggered    → store has been (or is being) hydrated
+  //   - isImagesLoaded   → hydration actually finished (see load effect)
+  //   - dirtyRef         → a real mutation happened (not a hydration commit)
   useEffect(() => {
-    if (!isImagesLoaded) return;
+    if (!loadTriggered || !isImagesLoaded) return;
+    if (!dirtyRef.current) return;
+    // V1.4.5-HYDRATION-FAIL: never write the store when hydration
+    // failed — the in-memory array is missing the (unreadable but
+    // possibly intact) library. localStorage flush + next-launch
+    // merge keeps the mutations instead.
+    if (hydrationFailedRef.current) return;
     const timer = setTimeout(() => {
+      if (loadInFlightRef.current || hydrationFailedRef.current) return;
       void set('mashup_saved_images', savedImages).catch(() => {});
       // Auto-backup to Documents folder (survives reinstall)
       void autoBackupImages(savedImages);
     }, 200);
     return () => clearTimeout(timer);
-  }, [savedImages, isImagesLoaded]);
+  }, [savedImages, isImagesLoaded, loadTriggered]);
 
   // BUG-DES-002: flush-on-unload safety net for the 200ms debounce
   // window. Without this, a manual Post Now (postedAt/postError) made
@@ -170,6 +261,7 @@ export function useImages() {
   }, []);
 
   const saveImage = (img: GeneratedImage) => {
+    markDirty();
     setSavedImages(prev => {
       const exists = prev.some(i => i.id === img.id);
       if (exists) return prev.map(i => i.id === img.id ? { ...i, ...img } : i);
@@ -179,16 +271,19 @@ export function useImages() {
 
   const deleteImage = (id: string, fromSaved: boolean) => {
     if (fromSaved) {
+      markDirty();
       setSavedImages(prev => prev.filter(i => i.id !== id));
     }
     return !fromSaved;
   };
 
   const updateImageTags = (id: string, tags: string[]) => {
+    markDirty();
     setSavedImages(prev => prev.map(img => img.id === id ? { ...img, tags } : img));
   };
 
   const bulkUpdateImageTags = (ids: string[], tags: string[], mode: 'append' | 'replace') => {
+    markDirty();
     setSavedImages(prev => prev.map(img => {
       if (!ids.includes(img.id)) return img;
       if (mode === 'append') {
@@ -200,18 +295,22 @@ export function useImages() {
   };
 
   const toggleApproveImage = (id: string) => {
+    markDirty();
     setSavedImages(prev => prev.map(img => img.id === id ? { ...img, approved: !img.approved } : img));
   };
 
   const setImageStatus = (id: string, status: 'generating' | 'animating' | 'ready') => {
+    markDirty();
     setSavedImages(prev => prev.map(img => img.id === id ? { ...img, status } : img));
   };
 
   const updateSavedImageCollectionId = (imageId: string, collectionId: string | undefined) => {
+    markDirty();
     setSavedImages(prev => prev.map(img => img.id === imageId ? { ...img, collectionId } : img));
   };
 
   const clearCollectionFromImages = (collectionId: string) => {
+    markDirty();
     setSavedImages(prev => prev.map(img => img.collectionId === collectionId ? { ...img, collectionId: undefined } : img));
   };
 

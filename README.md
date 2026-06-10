@@ -9,7 +9,7 @@ as a fully captioned, scheduled Instagram post — image generation, AI
 captions, approval queue, and a smart scheduler wired into one atomic
 pipeline.
 
-[**🌐 Landing page**](https://mashupforge.vercel.app) · [**📥 Download v1.0.2**](https://github.com/4neverCompany/MashupForge/releases/latest) · [**🎨 Try the studio**](https://mashupforge.vercel.app/studio)
+[**🌐 Landing page**](https://mashupforge.vercel.app) · [**📥 Download the latest release**](https://github.com/4neverCompany/MashupForge/releases/latest) · [**🎨 Try the studio**](https://mashupforge.vercel.app/studio)
 
 ![MashupForge — AI multiverse crossover studio](./assets/hero-banner.webp)
 
@@ -210,21 +210,24 @@ src-tauri/                  # Tauri 2 desktop shell (Rust)
 - **Web search:** camofox-browser sidecar (Camoufox Firefox) + DDG/Brave fallback — see `docs/camofox-integration.md`
 - **Storage:** IndexedDB (web) + SQLite via `tauri-plugin-sql` (desktop)
 - **Persistence model:** Real ACID transactions on both backends, parallel-coexistence migration from legacy IDB shape
-- **Testing:** Vitest 4 + happy-dom + Testing Library — 1,194 tests, 0 flakes
+- **Testing:** Vitest 4 + happy-dom + Testing Library
 
 ## 📦 Releases
 
-Latest: **[v1.0.2](https://github.com/4neverCompany/MashupForge/releases/tag/v1.0.2)** — desktop `/studio` boot-URL hotfix
+Latest: see the **[GitHub Releases page](https://github.com/4neverCompany/MashupForge/releases/latest)** —
+the full version history lives in [`CHANGELOG.md`](./CHANGELOG.md).
 
-| Version | Date | Highlights |
-|---|---|---|
-| **v1.0.2** | 2026-06-02 | Desktop: navigate to `/studio` after sidecar boot (was loading landing page root → 404) |
-| **v1.0.1** | 2026-06-02 | **v0.9.41 production fix** — atomic post+hosted-URL write via the new state machine |
-| **v1.0.0** | 2026-06-01 | Initial GA. AGPL-3.0, Tauri 2 shell, signed auto-update channel |
+<!-- V1.4.5-DOCS: the hand-maintained version table was three minor
+     versions stale (claimed v1.0.2 at a time when v1.4.x was shipping)
+     and made the repo look abandoned. Until scripts/release.sh learns
+     to maintain a table automatically (see lib/release-history.ts),
+     link to the generated sources of truth instead of duplicating
+     them here. -->
 
 Auto-update is wired: existing users see the update banner on next
-launch. `latest.json` is the source of truth for the updater — current
-target is `1.0.2`.
+launch. `latest.json` (attached to the latest **published** GitHub
+release) is the source of truth for the updater — a tag alone is NOT
+enough; the release must be published or no desktop user receives it.
 
 ## 🧑‍💻 Contributing
 
@@ -237,7 +240,7 @@ Before opening a PR, run:
 
 ```bash
 npm run typecheck   # tsc --noEmit, must be clean
-npm test            # 1,194 tests, all must pass
+npm test            # full Vitest suite, all must pass
 npm run build       # bundle budget: 300 KB gzipped first-load JS per route
 ```
 

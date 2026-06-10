@@ -305,13 +305,21 @@ export function ManualGenerationPanel({ onImageGenerated }: { onImageGenerated?:
     [availableModels, modelId],
   )
 
-  // Reset model + aspect ratio + resolution when provider/mode changes
+  // Reset model + aspect ratio + resolution when provider/mode changes.
+  // react-hooks/set-state-in-effect: deferred via queueMicrotask
+  // (project convention), stale-guarded against a provider/mode flip
+  // before the microtask fires.
   useEffect(() => {
-    const newModelId = getDefaultModel(provider, mode)
-    setModelId(newModelId)
-    const models = getModelList(provider, mode)
-    setAspectRatio(getDefaultAspectRatio(models))
-    setResolution(getDefaultResolution(models))
+    let stale = false
+    queueMicrotask(() => {
+      if (stale) return
+      const newModelId = getDefaultModel(provider, mode)
+      setModelId(newModelId)
+      const models = getModelList(provider, mode)
+      setAspectRatio(getDefaultAspectRatio(models))
+      setResolution(getDefaultResolution(models))
+    })
+    return () => { stale = true }
   }, [provider, mode])
 
   // Reset aspect/resolution to the model's supported set when the
@@ -320,16 +328,21 @@ export function ManualGenerationPanel({ onImageGenerated }: { onImageGenerated?:
   // supported set).
   useEffect(() => {
     if (!selectedModel) return
-    if (!selectedModel.aspectRatios.includes(aspectRatio)) {
-      setAspectRatio(selectedModel.aspectRatios[0] || '1:1')
-    }
-    if (
-      selectedModel.resolutions &&
-      resolution &&
-      !selectedModel.resolutions.includes(resolution)
-    ) {
-      setResolution(selectedModel.resolutions[0] || '')
-    }
+    let stale = false
+    queueMicrotask(() => {
+      if (stale) return
+      if (!selectedModel.aspectRatios.includes(aspectRatio)) {
+        setAspectRatio(selectedModel.aspectRatios[0] || '1:1')
+      }
+      if (
+        selectedModel.resolutions &&
+        resolution &&
+        !selectedModel.resolutions.includes(resolution)
+      ) {
+        setResolution(selectedModel.resolutions[0] || '')
+      }
+    })
+    return () => { stale = true }
   }, [selectedModel, aspectRatio, resolution])
 
   // Elapsed-time ticker for the "Generating…" label

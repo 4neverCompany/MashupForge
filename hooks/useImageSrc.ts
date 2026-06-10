@@ -35,25 +35,30 @@ export function useImageSrc(image: Pick<GeneratedImage, 'id' | 'localPath' | 'ur
   const [src, setSrc] = useState<string>(() => (image ? displayUrl(image) : ''))
 
   useEffect(() => {
+    // react-hooks/set-state-in-effect: the synchronous setSrc calls
+    // are deferred via queueMicrotask (project convention) and share
+    // the async path's cancellation guard.
+    let cancelled = false
     if (!image) {
-      setSrc('')
-      return
-    }
-    // If we have a localPath, do the async Tauri resolution. The
-    // URL is stable across re-renders unless the image id changes.
-    if (image.localPath) {
-      let cancelled = false
+      queueMicrotask(() => {
+        if (!cancelled) setSrc('')
+      })
+    } else if (image.localPath) {
+      // If we have a localPath, do the async Tauri resolution. The
+      // URL is stable across re-renders unless the image id changes.
       void (async () => {
         const resolved = await displayUrlAsync(image)
         if (!cancelled) setSrc(resolved)
       })()
-      return () => {
-        cancelled = true
-      }
+    } else {
+      // No local file — use the sync fallback (CDN url or data URL).
+      queueMicrotask(() => {
+        if (!cancelled) setSrc(displayUrl(image))
+      })
     }
-    // No local file — use the sync fallback (CDN url or data URL).
-    setSrc(displayUrl(image))
-    return
+    return () => {
+      cancelled = true
+    }
   }, [image?.id, image?.localPath, image?.url, image?.base64, image])
 
   return src

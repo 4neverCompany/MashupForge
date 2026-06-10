@@ -209,16 +209,28 @@ async function runOnce(opts: CliInvokeOptions<unknown>): Promise<RunOnceResult> 
   const start = Date.now();
 
   const env = { ...process.env, ...(opts.env ?? {}) } as NodeJS.ProcessEnv;
-  const useShell = spawnNeedsShell(opts.binary);
+  // V1.4.5-SHELL-INJECTION: never hand raw args to `shell: true`. For
+  // Windows .cmd/.bat shims we build the cmd.exe command line ourselves
+  // with cross-spawn-style escaping (see buildWindowsShimSpawn). User
+  // prompts (`--prompt <text>`) can contain cmd metacharacters
+  // (& | % ^ " …) and may originate from trending-search / AI output —
+  // with plain `shell: true` Node performs NO escaping and those were
+  // interpreted by cmd.exe: a real command-injection vector.
+  const { file, args: spawnArgs, windowsVerbatimArguments } =
+    buildWindowsShimSpawn(opts.binary, opts.args);
 
   return new Promise<RunOnceResult>((resolve, reject) => {
     let child;
     try {
-      child = _spawn(opts.binary, opts.args, {
+      child = _spawn(file, spawnArgs, {
         stdio: ['ignore', 'pipe', 'pipe'],
         env,
         signal: opts.signal,
-        shell: useShell,
+        // Node's own shell mode is permanently OFF — the .cmd shim
+        // path goes through an explicit, escaped cmd.exe invocation
+        // (buildWindowsShimSpawn) instead.
+        shell: false,
+        windowsVerbatimArguments,
         // On Windows the npm-installed shim returns immediately even
         // when the underlying `.cmd` is missing; this option makes
         // the failure surface as the `error` event instead of a
@@ -369,6 +381,84 @@ function tryParseJson(s: string): unknown | null {
  */
 export function spawnNeedsShell(bin: string): boolean {
   return process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin);
+}
+
+// ---------------------------------------------------------------------------
+// V1.4.5-SHELL-INJECTION: safe spawning of Windows .cmd/.bat shims
+// ---------------------------------------------------------------------------
+//
+// `shell: true` makes Node join binary + args into ONE string and hand it
+// to `cmd /d /s /c` with ZERO escaping. Any cmd metacharacter in an arg
+// (& | < > ^ % ! ") is interpreted. Since adapter args carry user prompts
+// (and prompts can come from trending-search or AI output), that was a
+// command-injection vector on the primary platform (Windows desktop).
+//
+// Instead of `shell: true` we now spawn cmd.exe ourselves with
+// `windowsVerbatimArguments: true` and a command line we escape with the
+// battle-tested cross-spawn algorithm (github.com/moxystudio/node-cross-spawn,
+// lib/util/escape.js — reimplemented here to avoid the dependency).
+
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
+/** Escape a value that will appear UNQUOTED on a cmd.exe command line. */
+export function escapeCmdCommand(cmd: string): string {
+  return cmd.replace(CMD_META, '^$1');
+}
+
+/**
+ * Escape one argument for a cmd.exe command line (cross-spawn algorithm):
+ * backslash-double any backslashes before quotes, escape the quotes,
+ * wrap in double quotes, then caret-escape all cmd metacharacters.
+ * `doubleEscape` doubles the carets — required when the target is a
+ * .cmd/.bat script because cmd.exe parses the line twice.
+ */
+export function escapeCmdArgument(arg: string, doubleEscape = true): string {
+  let s = `${arg}`;
+  // Double up backslashes that precede a quote, escape the quote.
+  s = s.replace(/(\\*)"/g, '$1$1\\"');
+  // Double up trailing backslashes (they'd otherwise escape our quote).
+  s = s.replace(/(\\*)$/, '$1$1');
+  s = `"${s}"`;
+  s = s.replace(CMD_META, '^$1');
+  if (doubleEscape) s = s.replace(CMD_META, '^$1');
+  return s;
+}
+
+export interface ShimSpawnPlan {
+  file: string;
+  args: string[];
+  windowsVerbatimArguments: boolean;
+}
+
+/**
+ * Build the actual spawn invocation. POSIX / non-shim binaries pass
+ * through untouched (argv array, no shell — inherently injection-safe).
+ * Windows .cmd/.bat shims become an explicit
+ * `cmd.exe /d /s /c "<escaped command line>"` with
+ * `windowsVerbatimArguments` so Node performs no additional mangling.
+ *
+ * `needsShell` is injectable so the win32 escaping branch is testable
+ * on the Ubuntu CI runners (spawnNeedsShell is platform-gated and
+ * would otherwise leave this security-critical path with zero CI
+ * coverage). Production callers use the default.
+ */
+export function buildWindowsShimSpawn(
+  binary: string,
+  args: string[],
+  needsShell: boolean = spawnNeedsShell(binary),
+): ShimSpawnPlan {
+  if (!needsShell) {
+    return { file: binary, args, windowsVerbatimArguments: false };
+  }
+  const commandLine = [
+    escapeCmdArgument(binary, false),
+    ...args.map((a) => escapeCmdArgument(a, true)),
+  ].join(' ');
+  return {
+    file: process.env.comspec || 'cmd.exe',
+    args: ['/d', '/s', '/c', `"${commandLine}"`],
+    windowsVerbatimArguments: true,
+  };
 }
 
 /**
