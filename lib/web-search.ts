@@ -115,17 +115,25 @@ export function validateQuery(query: unknown): string | null {
   return trimmed;
 }
 
-export type WebSearchProvider = 'brave' | 'ddg';
+export type WebSearchProvider = 'serper' | 'brave' | 'ddg';
 
 export interface WebSearchOptions {
   /**
-   * Preferred provider. `'brave'` uses Brave Search API when
-   * `braveApiKey` is supplied; on any failure (missing key, non-2xx,
-   * network error, empty result set) it transparently falls back to
-   * DDG. `'ddg'` (or omitted) uses DDG directly.
+   * Preferred provider. The resolver in `webSearch` walks a chain so
+   * a failure (missing key, non-2xx, network error, empty result set)
+   * transparently falls through to the next provider, ending at DDG so
+   * enrichment never silently drops to nothing:
+   *   - `'serper'` → Serper.dev (Google), then Brave (if key), then DDG
+   *   - `'brave'`  → Brave, then DDG
+   *   - `'ddg'` (or omitted) → DDG directly
+   * Regardless of `provider`, if a `serperApiKey` is supplied Serper is
+   * tried first — it's the most reliable backend (DDG now bot-blocks
+   * the HTML-scrape path).
    */
   provider?: WebSearchProvider;
-  /** Brave Search subscription token. Required for `provider: 'brave'`. */
+  /** Serper.dev API key. Enables the Serper path (the new default). */
+  serperApiKey?: string;
+  /** Brave Search subscription token. Enables the Brave path. */
   braveApiKey?: string;
 }
 
@@ -199,6 +207,77 @@ export async function webSearchBrave(
   }
 }
 
+const SERPER_ENDPOINT = 'https://google.serper.dev/search';
+
+interface SerperOrganicItem {
+  title?: unknown;
+  link?: unknown;
+  snippet?: unknown;
+}
+
+/**
+ * Map the Serper.dev JSON payload to our uniform result shape. Pure —
+ * exported for unit tests. Serper returns Google's organic results
+ * under `organic[]` with `link` (not `url`) and `snippet`. Skips
+ * entries missing a title or an http(s) link.
+ */
+export function parseSerperJson(payload: unknown, count: number): WebSearchResult[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const items = (payload as Record<string, unknown>).organic;
+  if (!Array.isArray(items)) return [];
+
+  const out: WebSearchResult[] = [];
+  for (const raw of items as SerperOrganicItem[]) {
+    if (out.length >= count) break;
+    const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+    const url = typeof raw.link === 'string' ? raw.link.trim() : '';
+    const snippet = typeof raw.snippet === 'string' ? raw.snippet : '';
+    if (!title || !/^https?:\/\//i.test(url)) continue;
+    out.push({
+      title: stripTags(title),
+      url,
+      snippet: stripTags(snippet),
+    });
+  }
+  return out;
+}
+
+/**
+ * Serper.dev (Google Search API) client. Returns [] on any failure
+ * (missing key, non-2xx, network, parse). Never throws. Serper is a
+ * POST API keyed by `X-API-KEY`; the free tier grants 2,500 one-off
+ * credits which is plenty for trending enrichment.
+ */
+export async function webSearchSerper(
+  query: string,
+  count: number = DEFAULT_COUNT,
+  apiKey: string | undefined,
+  signal?: AbortSignal,
+): Promise<WebSearchResult[]> {
+  const q = validateQuery(query);
+  if (!q) return [];
+  if (typeof apiKey !== 'string' || apiKey.trim().length === 0) return [];
+
+  const n = clampCount(count);
+
+  try {
+    const res = await fetch(SERPER_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'X-API-KEY': apiKey.trim(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ q, num: n }),
+      signal: signal ?? AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const json: unknown = await res.json();
+    return parseSerperJson(json, n);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Fetch DDG HTML and parse. Returns [] on any failure. Never throws.
  * Exported for callers that want to force the DDG path (e.g. the route
@@ -236,12 +315,20 @@ export async function webSearchDdg(
 }
 
 /**
- * Provider-agnostic entry point. If caller requests Brave AND supplies a
- * key, try Brave first — on empty result (failure or genuinely 0 hits)
- * we fall back to DDG so enrichment never silently drops to nothing just
- * because Brave's quota was exhausted. Otherwise use DDG directly.
+ * Provider-agnostic entry point. Walks a fallback chain and returns the
+ * first non-empty result set, ending at DDG so enrichment never
+ * silently drops to nothing just because a paid quota was exhausted:
  *
- * Returns [] only when both providers yield nothing. Never throws.
+ *   Serper (if key) → Brave (if key) → DDG
+ *
+ * Serper is tried first whenever a `serperApiKey` is present — it's the
+ * most reliable backend now that DDG's HTML-scrape endpoint bot-blocks
+ * automated traffic. When `provider: 'ddg'` is explicitly requested and
+ * no Serper key is given we still honour the Brave-then-DDG path if a
+ * Brave key is present, then DDG.
+ *
+ * Returns [] only when every available provider yields nothing. Never
+ * throws.
  */
 export async function webSearch(
   query: string,
@@ -249,11 +336,17 @@ export async function webSearch(
   signal?: AbortSignal,
   options?: WebSearchOptions,
 ): Promise<WebSearchResult[]> {
-  if (options?.provider === 'brave' && options.braveApiKey) {
+  // 1. Serper.dev (new default) — tried first whenever a key exists.
+  if (options?.serperApiKey) {
+    const serper = await webSearchSerper(query, count, options.serperApiKey, signal);
+    if (serper.length > 0) return serper;
+  }
+  // 2. Brave — tried when a key exists (or when explicitly requested).
+  if (options?.braveApiKey) {
     const brave = await webSearchBrave(query, count, options.braveApiKey, signal);
     if (brave.length > 0) return brave;
-    return webSearchDdg(query, count, signal);
   }
+  // 3. DDG — always the last resort.
   return webSearchDdg(query, count, signal);
 }
 
@@ -324,4 +417,5 @@ export const __test__ = {
   MIN_COUNT,
   MAX_COUNT,
   BRAVE_ENDPOINT,
+  SERPER_ENDPOINT,
 };

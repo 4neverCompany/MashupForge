@@ -53,6 +53,22 @@ function pickMacroForNiche(_niche: string): '@google_search' {
 }
 
 /**
+ * Build the web-search provider chain from env-configured keys. Runs
+ * server-side (the Director loop), where `lib/desktop-env` has already
+ * hydrated config.json keys into `process.env`. Serper.dev is the new
+ * default backend (V1.6 — M1.4); without a key the chain falls to DDG,
+ * which now bot-blocks — hence the recurring empty trending results.
+ */
+function buildAgentSearchOptions(): webSearchModule.WebSearchOptions | undefined {
+  const serperApiKey = (process.env.SERPER_API_KEY ?? '').trim();
+  const braveApiKey = (process.env.BRAVE_API_KEY ?? '').trim();
+  const opts: webSearchModule.WebSearchOptions = {};
+  if (serperApiKey) opts.serperApiKey = serperApiKey;
+  if (braveApiKey) opts.braveApiKey = braveApiKey;
+  return opts.serperApiKey || opts.braveApiKey ? opts : undefined;
+}
+
+/**
  * Run a single niche through camofox-or-fallback, mapping the
  * raw `WebSearchResult` rows to `TrendResult` rows with the niche
  * tag attached. The `count` argument caps how many rows we return
@@ -80,7 +96,7 @@ async function searchNiche(opts: {
         count,
         ...(signal ? { signal } : {}),
       }),
-    () => webSearchModule.webSearch(query, count),
+    () => webSearchModule.webSearch(query, count, signal, buildAgentSearchOptions()),
   );
 
   return rows.map((r) => ({

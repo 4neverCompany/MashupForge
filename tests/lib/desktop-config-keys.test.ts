@@ -48,6 +48,10 @@ describe('DESKTOP_CONFIG_KEYS', () => {
     expect(keyNames).toContain('BRAVE_API_KEY');
   });
 
+  it('includes SERPER_API_KEY (default web-search provider)', () => {
+    expect(keyNames).toContain('SERPER_API_KEY');
+  });
+
   it('every entry has a non-empty label and hint', () => {
     for (const entry of DESKTOP_CONFIG_KEYS) {
       expect(entry.label.length).toBeGreaterThan(0);
