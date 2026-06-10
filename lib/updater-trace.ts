@@ -24,7 +24,7 @@ export interface UpdaterTraceEntry {
 export function traceUpdater(step: string, data?: unknown): void {
   const entry: UpdaterTraceEntry = { ts: Date.now(), step, data };
 
-  // eslint-disable-next-line no-console
+   
   console.log(`[updater-trace] ${step}`, data ?? '');
 
   try {

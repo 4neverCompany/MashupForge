@@ -97,7 +97,7 @@ async function getStore(): Promise<StoreLike> {
  * Default `T = any` matches `idb-keyval`'s signature so this is a true
  * drop-in for call sites that didn't pass an explicit generic.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export async function get<T = any>(key: string): Promise<T | undefined> {
   if (!isTauri()) return idbGet<T>(key);
   try {
@@ -113,7 +113,7 @@ export async function get<T = any>(key: string): Promise<T | undefined> {
  * `@tauri-apps/plugin-store` which uses a 100ms autoSave debounce by
  * default. In non-Tauri runtimes it writes to IDB through `idb-keyval`.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export async function set(key: string, value: any): Promise<void> {
   if (!isTauri()) return idbSet(key, value);
   try {

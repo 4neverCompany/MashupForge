@@ -196,13 +196,13 @@ export class HiggsfieldTextAdapter implements ProviderAdapter {
   // Unimplemented ProviderAdapter methods (text-only adapter)
   // -------------------------------------------------------------------------
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   async generateImage(_opts: unknown): Promise<never> {
     const { UnsupportedOperationError } = await import('../interface');
     throw new UnsupportedOperationError(this.name, 'image');
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   async generateVideo(_opts: unknown): Promise<never> {
     const { UnsupportedOperationError } = await import('../interface');
     throw new UnsupportedOperationError(this.name, 'video');

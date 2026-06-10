@@ -102,7 +102,7 @@ async function readSse(res: Response): Promise<string> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let out = '';
-  // eslint-disable-next-line no-constant-condition
+   
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;

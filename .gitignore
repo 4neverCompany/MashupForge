@@ -44,4 +44,12 @@ hermes-agent/
 .agents/
 .hermes/
 .nca/
+.mavis/
 skills-lock.json
+
+# pnpm artifacts — MashupForge is a bun project (bun.lock is the only
+# lockfile). A stray `pnpm install` leaves these behind AND creates a
+# node_modules/.pnpm store that skips native builds (the cause of the
+# local better-sqlite3 binding failures). Keep them out of the repo.
+pnpm-lock.yaml
+pnpm-workspace.yaml
