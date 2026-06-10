@@ -917,19 +917,35 @@ funktioniert; Release-Pipeline läuft wieder durch.
   über Serper.dev (Fallback Brave → DDG); authentifizierte CLI zählt
   als "connected". Tests: 2037 passed / 14 skipped, tsc+cargo clean.
 
-**Milestone-Zählung:** M1 = PR #65 (Pipeline/Higgsfield-Bugfixes),
-M2 = PR #66 (Director-Default). **Nächster Meilenstein: M3.**
+**Milestone-Zählung (laut Arbeits-Agent, 2026-06-11):** M1 = PR #65 ✅.
+Der Director-Default (PR #66) wurde mit M1 im v1.6.0-Bundle
+ausgeliefert. **Nächster Meilenstein: M2 = Camera-Angle als Skill
+(statt festem Setting) + automatische Skill-Auswahl durch die AI
+→ v1.7.0.** Danach M3 (dorthin wurde das Review-Finding deferred).
+
+⚠️ Der Arbeits-Agent pflegt `ROADMAP.md` und `STATE.md` — Stand
+2026-06-11 existieren beide NUR in seinem lokalen Klon, nicht auf
+`origin/main`. Committen/pushen, sonst ist die Roadmap für alle
+anderen Sessions unsichtbar (genau deshalb war dieses Handoff stale).
 
 ## §22 — ROADMAP (Stand 2026-06-11)
 
-### Jetzt (M3)
+### Jetzt (M2 → v1.7.0)
 
-1. **Deferred Finding aus dem v1.6.0-Adversarial-Review:** 1 bestätigtes
+1. **Camera-Angle als Skill** statt festem Setting + **automatische
+   Skill-Auswahl durch die AI** (Director wählt Winkel/Skills
+   kontextabhängig statt per statischem Settings-Picker aus PR #37).
+2. **ROADMAP.md / STATE.md ins Repo committen** (liegen nur im lokalen
+   Klon des Arbeits-Agents).
+
+### Danach (M3)
+
+3. **Deferred Finding aus dem v1.6.0-Adversarial-Review:** 1 bestätigtes
    Finding mit "seconds-wide trigger window" wurde explizit auf M3
    verschoben (siehe docs/changelog-highlights/1.6.0.md, Test summary).
    Das Finding ist NIRGENDS als Issue dokumentiert — zuerst
    rekonstruieren (PR-#66-Review-Artefakte) und als Issue anlegen.
-2. **PR-Triage:** #67 Vercel Web Analytics (neu, reviewen),
+4. **PR-Triage:** #67 Vercel Web Analytics (neu, reviewen),
    ~9 Dependabot-Bumps (Tauri-Crates + GitHub-Actions, teils seit
    02.06. offen — mergen oder schließen), #29 alter CI-Fix und #11
    (vermutlich obsolet — prüfen + schließen).
