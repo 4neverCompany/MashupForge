@@ -17,6 +17,14 @@ export interface GeneratedImage {
    * library — see lib/images/storage.ts.
    */
   localPath?: string;
+  /**
+   * V1.5: the CLEAN, pre-watermark source URL captured at generation
+   * time. The "Re-apply watermark" action (Captioning / Post-Ready /
+   * Gallery) composites onto this base instead of `url`, so repeated
+   * re-applies never stack watermarks. Absent on legacy images (the
+   * re-apply helper then falls back to `url`).
+   */
+  originalUrl?: string;
   prompt: string;
   imageId?: string;
   savedAt?: number;

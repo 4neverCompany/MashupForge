@@ -63,7 +63,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getErrorMessage } from '@/lib/errors';
 import { withCamofoxHealth, camofoxSearch } from '@/lib/camofox';
 import { CAMOFOX_MACROS, type CamofoxMacro } from '@/lib/camofox/macros';
-import type { WebSearchResult } from '@/lib/web-search';
+import { webSearch, type WebSearchResult } from '@/lib/web-search';
 
 interface TrendingRequest {
   tags?: string[];
@@ -157,13 +157,23 @@ function toTrendResult(r: WebSearchResult, topic: string): TrendResult | null {
 }
 
 /**
- * Fetch a single camofox search. Returns [] if camofox is
- * unavailable (graceful degradation — the route should never 500
- * just because camofox is down; the pipeline handles empty results).
+ * Fetch a single trending search. camofox is the primary source;
+ * V1.5-TRENDING-FALLBACK adds a DDG/Brave `webSearch` backstop so the
+ * pipeline still gets results when camofox is down OR up-but-empty.
+ *
+ * Before v1.5 the camofox-only refactor (v1.1.2) left the server-side
+ * fallback as `async () => []`, so a user whose camofox sidecar wasn't
+ * running got "No trending data found" on every pipeline run. The
+ * fallback to webSearch is exactly what `lib/agent-tools/trending-search`
+ * and `app/api/ai/prompt` already use; we mirror it here so the
+ * standalone trending route has the same resilience.
  */
 async function fetchCamofox(query: string, macro: CamofoxMacro): Promise<TrendResult[]> {
   try {
-    const results = await withCamofoxHealth<WebSearchResult[]>(
+    // Primary: camofox. withCamofoxHealth returns [] when the sidecar
+    // is unreachable; it returns camofox's own (possibly empty) result
+    // when the sidecar is up.
+    const camofoxResults = await withCamofoxHealth<WebSearchResult[]>(
       () =>
         camofoxSearch({
           userId: 'trending-route',
@@ -174,6 +184,17 @@ async function fetchCamofox(query: string, macro: CamofoxMacro): Promise<TrendRe
         }),
       async () => [],
     );
+    let results = camofoxResults;
+    // Backstop: if camofox produced nothing (down OR up-but-empty),
+    // fall through to the DDG/Brave scrape. This is what makes
+    // trending work on a machine without a running camofox sidecar.
+    if (results.length === 0) {
+      try {
+        results = await webSearch(query, 8);
+      } catch {
+        results = [];
+      }
+    }
     return results
       .map((r) => toTrendResult(r, query))
       .filter((r): r is TrendResult => Boolean(r));

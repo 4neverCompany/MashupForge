@@ -27,6 +27,7 @@ import {
   RefreshCw,
   Save,
   Sparkles,
+  Stamp,
   Tag,
   Trash2,
   Video,
@@ -80,6 +81,8 @@ interface GalleryCardProps {
   deleteImage: (id: string, fromSaved: boolean) => void;
   generatePostContent: (image: GeneratedImage) => Promise<GeneratedImage | undefined>;
   autoTagImage: (id: string, providedImage?: GeneratedImage) => Promise<void>;
+  /** V1.5: re-apply the current watermark to this image (images only). */
+  onReapplyWatermark?: () => void;
 }
 
 export function GalleryCard({
@@ -110,6 +113,7 @@ export function GalleryCard({
   deleteImage,
   generatePostContent,
   autoTagImage,
+  onReapplyWatermark,
 }: GalleryCardProps) {
   // V060-COLL-001: click-driven + portaled "Add to Collection" menu.
   // The previous hover-driven dropdown was clipped by sibling cards in
@@ -541,10 +545,22 @@ export function GalleryCard({
                       onSelect: () => handleAnimate(img),
                     }
                   : null;
+              // V1.5: re-apply the current watermark (images only).
+              const reapplyWatermarkItem: KebabMenuItem | null =
+                onReapplyWatermark && !img.isVideo
+                  ? {
+                      kind: 'item',
+                      id: 'reapply-watermark',
+                      label: 'Re-apply watermark',
+                      icon: Stamp,
+                      onSelect: onReapplyWatermark,
+                    }
+                  : null;
               const items: (KebabMenuItem | null)[] =
                 view === 'gallery'
                   ? [
                       animateItem,
+                      reapplyWatermarkItem,
                       {
                         kind: 'item',
                         id: 'auto-tag',
@@ -572,6 +588,7 @@ export function GalleryCard({
                     ]
                   : [
                       animateItem,
+                      reapplyWatermarkItem,
                       {
                         kind: 'item',
                         id: 'save-for-post',

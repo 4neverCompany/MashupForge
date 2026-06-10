@@ -154,6 +154,86 @@ export async function persistImageToDisk(
 }
 
 /**
+ * Where approved images are exported for discoverability — the user's
+ * real Documents folder, NOT the hidden appdata dir. Returns
+ * `Documents\MashupForge\Images` (or the platform equivalent) in Tauri,
+ * or `null` off-Tauri (web/test). Scoped in
+ * src-tauri/capabilities/default.json under `$DOCUMENT/MashupForge/Images`.
+ */
+export async function getApprovedImagesDocDir(): Promise<string | null> {
+  if (typeof window === 'undefined') return null
+  const tauriInternals = (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
+  const tauriLegacy = (window as unknown as { __TAURI__?: unknown }).__TAURI__
+  if (!tauriInternals && !tauriLegacy) return null
+  try {
+    const { documentDir, join } = await import('@tauri-apps/api/path')
+    const base = await documentDir()
+    return await join(base, 'MashupForge', 'Images')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * V1.5: persist an APPROVED image to disk in two places, from a single
+ * fetch:
+ *
+ *   1. the canonical app-data store (`images/generated/`) — the source
+ *      of truth that `displayUrlAsync` / `deleteImageFile` resolve, and
+ *   2. a discoverable copy in `Documents\MashupForge\Images` so the user
+ *      can find their approved posts as ordinary files.
+ *
+ * Returns the canonical app-data filename (to write into `localPath`) on
+ * success, or `null` off-Tauri / on failure. The Documents copy is
+ * best-effort: a scope/permission failure there never blocks the
+ * canonical write. Pass the POST-watermark URL so the saved file carries
+ * the watermark the user approved.
+ */
+export async function persistApprovedImageToDisk(
+  sourceUrl: string,
+  imageId: string,
+  savedAt: number,
+): Promise<string | null> {
+  const dir = await getImagesDir()
+  if (!dir || !sourceUrl) return null
+
+  try {
+    const { mkdir, writeFile } = await import('@tauri-apps/plugin-fs')
+    const { join } = await import('@tauri-apps/api/path')
+
+    await mkdir(dir, { recursive: true })
+
+    const res = await fetch(sourceUrl)
+    if (!res.ok) return null
+    const bytes = new Uint8Array(await res.arrayBuffer())
+
+    const ext = extensionFromUrl(sourceUrl)
+    const baseName = buildImageFilename(imageId, savedAt).replace(/\.jpg$/, '')
+    const filename = `${baseName}${ext}`
+
+    // 1. Canonical app-data write (source of truth).
+    const canonicalPath = await join(dir, filename)
+    await writeFile(canonicalPath, bytes)
+
+    // 2. Discoverable Documents copy — best-effort, never fatal.
+    try {
+      const docDir = await getApprovedImagesDocDir()
+      if (docDir) {
+        await mkdir(docDir, { recursive: true })
+        const docPath = await join(docDir, filename)
+        await writeFile(docPath, bytes)
+      }
+    } catch {
+      /* Documents copy is optional; canonical write already succeeded. */
+    }
+
+    return filename
+  } catch {
+    return null
+  }
+}
+
+/**
  * Convert a stored image record into a URL that the WebView2 can
  * render WITHOUT resolving the local filesystem path. Priority:
  *

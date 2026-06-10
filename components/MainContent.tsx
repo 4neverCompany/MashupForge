@@ -50,6 +50,7 @@ import {
   Send,
   TrendingUp,
   ImageOff,
+  Stamp,
 } from 'lucide-react';
 import {
   useMashup,
@@ -176,6 +177,7 @@ function AutoTextarea({ minRows = 2, className, value, ...rest }: AutoTextareaPr
 import { useAuth } from '@/hooks/useAuth';
 import { useDesktopConfig } from '@/hooks/useDesktopConfig';
 import { showToast } from '@/components/Toast';
+import { reapplyWatermark } from '@/lib/watermark';
 
 export function MainContent() {
   const { logout } = useAuth();
@@ -1166,6 +1168,27 @@ export function MainContent() {
   /** Merge partial updates into an image and persist. */
   const patchImage = (img: GeneratedImage, patch: Partial<GeneratedImage>) => {
     saveImage({ ...img, ...patch });
+  };
+
+  /**
+   * V1.5: re-apply the current watermark to an already-saved image.
+   * Shared by the Captioning, Post-Ready, and Gallery surfaces. Skips
+   * videos and disabled-watermark cases with a toast; on success the
+   * re-watermarked image (composited onto its clean originalUrl, so no
+   * double-stacking) is persisted via saveImage.
+   */
+  const handleReapplyWatermark = async (img: GeneratedImage) => {
+    const result = await reapplyWatermark(
+      img,
+      settings.watermark ?? { enabled: false, image: null, position: 'bottom-right', opacity: 0.8, scale: 0.05 },
+      settings.channelName,
+    );
+    if (result.ok) {
+      saveImage(result.image);
+      showToast('Watermark re-applied.', 'success');
+    } else {
+      showToast(result.reason, 'error');
+    }
   };
 
   /**
@@ -3278,6 +3301,15 @@ export function MainContent() {
                                   <Sparkles className="w-3.5 h-3.5" />
                                   {img.postCaption ? 'Regenerate' : 'Generate'}
                                 </button>
+                                {!img.isVideo && (
+                                  <button
+                                    onClick={() => handleReapplyWatermark(img)}
+                                    className="btn-blue-sm justify-center"
+                                    title="Re-apply watermark with current settings"
+                                  >
+                                    <Stamp className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                                 <button
                                   disabled={!img.postCaption}
                                   onClick={() => patchImage(img, { isPostReady: true })}
@@ -4682,6 +4714,7 @@ export function MainContent() {
                                   }}
                                   onUnready={() => patchImage(img, { isPostReady: false })}
                                   onCancelSchedule={() => unschedulePost(img)}
+                                  onReapplyWatermark={() => handleReapplyWatermark(img)}
                                 />
                               </DraggableSingleWrapper>
                             </div>
@@ -5008,6 +5041,7 @@ export function MainContent() {
                     deleteImage={deleteImage}
                     generatePostContent={generatePostContent}
                     autoTagImage={autoTagImage}
+                    onReapplyWatermark={() => handleReapplyWatermark(img)}
                   />
                 );
               })}

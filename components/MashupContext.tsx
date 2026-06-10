@@ -41,6 +41,7 @@ import { useIdeas } from '../hooks/useIdeas';
 import { useSocial } from '../hooks/useSocial';
 import { usePipeline } from '../hooks/usePipeline';
 import { collectFinalizeTargets, finalizePipelineImage } from '../lib/pipeline-finalize';
+import { persistApprovedImageToDisk } from '../lib/images/storage';
 import { applyCaptionEdit } from '../lib/caption-edit';
 import { planApproveScheduledPost, planRejectScheduledPost } from '../lib/approval-actions';
 import { recordOutcome } from '../lib/outcome-tracker';
@@ -249,7 +250,47 @@ export function MashupProvider({ children }: { children: ReactNode }) {
       // (saveImage IDB quota, etc.) that escape finalizePipelineImage's
       // internal try/catch. Without this, a Promise.all rejection from
       // any image silently aborts the rest of the batch.
-      if (settings.watermark?.enabled) {
+      //
+      // V1.5-LOCAL-SAVE: after the (optional) watermark, persist the
+      // APPROVED image to disk — the canonical app-data store AND a
+      // discoverable Documents\MashupForge\Images copy — so the
+      // approved post exists as a real local file (the watermarked
+      // pixels previously lived only in the IDB `url`). Off-Tauri this
+      // is a no-op (persistApprovedImageToDisk returns null).
+      if (markPostReady) {
+        void Promise.all(
+          targets.map(async (img) => {
+            try {
+              // Apply the watermark first when enabled so the saved
+              // file carries the mark the user approved.
+              let finalImg = img;
+              if (settings.watermark?.enabled) {
+                finalImg = await finalizePipelineImage(
+                  img,
+                  settings.watermark,
+                  settings.channelName,
+                  applyWatermark,
+                  markPostReady,
+                );
+                saveImage(finalImg);
+              }
+              if (finalImg.url) {
+                const localPath = await persistApprovedImageToDisk(
+                  finalImg.url,
+                  finalImg.id,
+                  finalImg.savedAt ?? Date.now(),
+                );
+                if (localPath) saveImage({ ...finalImg, localPath });
+              }
+            } catch (err) {
+              console.warn('[MashupContext] finalize/persist failed for', img.id, err);
+            }
+          }),
+        );
+      } else if (settings.watermark?.enabled) {
+        // Reject path: still apply the watermark for Gallery display,
+        // but don't write a discoverable Documents copy (only approved
+        // posts are exported as local files).
         void Promise.all(
           targets.map(async (img) => {
             try {
