@@ -22,6 +22,12 @@
  *   - NOT for functions called during render — event handlers,
  *     effects, and async flows only. (A render-phase call could
  *     observe the previous render's implementation.)
+ *   - Caution for useLayoutEffect callers: layout effects flush
+ *     child-first, so a DESCENDANT's layout effect that calls a
+ *     wrapper during the same commit as a provider re-render sees
+ *     the previous commit's implementation (the provider's layout
+ *     effect hasn't refreshed the ref yet). No current consumer does
+ *     this (verified 2026-06-11); prefer useEffect for such calls.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
