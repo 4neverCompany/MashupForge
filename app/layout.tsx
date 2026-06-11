@@ -5,6 +5,7 @@ import { Toast } from '@/components/Toast';
 import { UpdateChecker } from '@/components/UpdateChecker';
 import { FirstRunBanner } from '@/components/FirstRunBanner';
 import { StartupReconciler } from '@/components/post-lifecycle/StartupReconciler';
+import { WebAnalytics } from '@/components/WebAnalytics';
 
 // AETHER SANS → Space Grotesk: geometric tech sans, distinctive letterforms,
 // futuristic feel that matches the 4neverCompany dark studio aesthetic.
@@ -57,6 +58,8 @@ export default function RootLayout({
         <UpdateChecker />
         <FirstRunBanner />
         <StartupReconciler />
+        {/* Web build only — renders null in the Tauri desktop app. */}
+        <WebAnalytics />
       </body>
     </html>
   );
