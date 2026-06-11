@@ -88,11 +88,25 @@ async function uploadBlobToProxy(blob: Blob, filename: string): Promise<string> 
 /**
  * Ensure a single image source is a public https URL.
  *
+ * - Tauri asset URLs (M3.2: slimmed images carry
+ *   `asset://` / `http://asset.localhost/...` in `url`) are fetched
+ *   in-webview and uploaded — they are machine-local files, NOT
+ *   publicly reachable. This branch MUST run before the http
+ *   passthrough: the Windows form starts with `http://` and would
+ *   otherwise be handed to Instagram as a "public" URL.
  * - Already-https URLs pass through unchanged.
  * - data: URLs get uploaded to uguu and replaced with the hosted URL.
  * - Other inputs throw — the caller should pre-validate.
  */
 export async function ensureHostedUrl(source: string): Promise<string> {
+  const { isAssetUrl } = await import('@/lib/images/slim');
+  if (isAssetUrl(source)) {
+    const res = await fetch(source, { signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`ensureHostedUrl: local asset fetch failed (${res.status})`);
+    const blob = await res.blob();
+    const ext = blob.type.includes('png') ? 'png' : 'jpg';
+    return uploadBlobToProxy(blob, `image.${ext}`);
+  }
   if (source.startsWith('http://') || source.startsWith('https://')) return source;
   const parsed = parseDataUrl(source);
   if (!parsed) throw new Error(`ensureHostedUrl: unsupported source (not http/https/data:): ${source.slice(0, 40)}...`);

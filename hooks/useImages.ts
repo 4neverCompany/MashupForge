@@ -7,6 +7,8 @@ import { useState, useEffect, useRef } from 'react';
 // pre-fix value and copy it forward on first launch.
 import { get, set } from '@/lib/persistence'
 import { autoBackupImages } from '@/lib/backup/images'
+import { hasEmbeddedPixels, isAssetUrl, slimImageRecord } from '@/lib/images/slim'
+import { displayUrlAsync } from '@/lib/images/storage'
 import { type GeneratedImage } from '../types/mashup'
 
 // Normalize images on load: rewrite legacy tag spelling and reset any
@@ -211,6 +213,10 @@ export function useImages() {
     if (hydrationFailedRef.current) return;
     const timer = setTimeout(() => {
       if (loadInFlightRef.current || hydrationFailedRef.current) return;
+      // M3.2: no store writes mid-migration — each would serialize the
+      // still-mostly-fat array (seconds of JSON.stringify at 200 MB).
+      // The migration triggers one final write when it completes.
+      if (migratingRef.current) return;
       void set('mashup_saved_images', savedImages).catch(() => {});
       // Auto-backup to Documents folder (survives reinstall)
       void autoBackupImages(savedImages);
@@ -260,6 +266,104 @@ export function useImages() {
     return () => window.removeEventListener('beforeunload', flush);
   }, []);
 
+  // ── M3.2 (V1.8): store slimming — embedded pixels OUT of the JSON ──
+  // The watermark flows (winner pick, pipeline finalize, re-apply)
+  // write canvas data-URLs (~0.5 MB each) into `url`; with the store
+  // persisting the full array, Maurice's mashupforge.json had grown to
+  // 217 MB (103 MB images + a 103 MB backup duplicate) — the documented
+  // 30s+ studio-mount stall. Every save now kicks an async slim pass:
+  // pixels go to the canonical images dir (v1.4.4 file-per-image
+  // pattern), the record keeps a `localPath` reference. Off-Tauri (web
+  // dev) slimImageRecord returns null and the fat record stays — the
+  // predicate still matches on the next launch, so nothing is lost.
+  const slimInFlightRef = useRef<Set<string>>(new Set());
+  const slimAndPatch = async (img: GeneratedImage): Promise<boolean> => {
+    if (slimInFlightRef.current.has(img.id)) return false;
+    slimInFlightRef.current.add(img.id);
+    try {
+      const slim = await slimImageRecord(img);
+      if (!slim) return false;
+      markDirty();
+      setSavedImages(prev => prev.map(i =>
+        i.id === img.id
+          ? { ...i, localPath: slim.localPath, url: slim.url, base64: undefined }
+          : i,
+      ));
+      return true;
+    } catch {
+      return false;
+    } finally {
+      slimInFlightRef.current.delete(img.id);
+    }
+  };
+
+  // One-time-per-session background migration for records that were
+  // persisted fat by older versions (236 of Maurice's 259 entries).
+  // Runs after a successful hydration, sequentially with a small
+  // breather so ~100 MB of disk writes don't compete with the UI.
+  // Idempotent: slimmed records no longer match the predicate, and a
+  // failed write leaves the fat record for the next launch.
+  const migrationRanRef = useRef(false);
+  // While the backlog migration runs, the 200ms-debounced store write
+  // is suppressed (see the debounce effect): each slim patch resets
+  // the timer, and any write that slips between patches serializes the
+  // still-mostly-fat array — at 200 MB that is seconds of main-thread
+  // JSON.stringify, potentially dozens of times on the first launch.
+  // One write fires after the migration completes. Crash-safety: a
+  // crash mid-migration loses only the slim PATCHES — the files are on
+  // disk, the store still holds the fat records, and the next launch
+  // re-runs the (idempotent, same-filename) migration.
+  const migratingRef = useRef(false);
+  useEffect(() => {
+    if (!loadTriggered || !isImagesLoaded) return;
+    if (hydrationFailedRef.current) return;
+    if (migrationRanRef.current) return;
+    migrationRanRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      const fat = savedImagesRef.current.filter(hasEmbeddedPixels);
+      if (fat.length > 0) migratingRef.current = true;
+      for (const img of fat) {
+        if (cancelled) { migratingRef.current = false; return; }
+        await slimAndPatch(img);
+        // Yield between writes — keeps the main thread responsive
+        // while the first post-update launch migrates the backlog.
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      migratingRef.current = false;
+      if (fat.length > 0 && !cancelled) {
+        // Re-arm the debounce so the final slim state persists now.
+        markDirty();
+        setSavedImages(prev => [...prev]);
+      }
+      // Refresh stale asset URLs: the persisted `url` of a slimmed
+      // record embeds an ABSOLUTE path (convertFileSrc), which goes
+      // stale when the app-data folder moves or the app is
+      // reinstalled. localPath is the durable reference — re-derive.
+      // Cheap (one convertFileSrc per entry, no disk reads); off-Tauri
+      // displayUrlAsync just echoes the stored url → no patch.
+      const withLocal = savedImagesRef.current.filter(
+        (i) => i.localPath && (!i.url || isAssetUrl(i.url)),
+      );
+      for (const img of withLocal) {
+        if (cancelled) return;
+        try {
+          const fresh = await displayUrlAsync(img);
+          if (fresh && fresh !== img.url) {
+            markDirty();
+            setSavedImages(prev => prev.map(i =>
+              i.id === img.id ? { ...i, url: fresh } : i,
+            ));
+          }
+        } catch { /* keep the stored url */ }
+      }
+    })();
+    return () => { cancelled = true; };
+    // slimAndPatch is stable-in-practice (uses refs + setState); the
+    // effect must fire exactly once per successful hydration.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadTriggered, isImagesLoaded]);
+
   const saveImage = (img: GeneratedImage) => {
     markDirty();
     setSavedImages(prev => {
@@ -267,6 +371,10 @@ export function useImages() {
       if (exists) return prev.map(i => i.id === img.id ? { ...i, ...img } : i);
       return [{ ...img, savedAt: Date.now() }, ...prev];
     });
+    // Fire-and-forget: pixels to disk, reference in the store. The
+    // record is saved fat first (UI stays snappy, nothing is lost on
+    // crash), then patched slim when the disk write lands.
+    if (hasEmbeddedPixels(img)) void slimAndPatch(img);
   };
 
   const deleteImage = (id: string, fromSaved: boolean) => {
