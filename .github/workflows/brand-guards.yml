@@ -21,7 +21,7 @@ jobs:
     name: Brand name consistency
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check for forbidden legacy brand names
         run: |
           # Forbidden patterns from §1.2 of the analysis
@@ -76,7 +76,7 @@ jobs:
     name: Version sync (package.json / Cargo.toml / tauri.conf.json)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Extract and compare versions
         run: |
           # Read versions from the three sources
@@ -100,7 +100,7 @@ jobs:
     name: bun.lock freshness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check bun.lock vs package-lock.json
         run: |
           if [ ! -f bun.lock ]; then
@@ -135,7 +135,7 @@ jobs:
     name: No `as any` in src/
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Search for as any casts (exclude comments)
         run: |
           # Search for "as any" in app/, components/, lib/, hooks/, types/.
