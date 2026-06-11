@@ -119,8 +119,13 @@ describe('HiggsfieldCliAdapter.generateImage — happy paths', () => {
     const [, args] = spawnMock.mock.calls[0] as [string, string[], unknown];
     expect(args).toContain('--prompt');
     expect(args).toContain('a cat');
-    expect(args).toContain('--aspect-ratio');
+    // V1.7.0-PRE-PROD-FIX: the Higgsfield CLI flag is `--aspect_ratio`
+    // (UNDERSCORE), not `--aspect-ratio` (hyphen). The hyphen form
+    // was rejected by the CLI with "Error: Unknown params:
+    // aspect-ratio".
+    expect(args).toContain('--aspect_ratio');
     expect(args).toContain('16:9');
+    expect(args).not.toContain('--aspect-ratio');
     expect(args).toContain('--image');
     expect(args).toContain('/tmp/ref.png');
     expect(args).toContain('text2image_nano_banana');
@@ -131,6 +136,27 @@ describe('HiggsfieldCliAdapter.generateImage — happy paths', () => {
     expect(args).not.toContain('--negative-prompt');
     expect(args).not.toContain('--image-url');
     expect(args).not.toContain('--image-id');
+  });
+
+  // V1.7.0-PRE-PROD-FIX: regression test for the hyphen-vs-underscore
+  // bug. Spec at lib/model-specs/higgsfield-nano-banana-pro.json:74
+  // says "Use --aspect_ratio, NOT --width/--height." The hyphen form
+  // `--aspect-ratio` was rejected by the CLI with
+  // "Error: Unknown params: aspect-ratio".
+  it('uses --aspect_ratio (underscore) — hyphen form would be rejected by the CLI', async () => {
+    spawnMock.mockReturnValueOnce(
+      makeChild({ stdout: JSON.stringify({ url: 'https://x' }) }) as never,
+    );
+    await adapter.generateImage({
+      prompt: 'test',
+      aspectRatio: '4:5',
+    });
+    const [, args] = spawnMock.mock.calls[0] as [string, string[], unknown];
+    // Must use underscore (CLI expects it).
+    expect(args).toContain('--aspect_ratio');
+    expect(args).toContain('4:5');
+    // Must NOT use hyphen (CLI rejects it).
+    expect(args).not.toContain('--aspect-ratio');
   });
 
   // V1.2.6: referenceImage with id (UUID) should be passed
