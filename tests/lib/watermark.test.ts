@@ -15,7 +15,7 @@ vi.mock('@/lib/images/storage', () => ({
   persistImageToDisk: vi.fn().mockResolvedValue(null),
 }));
 
-import { reapplyWatermark } from '@/lib/watermark';
+import { reapplyWatermark, applyWatermark, WATERMARK_LOAD_TIMEOUT_MS } from '@/lib/watermark';
 
 const onSettings: WatermarkSettings = {
   enabled: true,
@@ -53,5 +53,33 @@ describe('reapplyWatermark — guard branches', () => {
     const r = await reapplyWatermark(img({ url: undefined }), onSettings, 'Chan');
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/no source/i);
+  });
+});
+
+describe('applyWatermark — V1.7.0-PERF load timeout (no more infinite hang)', () => {
+  it('resolves to the un-watermarked base when the image never loads', async () => {
+    // happy-dom's `new Image()` never fires onload/onerror for a remote
+    // src (no network) — exactly the production stall. Before the fix the
+    // Promise never settled; now the timeout ships the base.
+    vi.useFakeTimers();
+    const base = 'https://cdn.example/never-loads.jpg';
+    const settings: WatermarkSettings = {
+      enabled: true,
+      image: 'data:image/png;base64,AAAA',
+      position: 'bottom-right',
+      opacity: 0.8,
+      scale: 0.15,
+    };
+    const p = applyWatermark(base, settings, 'Chan');
+    await vi.advanceTimersByTimeAsync(WATERMARK_LOAD_TIMEOUT_MS + 100);
+    await expect(p).resolves.toBe(base);
+    vi.useRealTimers();
+  });
+
+  it('short-circuits instantly (no timer) when the watermark is disabled', async () => {
+    const base = 'https://cdn.example/x.jpg';
+    await expect(
+      applyWatermark(base, { enabled: false, image: null, position: 'bottom-right', opacity: 0.8, scale: 0.05 }),
+    ).resolves.toBe(base);
   });
 });
