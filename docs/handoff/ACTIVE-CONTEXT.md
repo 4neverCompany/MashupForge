@@ -10,19 +10,31 @@
 Watermark-Timeout. Handoff wurde von dieser Session NICHT nachgezogen —
 jetzt erledigt.
 
-**Ops-Pflichten (vor/neben M3):**
-1. ✅ camofox-integration.yml-YAML-Fix (unquoted `:` in Step-Namen → roter
-   0s-Run auf JEDEM Push seit 09.06., 100/100 Failures) — auf main.
-2. ⏳ **GitHub Actions Node-20-Deadline 16.06.**: Dependabot-PRs #15/#18/
-   #40/#17/#13 (checkout@6, setup-node@6, upload-artifact@7,
-   download-artifact@8, cache@5) mergen; Cargo-Patches #16/#20/#23/#25/#41
-   dazu. PR #29 (ci-guard-allowlists, 03.06.) auf Supersession prüfen.
-   Vercel-Drafts #67/#11 = Maurice' Call.
+**Ops-Pflichten: ✅ ALLE ERLEDIGT (11.06. vormittags):**
+1. ✅ camofox-integration.yml-YAML-Fix (649b4ac).
+2. ✅ Node-20-Deadline: alle 10 Dependabot-PRs gemerged (checkout@6,
+   setup-node@6, upload-artifact@7, download-artifact@8, cache@5 + 5
+   Cargo-Patches inkl. tauri 2.11.2); `cargo check` lokal verifiziert
+   (reguläre CI prüft Rust nicht!). Gitleaks skippt jetzt Dependabot
+   (7aaf8ac — Dependabot-Runs haben keine Secrets → war garantiert rot).
+   PR #29 als superseded geschlossen. Offen: Vercel-Drafts #67/#11
+   (= Maurice' Call). gitleaks-action@v2 selbst ist Node 20 (upstream).
 
-**▶ Dann M3** ("Schneller & sauberer" → v1.8.0): M3.1 Re-Render-Storm
-(Context-Memo + GalleryCard-memo — größter gefühlter Speed-Win), M3.2
-Comparison-to-Disk, M3.3 Cleanup (vorher Maurice' working-folder/bmad-Frage
-klären). Plan im ROADMAP-Einstiegsblock.
+**M3-Fortschritt:**
+- ✅ **M3.1 Re-Render-Storm** gemerged (PR #74, be47d88): neuer
+  `hooks/useStableCallback.ts` (useEvent-Pattern, useState-Lazy-Init),
+  alle ~55 MashupContext-Funktions-Felder identitätsstabil + Value
+  memoized, GalleryCard in React.memo (default shallow; Prop-Vertrag
+  onReapplyWatermark nimmt jetzt das Image), savedIdSet statt O(N²).
+  Adversarial-Review (12 Agents): 0 bestätigte Defekte; Verifier
+  bestätigten Memo-Wirksamkeit + vollständige useMemo-Deps + keinen
+  Effect-Re-Run-Verlust.
+- ⏳ **M3.1b (Follow-up aus dem Review)**: PostReadyCard hat dieselbe
+  Krankheit — 12 Inline-Lambdas pro Card, kein React.memo
+  (MainContent.tsx ~4702-4731, PostReadyCard.tsx). Gleiche Behandlung.
+- ▶ **M3.2 Comparison-to-Disk** (nächster Schritt), dann M3.3 Cleanup
+  (vorher Maurice' working-folder/bmad-Frage klären). KEIN Tag bis das
+  M3-Bundle steht → EIN v1.8.0-Vorschlag, Maurice' OK abwarten.
 
 **Operating Rules (unverändert gültig):** Batch-Releases (nicht pro PR
 taggen, Maurice' OK abwarten — .claude/rules/release-flow.md im App-Repo);

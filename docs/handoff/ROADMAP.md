@@ -21,22 +21,24 @@
 wirklich), #73 (Watermark-Timeout). **Start bei M3 — "Schneller & sauberer"
 (→ v1.8.0)**, plus zwei Ops-Pflichten:
 
-0. **Ops zuerst:** (a) GitHub-Actions Node-20-Deprecation — am **16.06.**
-   erzwingt GitHub Node 24; die Dependabot-PRs #15 (checkout@6), #18
-   (setup-node@6), #40 (upload-artifact@7), #17 (download-artifact@8),
-   #13 (cache@5) mergen (+ Cargo-Patches #16/#20/#23/#25/#41). (b) Der
-   camofox-integration.yml-YAML-Fix ist auf main (unquoted Doppelpunkte in
-   Step-Namen — produzierte seit 09.06. einen roten 0s-Run pro Push).
-1. **M3.1 Re-Render-Storm** (größter gefühlter Speed-Win): `useMemo` aufs
-   MashupContext-Value (MashupContext.tsx:577), `React.memo` auf GalleryCard
-   (Comparator id/localPath/url/status), gefilterte Listen in MainContent
-   memoizen.
-2. **M3.2 Comparison-Results auf Disk** (100MB-JSON-Problem zweite Hälfte).
-3. **M3.3 Cleanup-Phasen** (pi/nca/mmx-Dead-Code ~2300 LOC, 27MB
+0. ✅ **Ops erledigt (11.06.):** Node-20-Deadline — alle 10 Dependabot-PRs
+   gemerged (`cargo check` lokal verifiziert); camofox-YAML-Fix (649b4ac);
+   Gitleaks skippt Dependabot (7aaf8ac); PR #29 superseded-closed. Offen
+   nur Vercel-Drafts #67/#11 (= Maurice' Call).
+1. ✅ **M3.1 Re-Render-Storm** GEMERGED (PR #74, be47d88): useStableCallback-
+   Hooks, Context-Value memoized + ~55 stabile Funktions-Identitäten,
+   GalleryCard React.memo (default shallow), savedIdSet. Review: 0 Defekte.
+2. ▶ **M3.1b (Review-Follow-up):** PostReadyCard gleich behandeln —
+   12 Inline-Lambdas pro Card + kein React.memo (MainContent.tsx
+   ~4702-4731, PostReadyCard.tsx:79/122). Kleiner, klar umrissener PR.
+3. ▶ **M3.2 Comparison-Results auf Disk** (100MB-JSON-Problem zweite
+   Hälfte — mashup_comparison_results speichert GeneratedImage[] MIT
+   base64; useComparison.ts).
+4. **M3.3 Cleanup-Phasen** (pi/nca/mmx-Dead-Code ~2300 LOC, 27MB
    Landing-PNGs — VORHER Maurice' offene Frage zu docs/working-folder/bmad
    klären, siehe "Entscheidungen"). Dazu der deferred v1.6.0-Review-Befund
    (Pre-Hydration-Opt-out-Fenster).
-4. **Arbeitsweise**: Feature-Branch → PR → CI grün → Merge (Squash-Titel
+5. **Arbeitsweise**: Feature-Branch → PR → CI grün → Merge (Squash-Titel
    conventional!). NICHT taggen — M3 sammeln, EIN v1.8.0-Release
    vorschlagen, Maurice' OK abwarten (release-flow.md).
 
