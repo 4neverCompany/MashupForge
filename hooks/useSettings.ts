@@ -7,8 +7,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 // Tauri they really hit `%APPDATA%\com.4nevercompany.mashupforge\
 // mashupforge.json` and survive folder moves.
 import { get, set } from '@/lib/persistence';
-import { type UserSettings, defaultSettings } from '../types/mashup';
+import { type UserSettings, type WatermarkSettings, defaultSettings } from '../types/mashup';
 import { applySettingsMigrations } from '../lib/pipeline-daemon-utils';
+import {
+  shouldMigrateWatermark,
+  migrateWatermarkToDisk,
+} from '@/lib/watermarks/migrate';
 
 // Deep-merge a loaded payload into the current settings, preserving defaults
 // for any fields that are missing or explicitly undefined in the payload.
@@ -279,6 +283,61 @@ export function useSettings() {
     loadSettings();
     return () => { cancelled = true; };
   }, [loadTriggered, replayPendingOps]);
+
+  // V1.7.1-M3.2b-WATERMARK-DISK: once-per-session migration from the
+  // legacy in-store data-URL watermark to a disk-backed file. Mirrors
+  // the M3.2 (PR #77) once-per-session image-slim pattern. Gated on
+  // hydration success + Tauri runtime + a `migratedFlags` marker so
+  // the migration runs at most once per store.
+  //
+  // The migration is best-effort: a failed disk write leaves the
+  // legacy data-URL alone and the user's watermark keeps working.
+  // On success, we patch `settings.watermark` in place via the
+  // normal `setSettings` path, which schedules a 300ms-debounced
+  // persist — same plumbing every other edit uses.
+  useEffect(() => {
+    if (!isSettingsLoaded) return;
+    if (!hydratedOnceRef.current) return;
+    if (typeof window === 'undefined') return;
+    const tauriInternals = (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    const tauriLegacy = (window as unknown as { __TAURI__?: unknown }).__TAURI__;
+    const isTauri = !!(tauriInternals || tauriLegacy);
+    if (!isTauri) return;
+    // Snapshot current settings via the ref so the migration effect
+    // doesn't need to depend on the full settings object (which
+    // would re-fire on every edit and re-run the migration guard).
+    const current = settingsRef.current;
+    if (!shouldMigrateWatermark(current, isTauri)) return;
+    let cancelled = false;
+    (async () => {
+      const patch = await migrateWatermarkToDisk(current);
+      if (cancelled || !patch || !patch.watermark) return;
+      // The spread of `patch.watermark` is `Partial<WatermarkSettings>`
+      // (imageRef is optional), and merging it with `prev.watermark`
+      // can leave every field as `... | undefined`. The setState
+      // callback has to return the strict `UserSettings` shape, so
+      // build it with explicit required-field defaults from `prev`.
+      setSettings((prev) => {
+        const prevWm: WatermarkSettings = prev.watermark ?? {
+          enabled: false,
+          image: null,
+          position: 'bottom-right',
+          opacity: 0.8,
+          scale: 0.15,
+        };
+        const merged: WatermarkSettings = {
+          enabled: patch.watermark!.enabled ?? prevWm.enabled,
+          image: patch.watermark!.image ?? prevWm.image,
+          position: patch.watermark!.position ?? prevWm.position,
+          opacity: patch.watermark!.opacity ?? prevWm.opacity,
+          scale: patch.watermark!.scale ?? prevWm.scale,
+          imageRef: patch.watermark!.imageRef ?? prevWm.imageRef,
+        };
+        return { ...prev, watermark: merged };
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [isSettingsLoaded]);
 
   // PROP-010: persist after every committed state change, debounced 300ms.
   // Debounce prevents an IDB write on every keystroke in text fields while
