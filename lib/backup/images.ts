@@ -1,4 +1,5 @@
 import { get, set } from '@/lib/persistence'
+import { slimForBackup } from '@/lib/images/slim'
 import { type GeneratedImage } from '@/types/mashup'
 import pkg from '@/package.json'
 
@@ -72,15 +73,23 @@ async function writeBackupFile(filename: string, content: string): Promise<boole
  */
 export async function autoBackupImages(images: GeneratedImage[]): Promise<void> {
   if (images.length === 0) return
+  // M3.2 (V1.8): back up SLIMMED records — metadata + re-downloadable
+  // URLs + localPath references, never raw embedded pixels. The fat
+  // variant serialized ~100 MB of data-URLs into the plugin-store
+  // (doubling mashupforge.json) AND into two Documents files on every
+  // 200ms-debounced mutation. Recovery (lib/backup/recovery.ts)
+  // re-downloads per URL; locally-persisted pixels live as real files
+  // in the images dir (and approved ones additionally in Documents).
+  const slimmed = slimForBackup(images)
   const metadata: BackupMetadata = {
     timestamp: Date.now(),
     version: APP_VERSION,
-    imageCount: images.length,
+    imageCount: slimmed.length,
     source: 'auto',
   }
-  await set(BACKUP_KEY, images)
+  await set(BACKUP_KEY, slimmed)
   await set(BACKUP_METADATA_KEY, metadata)
-  const json = JSON.stringify({ images, ...metadata }, null, 2)
+  const json = JSON.stringify({ images: slimmed, ...metadata }, null, 2)
   const filename = `mashupforge_images_${new Date().toISOString().split('T')[0]}.json`
   await writeBackupFile(filename, json)
   await writeBackupFile('latest.json', json)
