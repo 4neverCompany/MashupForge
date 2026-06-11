@@ -141,6 +141,56 @@ describe('MODEL-PRESELECT-FIX (2026-05-21): respects getEnabledModelIds', () => 
   });
 });
 
+describe('V1.7.0-PIPELINE-HIGGSFIELD: Higgsfield models join the generation set', () => {
+  it('appends configured higgsfield:<slug> ids when higgsfieldEnabled', async () => {
+    const trigger = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      triggerImageGeneration: trigger,
+      getEnabledModelIds: vi.fn().mockReturnValue(['phoenix']),
+    });
+    const settings = makeSettings({
+      higgsfieldEnabled: true,
+      higgsfieldImageModels: ['nano_banana_2', 'flux_2'],
+    });
+    await processIdea(makeIdea(), 0, 1, makeEngagement(), [], settings, deps);
+    const passed = trigger.mock.calls[0][1] as string[];
+    expect(passed).toContain('phoenix');
+    expect(passed).toContain('higgsfield:nano_banana_2');
+    expect(passed).toContain('higgsfield:flux_2');
+  });
+
+  it('does NOT add higgsfield ids when the toggle is off', async () => {
+    const trigger = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      triggerImageGeneration: trigger,
+      getEnabledModelIds: vi.fn().mockReturnValue(['phoenix']),
+    });
+    const settings = makeSettings({
+      higgsfieldEnabled: false,
+      higgsfieldImageModels: ['nano_banana_2'],
+    });
+    await processIdea(makeIdea(), 0, 1, makeEngagement(), [], settings, deps);
+    const passed = trigger.mock.calls[0][1] as string[];
+    expect(passed.some((id) => id.startsWith('higgsfield:'))).toBe(false);
+  });
+
+  it('can run a Higgsfield-only pipeline (no Leonardo selection, toggle on)', async () => {
+    const trigger = vi.fn().mockResolvedValue(undefined);
+    const deps = makeDeps({
+      triggerImageGeneration: trigger,
+      // empty selection → leonardo fallback, but the user wants higgsfield
+      getEnabledModelIds: vi.fn().mockReturnValue([]),
+    });
+    const settings = makeSettings({
+      higgsfieldEnabled: true,
+      higgsfieldImageModels: ['nano_banana_2'],
+    });
+    await processIdea(makeIdea(), 0, 1, makeEngagement(), [], settings, deps);
+    const passed = trigger.mock.calls[0][1] as string[];
+    expect(passed).toContain('higgsfield:nano_banana_2');
+  });
+});
+
 describe('processIdea — happy path (single mode)', () => {
   it('calls all steps in sequence and marks idea done', async () => {
     const deps = makeDeps();
