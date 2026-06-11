@@ -22,11 +22,20 @@ import { Analytics } from '@vercel/analytics/next';
 export function WebAnalytics() {
   const [isWeb, setIsWeb] = useState(false);
 
+  // Defer the setState via queueMicrotask (project convention for the
+  // react-hooks/set-state-in-effect rule), stale-guarded against
+  // unmount before the microtask fires. The two-step mount dance is
+  // deliberate: rendering <Analytics /> from a useState initializer
+  // would mismatch the server-rendered null during hydration.
   useEffect(() => {
+    let stale = false;
     const isTauri =
       typeof window !== 'undefined'
       && '__TAURI_INTERNALS__' in window;
-    setIsWeb(!isTauri);
+    queueMicrotask(() => {
+      if (!stale) setIsWeb(!isTauri);
+    });
+    return () => { stale = true; };
   }, []);
 
   if (!isWeb) return null;
