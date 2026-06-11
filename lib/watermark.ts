@@ -16,6 +16,12 @@ import type { WatermarkSettings, GeneratedImage } from '@/types/mashup';
  * watermark is disabled or there's nothing to draw. HTTP sources are routed
  * through /api/proxy-image to dodge canvas CORS taint.
  */
+// V1.7.0-PERF: max time to wait for the base/watermark images to load
+// before giving up and shipping the un-watermarked base. 15s is generous
+// for a healthy CDN; the point is to convert an *infinite* hang into a
+// bounded, recoverable one.
+export const WATERMARK_LOAD_TIMEOUT_MS = 15_000;
+
 export async function applyWatermark(
   baseImageSrc: string,
   settings: WatermarkSettings,
@@ -24,7 +30,27 @@ export async function applyWatermark(
   if (!settings.enabled) return baseImageSrc;
   if (!settings.image && !channelName) return baseImageSrc;
 
-  return new Promise((resolve) => {
+  return new Promise((resolveRaw) => {
+    // V1.7.0-PERF: bound the whole composite. The base image (a CDN URL
+    // routed through /api/proxy-image) and the watermark image both load
+    // via `new Image()`, which fires NEITHER onload NOR onerror if the
+    // source stalls (slow/expired CDN, dead proxy, oversized data URL).
+    // Without this guard the Promise never settled, so every awaiting
+    // caller (generation, the pipeline's per-image finalize, the manual
+    // "Re-apply watermark" button) hung INDEFINITELY — the freeze Maurice
+    // saw. On timeout we ship the un-watermarked base rather than hang.
+    let settled = false;
+    const finish = (value: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveRaw(value);
+    };
+    const timer = setTimeout(() => {
+      console.warn('[watermark] image load timed out — shipping un-watermarked base');
+      finish(baseImageSrc);
+    }, WATERMARK_LOAD_TIMEOUT_MS);
+
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -33,7 +59,7 @@ export async function applyWatermark(
       canvas.height = img.height;
       const ctx = canvas.getContext('2d');
       if (!ctx) {
-        resolve(baseImageSrc);
+        finish(baseImageSrc);
         return;
       }
 
@@ -80,9 +106,9 @@ export async function applyWatermark(
           // POST-413-FIX (2026-05-21): JPEG (not PNG) to keep the data URL
           // under Vercel's 4.5MB serverless body limit. The composite has
           // no transparency at this point, so dropping alpha costs nothing.
-          resolve(canvas.toDataURL('image/jpeg', 0.92));
+          finish(canvas.toDataURL('image/jpeg', 0.92));
         };
-        wm.onerror = () => resolve(baseImageSrc);
+        wm.onerror = () => finish(baseImageSrc);
         wm.src = settings.image;
       } else if (channelName) {
         const fontSize = canvas.width * (settings.scale || 0.05);
@@ -126,10 +152,10 @@ export async function applyWatermark(
         }
 
         ctx.fillText(channelName, x, y);
-        resolve(canvas.toDataURL('image/jpeg', 0.92));
+        finish(canvas.toDataURL('image/jpeg', 0.92));
       }
     };
-    img.onerror = () => resolve(baseImageSrc);
+    img.onerror = () => finish(baseImageSrc);
     img.src = baseImageSrc.startsWith('http')
       ? `/api/proxy-image?url=${encodeURIComponent(baseImageSrc)}`
       : baseImageSrc.startsWith('data:')
