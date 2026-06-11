@@ -155,7 +155,10 @@ describe('V060-001 — PostReadyCard layout & interactions', () => {
     fireEvent.click(screen.getByRole('button', { name: /Schedule/ }));
     fireEvent.click(screen.getByRole('button', { name: /Auto-Schedule/ }));
     expect(onSchedule).toHaveBeenCalledTimes(1);
-    const [date, time] = onSchedule.mock.calls[0];
+    // M3.1b contract: (img, platforms, date, time) — the card threads
+    // its own image + selection back so the parent handler can be ONE
+    // stable function instead of a per-card lambda.
+    const [, , date, time] = onSchedule.mock.calls[0];
     expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(time).toMatch(/^\d{2}:\d{2}$/);
     expect(screen.queryByLabelText('Schedule calendar')).toBeNull();
