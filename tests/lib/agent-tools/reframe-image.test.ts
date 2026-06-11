@@ -149,7 +149,7 @@ describe('reframe_image — happy path', () => {
     expect(callArgs.args[0]).toBe('generate');
     expect(callArgs.args[1]).toBe('create');
     expect(callArgs.args[2]).toBe('nano_banana_2');
-    expect(callArgs.args).toContain('--aspect-ratio');
+    expect(callArgs.args).toContain('--aspect_ratio');
     expect(callArgs.args).toContain('9:16');
     expect(callArgs.args).toContain('--image');
     spy.mockRestore();

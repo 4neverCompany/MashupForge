@@ -52,27 +52,38 @@ describe('computeWeekFillStatus', () => {
     expect(s.days[6].dayLabel).toBe('Sun');
   });
 
-  it('counts scheduled AND posted toward fill, tracks pending_approval separately, ignores failed', () => {
+  it('counts scheduled, posted, AND failed toward fill; tracks pending_approval separately; ignores only rejected', () => {
     // BUG-FIX-2026-06-06: previously 'posted' was excluded entirely,
     // causing the day to show as "open" in the pipeline after a
     // successful post. Now posted posts contribute to the fill so the
     // day is correctly recognized as full.
+    //
+    // V1.7.0-PRE-PROD-FIX: 'failed' also counts toward fill. A failed
+    // post IS a tried slot — the daemon should NOT generate a new
+    // post for that day just because the original attempt failed.
+    // Only 'rejected' is excluded (the user explicitly said "don't
+    // post this" → the day is genuinely free for new content).
     const posts: ScheduledPost[] = [
       post('2026-04-20', '18:00', 'scheduled'),
       post('2026-04-20', '20:00', 'pending_approval'),
-      post('2026-04-20', '22:00', 'posted'),     // NOW counts toward fill
-      post('2026-04-21', '10:00', 'failed'),     // excluded entirely
+      post('2026-04-20', '22:00', 'posted'),     // counts toward fill
+      post('2026-04-21', '10:00', 'failed'),     // NOW counts toward fill
       post('2026-04-22', '09:00', 'scheduled'),
+      post('2026-04-23', '10:00', 'rejected'),   // excluded
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
     // day 0: 1 scheduled + 1 posted = 2 scheduledCount, 1 pending_approval
     expect(s.days[0].scheduledCount).toBe(2);
     expect(s.days[0].pendingApprovalCount).toBe(1);
-    expect(s.days[1].scheduledCount).toBe(0);
+    // day 1: 1 failed → counts (was 0 before the fix)
+    expect(s.days[1].scheduledCount).toBe(1);
     expect(s.days[1].pendingApprovalCount).toBe(0);
+    // day 2: 1 scheduled
     expect(s.days[2].scheduledCount).toBe(1);
-    expect(s.days[2].pendingApprovalCount).toBe(0);
-    expect(s.scheduledTotal).toBe(3);
+    // day 3: 1 rejected → still 0
+    expect(s.days[3].scheduledCount).toBe(0);
+    // total: 2 + 1 + 1 + 0 = 4 (was 3 before; +1 from failed)
+    expect(s.scheduledTotal).toBe(4);
     expect(s.pendingApprovalTotal).toBe(1);
   });
 
@@ -120,21 +131,50 @@ describe('computeWeekFillStatus', () => {
     expect(s.filled).toBe(false);
   });
 
-  it('pendingApprovalTotal sums across days; posted counts toward fill, failed/rejected excluded', () => {
+  it('pendingApprovalTotal sums across days; posted AND failed count toward fill, only rejected excluded', () => {
     // BUG-FIX-2026-06-06: 'posted' now counts toward fill (it's a
-    // successfully filled slot). 'failed' and 'rejected' still excluded.
+    // successfully filled slot).
+    // V1.7.0-PRE-PROD-FIX: 'failed' also counts toward fill (it's a
+    // tried slot — the daemon should not regenerate). 'rejected'
+    // is the only status that frees the day for new content.
     const posts: ScheduledPost[] = [
       post('2026-04-20', '14:00', 'pending_approval'),
       post('2026-04-21', '14:00', 'pending_approval'),
       post('2026-04-22', '14:00', 'pending_approval'),
-      post('2026-04-20', '15:00', 'posted'),     // NOW counts toward fill
-      post('2026-04-20', '16:00', 'failed'),     // still excluded
-      post('2026-04-20', '17:00', 'rejected'),   // still excluded
+      post('2026-04-20', '15:00', 'posted'),     // counts toward fill
+      post('2026-04-20', '16:00', 'failed'),     // counts toward fill (was excluded)
+      post('2026-04-20', '17:00', 'rejected'),   // excluded
     ];
     const s = computeWeekFillStatus(posts, 7, 2, NOW);
     expect(s.pendingApprovalTotal).toBe(3);
-    expect(s.scheduledTotal).toBe(1);
+    // posted + failed on day 0 → scheduledCount = 2
+    expect(s.scheduledTotal).toBe(2);
+    expect(s.days[0].scheduledCount).toBe(2);
+  });
+
+  // V1.7.0-PRE-PROD-FIX: dedicated test for the "failed counts toward
+  // fill, rejected still excluded" contract. Reproduces the exact bug
+  // Maurice reported: a posted-then-failed entry on a day should NOT
+  // leave the day marked as "open" in the pipeline UI.
+  it('counts a failed post toward fill so the daemon does not regenerate', () => {
+    const posts: ScheduledPost[] = [
+      post('2026-04-20', '14:00', 'failed'),     // the failed post in question
+    ];
+    const s = computeWeekFillStatus(posts, 7, 1, NOW);
+    // Day 0 should report 1 scheduledCount, 0 gap, NOT "open"
     expect(s.days[0].scheduledCount).toBe(1);
+    expect(s.days[0].gap).toBe(0);
+    expect(s.scheduledTotal).toBe(1);
+  });
+
+  it('does NOT count rejected posts (those free the day for new content)', () => {
+    const posts: ScheduledPost[] = [
+      post('2026-04-20', '14:00', 'rejected'),
+    ];
+    const s = computeWeekFillStatus(posts, 7, 1, NOW);
+    expect(s.days[0].scheduledCount).toBe(0);
+    expect(s.days[0].gap).toBe(1);
+    expect(s.scheduledTotal).toBe(0);
   });
 
   it('pending_approval posts outside the horizon are ignored from pendingApprovalTotal', () => {
