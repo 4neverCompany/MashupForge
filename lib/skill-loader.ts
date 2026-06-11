@@ -162,6 +162,13 @@ export async function loadAllSkills(): Promise<SkillMeta[]> {
  * names. Unknown names are silently skipped. Returns an empty
  * string when no active skills are present so the caller can
  * concatenate without a special case.
+ *
+ * V1.7.0-M2.2 (automatic skill selection): the block now opens with a
+ * SKILL INDEX (name + description) and a routing instruction telling the
+ * model to apply only the skill(s) that fit the CURRENT prompt, instead
+ * of forcing every active skill onto every prompt. Before this, a noir
+ * portrait and a wide battle scene received the identical skill payload.
+ * The per-skill bodies still follow so an applied skill remains actionable.
  */
 export async function buildSkillSystemBlock(activeNames: readonly string[]): Promise<string> {
   if (activeNames.length === 0) return '';
@@ -171,10 +178,19 @@ export async function buildSkillSystemBlock(activeNames: readonly string[]): Pro
     .map((n) => byName.get(n))
     .filter((s): s is SkillMeta => Boolean(s));
   if (selected.length === 0) return '';
+  const index = selected
+    .map((s, i) => `${i + 1}. ${s.name} — ${s.description || '(no description)'}`)
+    .join('\n');
   return [
     '## Active Skills',
     '',
-    'The following skills are enabled for this session. Treat their content as authoritative directives that override generic prompt-engineering heuristics. Do not invent content that contradicts a skill; do not invoke a skill that is not enabled.',
+    // V1.7.0-M2.2: routing instruction — selective, not blanket application.
+    'Apply ONLY the skill(s) whose description below matches the current prompt\'s subject, franchise, or mood. A skill that does not fit should be ignored, not forced. Treat an applied skill\'s content as authoritative directives that override generic prompt-engineering heuristics; never invoke a skill that is not listed here.',
+    '',
+    '### Skill Index',
+    index,
+    '',
+    '---',
     '',
     ...selected.flatMap((s, i) => [
       `### Skill ${i + 1}: ${s.name}`,
