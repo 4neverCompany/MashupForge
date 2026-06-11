@@ -85,7 +85,7 @@ jobs:
           bun-version: '1.3.12'
 
       - name: Cache Bun install
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
@@ -128,7 +128,7 @@ jobs:
         # repeat builds skip the @askjo/camofox-browser@1.11.2 download.
         # Cache key is version + script hash, so a script change OR
         # version bump invalidates cleanly.
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache/camofox
           key: camofox-v1.11.2-${{ hashFiles('scripts/fetch-camofox-browser.ps1') }}
@@ -211,7 +211,7 @@ jobs:
       # for the full upstream survey.
       - name: Cache nca binary
         id: cache-nca
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: src-tauri/resources/nca/nca.exe
           key: nca-windows-x86_64-v0.3.0
