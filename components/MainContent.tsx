@@ -1775,12 +1775,31 @@ export function MainContent() {
               );
             }
             const mediaUrls = await ensureHostedUrls(rawSources);
+            // V1.7.0-PRE-PROD-FIX: defensive filter. Even if `post.platforms`
+            // still references a now-disabled platform (e.g. user
+            // toggled Pinterest off in PipelineTab but the dialog
+            // chose "only new posts" so old posts kept the platform),
+            // the auto-poster never sends to it. The intersection of
+            // (post.platforms) and (settings.pipelinePlatforms) is the
+            // ground truth at the actual post site.
+            const livePlatforms = (post.platforms || []).filter((pl) =>
+              (settings.pipelinePlatforms || []).includes(pl),
+            );
+            if (livePlatforms.length === 0) {
+              // No live platforms left — skip silently. The
+              // findPostingBlock guard already refuses posts with no
+              // viable platforms, but this is a defense-in-depth
+              // check in case the guard runs before the platform
+              // setting hydrates.
+              processedIds.add(post.id);
+              continue;
+            }
             const res = await fetch('/api/social/post', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 caption: post.caption,
-                platforms: post.platforms,
+                platforms: livePlatforms,
                 mediaUrls,
                 credentials,
               }),
@@ -1853,6 +1872,18 @@ export function MainContent() {
           if (!post.platforms || post.platforms.length === 0) {
             throw new Error('No platforms selected on the scheduled post');
           }
+          // V1.7.0-PRE-PROD-FIX: defensive filter for the manual-single
+          // (non-carousel) auto-poster. Same contract as the carousel
+          // path above. Even if `post.platforms` still references a
+          // now-disabled platform, only the intersection with
+          // `settings.pipelinePlatforms` is sent.
+          const livePlatformsManual = (post.platforms || []).filter((pl) =>
+            (settings.pipelinePlatforms || []).includes(pl),
+          );
+          if (livePlatformsManual.length === 0) {
+            processedIds.add(post.id);
+            continue;
+          }
           // POST-413-FIX phase 3 (2026-05-21): see manual-single
           // counterpart above. ensureHostedUrl uploads data: URLs to uguu
           // and passes https URLs through unchanged.
@@ -1863,7 +1894,7 @@ export function MainContent() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               caption: post.caption,
-              platforms: post.platforms,
+              platforms: livePlatformsManual,
               mediaUrl: hostedUrl,
               credentials,
             }),
