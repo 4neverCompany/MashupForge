@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useStableCallback } from '@/hooks/useStableCallback';
+import { useStableCallback, useStableCallbacks } from '@/hooks/useStableCallback';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -446,6 +446,18 @@ export function MainContent() {
     return (['instagram', 'pinterest', 'twitter', 'discord'] as PostPlatform[]).filter(hasPlatformCreds);
   };
 
+  // M3.1b: identity-stable variant of availablePlatforms() for props
+  // of memoized cards (PostReadyCard). The function builds a fresh
+  // array per call, which as a prop would defeat React.memo on every
+  // render. Recomputes only when the credential inputs change.
+  const availablePlatformsList = useMemo(
+    () => (['instagram', 'pinterest', 'twitter', 'discord'] as PostPlatform[]).filter(hasPlatformCreds),
+    // hasPlatformCreds is a render-fresh closure; its actual inputs are
+    // listed here instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings.apiKeys, isDesktop, desktopCreds],
+  );
+
   // PROP-016: smart scheduler hook — owns slot computation state.
   const smartScheduler = useSmartScheduler({
     postCount: 1,                          // updated per-call via trigger options
@@ -455,10 +467,12 @@ export function MainContent() {
     igAccountId: settings.apiKeys?.instagram?.igAccountId,
   });
 
-  /** Return the per-card selection, initialising to "all available" on first access. */
+  /** Return the per-card selection, initialising to "all available" on
+   *  first access. M3.1b: the fallback is the memoized list so the
+   *  returned identity is stable for cards without an explicit pick. */
   const getSelectedPlatforms = (id: string): PostPlatform[] => {
     if (postPlatformSel[id]) return postPlatformSel[id];
-    return availablePlatforms();
+    return availablePlatformsList;
   };
 
   // V040-001: keep React state and persisted setting in sync. Persists
@@ -1278,6 +1292,52 @@ export function MainContent() {
     const next = (img.postHashtags || []).filter((_, i) => i !== index);
     patchImage(img, { postHashtags: next });
   };
+
+  // ── M3.1b: identity-stable props for the memoized PostReadyCard ────
+  // The single-image Post Ready call site used to pass 13 fresh inline
+  // lambdas per card per render, defeating any memo. One stable bag
+  // (handlers take the image / id as their first argument — the card
+  // threads it back at call time) + a memoized scheduledPosts list.
+  const allScheduledPosts = useMemo(
+    () => settings.scheduledPosts ?? [],
+    [settings.scheduledPosts],
+  );
+
+  const postReadyHandlers = useStableCallbacks({
+    onPreviewClick: (img: GeneratedImage) => setSelectedImage(img),
+    onCaptionChange: (img: GeneratedImage, next: string) =>
+      patchImage(img, { postCaption: next }),
+    onRemoveHashtag: (img: GeneratedImage, i: number) => removeHashtag(img, i),
+    onTogglePlatform: (imgId: string, p: PostPlatform) => togglePlatformFor(imgId, p),
+    onPostNow: (img: GeneratedImage, platforms: PostPlatform[]) =>
+      postImageNow(img, platforms),
+    onSchedule: (img: GeneratedImage, platforms: PostPlatform[], date: string, time: string) =>
+      scheduleImage(img, platforms, date, time),
+    onCopy: (img: GeneratedImage) =>
+      copyWithFeedback(formatPost(img), `all-${img.id}`),
+    onRegen: async (img: GeneratedImage) => {
+      setPreparingPostId(img.id);
+      try {
+        await generatePostContent(img);
+      } finally {
+        setPreparingPostId(null);
+      }
+    },
+    onUnready: (img: GeneratedImage) => patchImage(img, { isPostReady: false }),
+    onCancelSchedule: (img: GeneratedImage) => unschedulePost(img),
+    onReapplyWatermark: (img: GeneratedImage) => handleReapplyWatermark(img),
+    // Functional updater (the old inline lambda read the closure
+    // snapshot of postReadySelected — equivalent here, but the
+    // functional form is also safe under rapid toggles).
+    onGroupingToggle: (imgId: string, checked: boolean) => {
+      setPostReadySelected((prev) => {
+        const next = new Set(prev);
+        if (checked) next.add(imgId);
+        else next.delete(imgId);
+        return next;
+      });
+    },
+  });
 
   /**
    * Generate captions for every visible uncaptioned image.
@@ -3382,7 +3442,10 @@ export function MainContent() {
                   postReadySort,
                   settings.scheduledPosts || [],
                 );
-                const available = availablePlatforms();
+                // M3.1b: the memoized list — a fresh array here would
+                // defeat PostReadyCard's React.memo via the `available`
+                // prop on every render.
+                const available = availablePlatformsList;
 
                 // V091-POLISH / QUEUE-STATUS: roll up the scheduled-post
                 // statuses into the Post Ready header so users see the
@@ -4692,42 +4755,15 @@ export function MainContent() {
                                 <PostReadyCard
                                   img={img}
                                   scheduledPost={scheduled}
-                                  allScheduledPosts={settings.scheduledPosts || []}
+                                  allScheduledPosts={allScheduledPosts}
                                   selectedPlatforms={selPlatforms}
                                   available={available}
                                   busy={busy}
                                   status={status}
                                   isRegen={isRegen}
                                   groupingChecked={postReadySelected.has(img.id)}
-                                  onGroupingToggle={(checked) => {
-                                    const next = new Set(postReadySelected);
-                                    if (checked) next.add(img.id);
-                                    else next.delete(img.id);
-                                    setPostReadySelected(next);
-                                  }}
                                   copyHighlighted={copiedId === `all-${img.id}`}
-                                  onPreviewClick={() => setSelectedImage(img)}
-                                  onCaptionChange={(next) => patchImage(img, { postCaption: next })}
-                                  onRemoveHashtag={(i) => removeHashtag(img, i)}
-                                  onTogglePlatform={(p) => togglePlatformFor(img.id, p)}
-                                  onPostNow={() => postImageNow(img, selPlatforms)}
-                                  onSchedule={(date, time) =>
-                                    scheduleImage(img, selPlatforms, date, time)
-                                  }
-                                  onCopy={() =>
-                                    copyWithFeedback(formatPost(img), `all-${img.id}`)
-                                  }
-                                  onRegen={async () => {
-                                    setPreparingPostId(img.id);
-                                    try {
-                                      await generatePostContent(img);
-                                    } finally {
-                                      setPreparingPostId(null);
-                                    }
-                                  }}
-                                  onUnready={() => patchImage(img, { isPostReady: false })}
-                                  onCancelSchedule={() => unschedulePost(img)}
-                                  onReapplyWatermark={() => handleReapplyWatermark(img)}
+                                  {...postReadyHandlers}
                                 />
                               </DraggableSingleWrapper>
                             </div>

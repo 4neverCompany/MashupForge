@@ -12,7 +12,7 @@
  * card; clicking a time confirms the schedule and closes the calendar.
  */
 
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import {
   AlertCircle,
   Check,
@@ -60,26 +60,32 @@ export interface PostReadyCardProps {
    *  checkbox renders (used by the carousel-card variant which
    *  doesn't expose grouping). */
   groupingChecked?: boolean;
-  onGroupingToggle?: (checked: boolean) => void;
   /** Selected for the bulk "Copy" feedback flag — mirrors copiedId === `all-${id}`. */
   copyHighlighted: boolean;
 
   // ── Handlers ──────────────────────────────────────────────────────
-  onPreviewClick: () => void;
-  onCaptionChange: (next: string) => void;
-  onRemoveHashtag: (idx: number) => void;
-  onTogglePlatform: (p: PostPlatform) => void;
-  onPostNow: () => void;
-  onSchedule: (date: string, time: string) => void;
-  onCopy: () => void;
-  onRegen: () => void;
-  onUnready: () => void;
+  // M3.1b: every handler receives the image (or its id) as the first
+  // argument so MainContent can pass ONE identity-stable handler per
+  // prop instead of a fresh per-card inline lambda each render — a
+  // fresh lambda identity would defeat the React.memo below. The
+  // card already holds `img` / `selectedPlatforms` and threads them
+  // back at call time.
+  onGroupingToggle?: (imgId: string, checked: boolean) => void;
+  onPreviewClick: (img: GeneratedImage) => void;
+  onCaptionChange: (img: GeneratedImage, next: string) => void;
+  onRemoveHashtag: (img: GeneratedImage, idx: number) => void;
+  onTogglePlatform: (imgId: string, p: PostPlatform) => void;
+  onPostNow: (img: GeneratedImage, platforms: PostPlatform[]) => void;
+  onSchedule: (img: GeneratedImage, platforms: PostPlatform[], date: string, time: string) => void;
+  onCopy: (img: GeneratedImage) => void;
+  onRegen: (img: GeneratedImage) => void;
+  onUnready: (img: GeneratedImage) => void;
   /** V1.5: re-apply the current watermark to this image. Omitted for
    *  videos (the parent only passes it for images). */
-  onReapplyWatermark?: () => void;
+  onReapplyWatermark?: (img: GeneratedImage) => void;
   /** Unschedule — drop the ScheduledPost without rejecting the image.
    *  Only offered when there is an active (non-posted) schedule. */
-  onCancelSchedule?: () => void;
+  onCancelSchedule?: (img: GeneratedImage) => void;
 }
 
 /** Map post lifecycle → border + pill colors. */
@@ -119,7 +125,12 @@ function statusVisuals(status: PostReadyStatusKind): {
 
 const HASHTAG_PREVIEW = 3;
 
-export function PostReadyCard({
+// M3.1b (V1.8): memoized with default shallow comparison — same
+// rationale as GalleryCard. Effective because MainContent passes
+// identity-stable handlers (useStableCallbacks bag) and memoized
+// data props; an unrelated provider tick (pipeline log/progress) no
+// longer re-renders every Post Ready card.
+export const PostReadyCard = memo(function PostReadyCard({
   img,
   scheduledPost,
   allScheduledPosts,
@@ -169,7 +180,7 @@ export function PostReadyCard({
   const hiddenCount = Math.max(0, hashtags.length - HASHTAG_PREVIEW);
 
   const handleCalendarConfirm = (date: string, time: string) => {
-    onSchedule(date, time);
+    onSchedule(img, selectedPlatforms, date, time);
     setCalendarOpen(false);
   };
 
@@ -209,7 +220,7 @@ export function PostReadyCard({
           src={img.url}
           alt={img.prompt}
           selectedPlatforms={selectedPlatforms}
-          onClick={onPreviewClick}
+          onClick={() => onPreviewClick(img)}
           overlay={
             <>
               {kind === 'posted' && (
@@ -227,7 +238,7 @@ export function PostReadyCard({
                   <input
                     type="checkbox"
                     checked={!!groupingChecked}
-                    onChange={(e) => onGroupingToggle(e.target.checked)}
+                    onChange={(e) => onGroupingToggle(img.id, e.target.checked)}
                     className="w-4 h-4 accent-[#00e6ff] cursor-pointer"
                   />
                 </label>
@@ -252,7 +263,7 @@ export function PostReadyCard({
               <textarea
                 autoFocus
                 value={img.postCaption || ''}
-                onChange={(e) => onCaptionChange(e.target.value)}
+                onChange={(e) => onCaptionChange(img, e.target.value)}
                 onBlur={() => setCaptionExpanded(false)}
                 placeholder="No caption yet…"
                 rows={4}
@@ -290,7 +301,7 @@ export function PostReadyCard({
                     {tag}
                     {hashtagsExpanded && (
                       <button
-                        onClick={() => onRemoveHashtag(i)}
+                        onClick={() => onRemoveHashtag(img, i)}
                         className="text-zinc-500 hover:text-red-400"
                         aria-label={`Remove ${tag}`}
                       >
@@ -338,7 +349,7 @@ export function PostReadyCard({
                     <button
                       key={p}
                       type="button"
-                      onClick={() => onTogglePlatform(p)}
+                      onClick={() => onTogglePlatform(img.id, p)}
                       className={`px-2.5 py-1 text-[10px] rounded-full border transition-colors ${
                         checked
                           ? `${platformBadgeClass(p)} text-white border-transparent`
@@ -358,7 +369,7 @@ export function PostReadyCard({
           <div className="flex items-center gap-2">
             <button
               disabled={!!busy || selectedPlatforms.length === 0}
-              onClick={onPostNow}
+              onClick={() => onPostNow(img, selectedPlatforms)}
               className="flex-1 btn-blue-sm text-[11px] px-2 justify-center"
             >
               {busy === 'posting' ? (
@@ -388,7 +399,7 @@ export function PostReadyCard({
                     label: 'Copy caption + tags',
                     icon: copyHighlighted ? Check : Copy,
                     disabled: !img.postCaption,
-                    onSelect: onCopy,
+                    onSelect: () => onCopy(img),
                   },
                   {
                     kind: 'item',
@@ -396,7 +407,7 @@ export function PostReadyCard({
                     label: 'Regenerate caption',
                     icon: isRegen ? Loader2 : RefreshCw,
                     disabled: isRegen,
-                    onSelect: onRegen,
+                    onSelect: () => onRegen(img),
                   },
                 ];
                 // V1.5: re-apply the current watermark (images only).
@@ -406,7 +417,7 @@ export function PostReadyCard({
                     id: 'reapply-watermark',
                     label: 'Re-apply watermark',
                     icon: Stamp,
-                    onSelect: onReapplyWatermark,
+                    onSelect: () => onReapplyWatermark(img),
                   });
                 }
                 if (onCancelSchedule && kind === 'scheduled') {
@@ -415,7 +426,7 @@ export function PostReadyCard({
                     id: 'cancel-schedule',
                     label: 'Cancel schedule',
                     icon: X,
-                    onSelect: onCancelSchedule,
+                    onSelect: () => onCancelSchedule(img),
                   });
                 }
                 out.push({
@@ -424,7 +435,7 @@ export function PostReadyCard({
                   label: 'Move out of Post Ready',
                   icon: MinusCircle,
                   destructive: true,
-                  onSelect: onUnready,
+                  onSelect: () => onUnready(img),
                 });
                 return out;
               })()}
@@ -454,5 +465,5 @@ export function PostReadyCard({
       )}
     </div>
   );
-}
+});
 
