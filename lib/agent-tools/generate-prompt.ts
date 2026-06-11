@@ -20,6 +20,7 @@
  * `lib/text-model-catalog`.
  */
 import { tool, generateText, type LanguageModel } from 'ai';
+import { extractDraftFromCommentary, trimCommentarySuffix } from './prompt-extract';
 import {
   GeneratePromptInput,
   GeneratePromptOutput,
@@ -150,26 +151,36 @@ function buildUserMessage(input: GeneratePromptInput): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Strip `<think>…</think>` reasoning blocks and any markdown
- * fence wrappers the model might emit. Mirrors `stripThinkBlocks`
- * in `lib/aiClient.ts` — duplicated here to avoid pulling the SSE
- * client into a server-side tool def. Reasoning models (M3, GLM-5.1,
- * DeepSeek-R1) emit <think> blocks before their answer; we don't
- * want the chain-of-thought to leak into the saved prompt.
+ * Strip `<think>…</think>` reasoning blocks, markdown fence wrappers,
+ * and the model's own "commentary" around the actual prompt. Mirrors
+ * `stripThinkBlocks` in `lib/aiClient.ts` for the SSE client path;
+ * duplicated here to avoid pulling the SSE client into a server-side
+ * tool def. The commentary-stripping step (V1.7.0-PRE-PROD-FIX) lives
+ * in `./prompt-extract.ts` and is shared with the agent-loop fallback
+ * path so both stay in lock-step.
  */
 function cleanModelOutput(raw: string): string {
+  // 1. Strip <think>…</think> blocks (terminated + unterminated leading).
   let out = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-  // Drop any unterminated leading <think>… block.
   const openIdx = out.indexOf('<think>');
   if (openIdx !== -1 && !out.slice(openIdx).includes('</think>')) {
     out = out.slice(0, openIdx);
   }
-  // Drop any markdown fence wrapper the model sneaked in.
+  // 2. Strip markdown fence wrappers.
   out = out
     .replace(/^```(?:text|json|markdown)?\s*\n?/i, '')
     .replace(/\n?```\s*$/i, '')
     .trim();
-  return out;
+  // 3. V1.7.0-PRE-PROD-FIX: pull just the draft body out of the
+  //    commentary the model loves to wrap around it ("The checker is
+  //    strict…", "Final prompt (copy-paste ready):", "Niches anchored.
+  //    Ready to feed to generate_image — just say the word"). Without
+  //    this, the entire commentary leaked into the image prompt and
+  //    the image model produced off-topic output.
+  const { draft } = extractDraftFromCommentary(out);
+  // 4. Defensive: drop any trailing commentary the model appends
+  //    AFTER the prompt body itself.
+  return trimCommentarySuffix(draft);
 }
 
 /**

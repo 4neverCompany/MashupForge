@@ -23,6 +23,10 @@ import { isPlatformAutoApproved } from '@/lib/pipeline-daemon-utils';
 import { isPlatformConfigured } from '@/lib/platform-credentials';
 import { UndoToast } from './UndoToast';
 import { useDesktopConfig } from '@/hooks/useDesktopConfig';
+import {
+  countAffectedPosts,
+  applyPlatformToggleToExistingPosts,
+} from '@/lib/pipeline-platforms-sync';
 import { BestTimesWidget } from './pipeline/BestTimesWidget';
 import { ActiveIdeaCard } from './pipeline/ActiveIdeaCard';
 import { ApprovalQueue } from './pipeline/ApprovalQueue';
@@ -192,8 +196,49 @@ export function PipelinePanel() {
     isPlatformConfigured(p, settings, isDesktop ? desktopCreds : undefined);
   const availablePlatforms: PipelinePlatform[] = (['instagram', 'pinterest', 'twitter', 'discord'] as PipelinePlatform[]).filter(hasCreds);
 
+  // V1.7.0-PRE-PROD-FIX: when the user toggles a platform OFF, ask
+  // whether the change should also apply to existing scheduled posts.
+  // Without this, every post scheduled with the platform enabled keeps
+  // posting to it (Maurice's bug: disabled Pinterest in Pipeline tab,
+  // the auto-poster still sent old posts to Pinterest). The defensive
+  // `filterPlatformsBySetting` in lib/pipeline-platforms-sync.ts is a
+  // safety net for posts that slip through; this dialog is the
+  // user-facing fix.
   const togglePlatform = (p: PipelinePlatform) => {
-    const next = platforms.includes(p) ? platforms.filter((x) => x !== p) : [...platforms, p];
+    const isDisabling = platforms.includes(p);
+    const next = isDisabling ? platforms.filter((x) => x !== p) : [...platforms, p];
+
+    if (isDisabling) {
+      const counts = countAffectedPosts(settings.scheduledPosts || [], p);
+      if (counts.total > 0) {
+        const summary: string[] = [];
+        if (counts.scheduled) summary.push(`${counts.scheduled} scheduled`);
+        if (counts.pending_approval) summary.push(`${counts.pending_approval} pending approval`);
+        if (counts.posted) summary.push(`${counts.posted} already posted`);
+        if (counts.failed) summary.push(`${counts.failed} failed`);
+        const countsLine = summary.length > 0 ? `\n\n${summary.join(', ')}.` : '';
+        const applyToExisting = window.confirm(
+          `Disable ${p}?${countsLine}\n\n` +
+            `OK — Remove ${p} from these ${counts.total} existing scheduled post(s) too. They will no longer post to ${p}.\n\n` +
+            `Cancel — Only new posts will skip ${p}; existing posts keep posting to it.`,
+        );
+        if (applyToExisting) {
+          // Apply the toggle to the setting AND to existing posts.
+          updateSettings((prev) => ({
+            pipelinePlatforms: next,
+            scheduledPosts: applyPlatformToggleToExistingPosts(
+              prev.scheduledPosts || [],
+              p,
+            ),
+          }));
+          return;
+        }
+        // User chose "only new posts" — just the setting.
+        updateSettings({ pipelinePlatforms: next });
+        return;
+      }
+    }
+    // Toggling ON, or toggling OFF with no existing posts affected.
     updateSettings({ pipelinePlatforms: next });
   };
 

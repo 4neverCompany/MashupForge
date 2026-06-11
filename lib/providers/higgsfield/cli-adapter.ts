@@ -239,7 +239,14 @@ export class HiggsfieldCliAdapter implements ProviderAdapter {
     pushFlag(args, '--prompt', opts.prompt);
     // V1.2.6: --seed / --width / --height / --negative-prompt
     // are NOT in MODELS.md for any image model. Removed.
-    if (opts.aspectRatio) pushFlag(args, '--aspect-ratio', opts.aspectRatio);
+    // V1.7.0-PRE-PROD-FIX: the Higgsfield CLI flag is `--aspect_ratio`
+    // (UNDERSCORE), not `--aspect-ratio` (hyphen). The model spec at
+    // lib/model-specs/higgsfield-nano-banana-pro.json:74 spells this
+    // out explicitly: "Use --aspect_ratio, NOT --width/--height. The
+    // MCP tool resolves dimensions from the ratio." Sending the hyphen
+    // form made the CLI reject the call with
+    // "Error: Unknown params: aspect-ratio".
+    if (opts.aspectRatio) pushFlag(args, '--aspect_ratio', opts.aspectRatio);
     // V1.2.6: --negative-prompt removed (not a real flag).
     // If a caller needs negative prompt semantics, they should
     // bake it into the main prompt text (most nano_banana

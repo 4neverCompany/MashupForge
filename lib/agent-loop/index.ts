@@ -62,6 +62,7 @@ import { z } from 'zod';
 import { AGENT_TOOLS } from '@/lib/agent-tools';
 import type { SkillRef } from '@/lib/agent-tools/schemas';
 import { buildSkillSystemBlock } from '@/lib/skill-loader';
+import { stripModelCommentary } from '@/lib/agent-tools/prompt-extract';
 
 import { StepLogger, truncateForLog, type Step } from './log';
 import { BudgetTracker, estimateStepCost } from './budget';
@@ -368,9 +369,11 @@ function extractFinalPrompt(args: {
 
 /**
  * Strip `<think>…</think>` reasoning (terminated or truncated-leading)
- * from a Director text response. Mirrors `stripThinkBlocks` in
- * lib/aiClient.ts / `cleanModelOutput` in generate-prompt.ts; duplicated
- * here to avoid importing the SSE client into the agent loop.
+ * AND the model's own commentary around the draft (V1.7.0-PRE-PROD-FIX)
+ * from a Director text response. Mirrors `cleanModelOutput` in
+ * `generate-prompt.ts`; the commentary-stripping is delegated to
+ * `lib/agent-tools/prompt-extract.ts` so the two callers stay in
+ * lock-step.
  */
 function stripDirectorReasoning(raw: string): string {
   let out = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
@@ -378,7 +381,10 @@ function stripDirectorReasoning(raw: string): string {
   if (openIdx !== -1 && !out.slice(openIdx).includes('</think>')) {
     out = out.slice(0, openIdx).trim();
   }
-  return out;
+  // V1.7.0-PRE-PROD-FIX: without this, the model output's commentary
+  // ("Let me build a final draft…", "Niches anchored. Ready to feed
+  // to generate_image…") leaked into the image prompt verbatim.
+  return stripModelCommentary(out);
 }
 
 // ---------------------------------------------------------------------------

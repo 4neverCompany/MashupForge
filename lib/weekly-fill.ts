@@ -76,8 +76,17 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
  * scheduler's slot-pick agree on which days count). Posts in the past
  * are filtered out.
  *
- * Terminal statuses (`posted`, `failed`, `rejected`) are excluded — they
- * don't contribute to "still to be published" capacity planning.
+ * Status semantics:
+ *   - `posted`       counts toward `filled` (a successfully
+ *                    published post IS a filled slot — the day
+ *                    shouldn't show as "open" in the pipeline).
+ *   - `failed`       ALSO counts toward `filled` since V1.7.0-PRE-PROD-FIX.
+ *                    A failed post means "we already tried this slot";
+ *                    the pipeline should NOT generate a new one
+ *                    just because the original attempt failed.
+ *   - `rejected`     excluded — the user explicitly said "don't post
+ *                    this", so the day is genuinely free for new
+ *                    content.
  *
  * Only `status === 'scheduled'` posts count toward `scheduledCount` /
  * `scheduledTotal` / `filled`. `pending_approval` posts are tracked
@@ -112,9 +121,15 @@ export function computeWeekFillStatus(
       // past `scheduled`. We DON'T apply the `ts < now` filter to
       // 'posted' (posted posts are by definition in the past) — they
       // count regardless of how long ago they were published.
-      // 'failed' and 'rejected' still excluded — those are "we tried
-      // and it didn't work", the daemon should keep generating.
-      if (p.status === 'failed' || p.status === 'rejected') continue;
+      //
+      // V1.7.0-PRE-PROD-FIX: `failed` posts now ALSO count toward the
+      // fill. A failed post IS a tried slot — the user (or the
+      // platform) has already expended a generation, and treating the
+      // day as still "open" made the pipeline generate more content
+      // for a slot that was already taken. `rejected` is still
+      // excluded — that's "I, the user, don't want this" and the
+      // day is genuinely free for new content.
+      if (p.status === 'rejected') continue;
       // Treat malformed date/time strings as "skip" rather than throwing —
       // callers include user-edited settings that may be half-filled.
       const ts = new Date(`${p.date}T${p.time}:00`).getTime();
