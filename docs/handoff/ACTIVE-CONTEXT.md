@@ -24,17 +24,26 @@ jetzt erledigt.
 - ✅ **M3.1 Re-Render-Storm** gemerged (PR #74, be47d88): neuer
   `hooks/useStableCallback.ts` (useEvent-Pattern, useState-Lazy-Init),
   alle ~55 MashupContext-Funktions-Felder identitätsstabil + Value
-  memoized, GalleryCard in React.memo (default shallow; Prop-Vertrag
-  onReapplyWatermark nimmt jetzt das Image), savedIdSet statt O(N²).
-  Adversarial-Review (12 Agents): 0 bestätigte Defekte; Verifier
-  bestätigten Memo-Wirksamkeit + vollständige useMemo-Deps + keinen
-  Effect-Re-Run-Verlust.
-- ⏳ **M3.1b (Follow-up aus dem Review)**: PostReadyCard hat dieselbe
-  Krankheit — 12 Inline-Lambdas pro Card, kein React.memo
-  (MainContent.tsx ~4702-4731, PostReadyCard.tsx). Gleiche Behandlung.
-- ▶ **M3.2 Comparison-to-Disk** (nächster Schritt), dann M3.3 Cleanup
-  (vorher Maurice' working-folder/bmad-Frage klären). KEIN Tag bis das
-  M3-Bundle steht → EIN v1.8.0-Vorschlag, Maurice' OK abwarten.
+  memoized, GalleryCard in React.memo. Review (12 Agents): 0 Defekte.
+- ✅ **M3.1b PostReadyCard** gemerged (PR #76, 911b2ee): Image-passing
+  Handler-Vertrag + EIN useStableCallbacks-Bag statt 13 Inline-Lambdas,
+  memoized availablePlatformsList/allScheduledPosts, React.memo.
+  REST: PostReadyCarouselCard (Carousel-Variante) ist weiterhin
+  unmemoized — bei Bedarf gleiche Behandlung.
+- ✅ **Vercel Web Analytics** gemerged (PR #75, 89d1e66; Maurice' JA
+  11.06.): `components/WebAnalytics.tsx` rendert NUR im Web-Build
+  (Tauri-Marker-Guard — sonst 404-Beacons bei jedem Desktop-Start);
+  Drafts #67/#11 als superseded geschlossen. Daten fließen, sobald
+  Analytics im Vercel-Dashboard fürs Projekt aktiv ist.
+- ▶ **M3.2 Comparison-to-Disk** = NÄCHSTER EINSTIEG (useComparison.ts:
+  mashup_comparison_results speichert GeneratedImage[] MIT base64 →
+  Pixel auf Disk wie v1.4.4-Gallery-Pattern, Metadaten im Store).
+- ▶ **M3.3 Cleanup — Maurice' OK liegt vor (11.06.)**: docs/bmad (+
+  docs/working-folder, 27MB Landing-PNGs) waren Produktions-Artefakte,
+  werden nicht mehr genutzt → aus dem Repo entfernen (vorher lokales
+  Backup außerhalb git ziehen!). Dazu pi/nca/mmx-Dead-Code (~2300 LOC)
+  und der deferred Pre-Hydration-Befund. KEIN Tag bis das M3-Bundle
+  steht → EIN v1.8.0-Vorschlag, Maurice' OK abwarten.
 
 **Operating Rules (unverändert gültig):** Batch-Releases (nicht pro PR
 taggen, Maurice' OK abwarten — .claude/rules/release-flow.md im App-Repo);

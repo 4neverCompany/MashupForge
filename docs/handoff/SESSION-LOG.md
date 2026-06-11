@@ -4,6 +4,10 @@
 
 ---
 
+## 2026-06-11 (Session 9 Forts. — Analytics + M3.1b gemerged, Maurice-Entscheidungen)
+
+Maurice: bmad-Docs koennen weg (waren Produktions-Artefakte), Vercel Web Analytics JA, weiter nach Roadmap. Erledigt: **PR #75** Vercel Web Analytics mit Tauri-Desktop-Guard (components/WebAnalytics.tsx rendert nur im Web-Build; im Browser-Preview verifiziert: Komponente mountet, Script wird angefragt; queueMicrotask-Konvention fuer set-state-in-effect); Drafts #67/#11 superseded-closed. **PR #76** M3.1b PostReadyCard: Image-passing Handler-Vertrag (13 Inline-Lambdas -> EIN useStableCallbacks-Bag, Spread am Call-Site), memoized availablePlatformsList/allScheduledPosts (availablePlatforms() baute pro Aufruf neue Arrays — haette jedes Memo ausgehebelt), React.memo; Test-Assertion an (img, platforms, date, time)-Vertrag angepasst. PostReadyCarouselCard bleibt unmemoized (notiert). Beide PRs 15/15 Checks, gemerged (89d1e66, 911b2ee). Naechster Einstieg: M3.2 Comparison-to-Disk, dann M3.3 Cleanup (bmad-OK liegt vor).
+
 ## 2026-06-11 (Session 8 — parallele Claude-Code-Session: M2 → v1.7.0) [rekonstruiert]
 
 Eine parallele Session (nicht diese) hat M2 komplett gebaut und als v1.7.0 released (00:41 UTC): **#69** kontextueller Camera-Angle pro Bild (Idea-Generator wählt aus dem 14-Angle-Katalog; Settings-Picker = optionaler Lock), **#70** automatische Skill-Selektion (Skill-Index + Routing-Anweisung statt Komplett-Dump; Studio-Route + Director), **#71** Director-Clean-Prompt-Fix (Image-Model bekam vorher den ganzen Terminal-Report inkl. `<think>` und Sign-off statt des kritisierten Drafts) + Provider-Name im Pipeline-Log, **#72** Pipeline routet `higgsfield:<slug>` jetzt wirklich zu Higgsfield (vorher silent Leonardo-Fallback; verbraucht jetzt echte Credits), **#73** applyWatermark 15s-Timeout (Infinite-Hang bei toten CDN-Quellen). Build 21m23s grün, alle 4 Assets. Handoff wurde NICHT nachgezogen (in Session 9 erledigt). Hinweis: Die Session squash-mergte wieder mit prosa-nahen Titeln, aber conventional-prefixed (feat:/fix:) — Guard hat das Release diesmal gesehen.
