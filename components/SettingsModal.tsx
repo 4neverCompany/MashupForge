@@ -39,6 +39,18 @@ import {
   type GeneratedImage,
 } from './MashupContext';
 import type { UserSettings, WatermarkSettings } from '@/types/mashup';
+import {
+  persistWatermarkToDisk,
+  displayWatermarkUrlAsync,
+  removeWatermarkFile,
+  parseDataUrl,
+  hashBytes,
+  extensionFromMime,
+} from '@/lib/watermarks/storage';
+import {
+  buildWatermarkUploadPatch,
+  buildWatermarkRemovePatch,
+} from '@/lib/watermarks/migrate';
 import { getAllTextModelSpecs } from '@/lib/text-model-specs';
 import { DesktopSettingsPanel } from './DesktopSettingsPanel';
 import { VercelAiModelPicker, defaultVercelAiModel } from './Settings/VercelAiModelPicker';
@@ -1808,15 +1820,68 @@ export function SettingsModal({
                     type="file"
                     id="watermark-upload"
                     accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml"
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files?.[0];
-                      if (file) {
+                      if (!file) return;
+                      // V1.7.1-M3.2b-WATERMARK-DISK: write the bytes to
+                      // disk via persistWatermarkToDisk. The store
+                      // keeps only a thin imageRef; the runtime `image`
+                      // field becomes an asset:// URL so consumers
+                      // (applyWatermark, GalleryCard, ImageDetailModal)
+                      // don't have to change.
+                      const ref = await persistWatermarkToDisk({
+                        bytes: new Uint8Array(await file.arrayBuffer()),
+                        mime: file.type || 'image/png',
+                      });
+                      if (!ref) {
+                        // Off-Tauri or write failure — fall back to the
+                        // legacy data-URL so the user still sees their
+                        // logo. (Web preview build, or fs-permission
+                        // denied.)
                         const reader = new FileReader();
                         reader.onload = (event) => {
-                          updateSettings({ watermark: { image: event.target?.result as string } as WatermarkSettings });
+                          const dataUrl = event.target?.result as string;
+                          if (!dataUrl) return;
+                          const parsed = parseDataUrl(dataUrl);
+                          if (!parsed) return;
+                          updateSettings({
+                            watermark: buildWatermarkUploadPatch(
+                              settings.watermark || ({} as WatermarkSettings),
+                              {
+                                dataUrl,
+                                assetUrl: dataUrl,
+                                hash: hashBytes(parsed.bytes),
+                                filename: '',
+                                mimeType: parsed.mime,
+                                size: parsed.bytes.byteLength,
+                              },
+                            ),
+                          });
                         };
                         reader.readAsDataURL(file);
+                        return;
                       }
+                      const assetUrl = await displayWatermarkUrlAsync(ref);
+                      if (!assetUrl) {
+                        // Disk write succeeded but we couldn't resolve
+                        // the asset:// URL — extremely unlikely, but
+                        // handle it by leaving a stale ref and a
+                        // missing image rather than crashing the modal.
+                        return;
+                      }
+                      updateSettings({
+                        watermark: buildWatermarkUploadPatch(
+                          settings.watermark || ({} as WatermarkSettings),
+                          {
+                            dataUrl: '',
+                            assetUrl,
+                            hash: ref.hash,
+                            filename: ref.filename,
+                            mimeType: ref.mimeType,
+                            size: ref.size,
+                          },
+                        ),
+                      });
                     }}
                     className="hidden"
                   />
@@ -1837,7 +1902,20 @@ export function SettingsModal({
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Visual Preview</span>
                         <button
-                          onClick={() => updateSettings({ watermark: { image: null } as WatermarkSettings })}
+                          onClick={async () => {
+                            // V1.7.1-M3.2b-WATERMARK-DISK: clear the
+                            // runtime image AND the persistent ref, then
+                            // best-effort delete the on-disk file. The
+                            // store write happens first so a disk-write
+                            // failure can't leave the user thinking
+                            // their logo is gone when it isn't.
+                            await removeWatermarkFile();
+                            updateSettings({
+                              watermark: buildWatermarkRemovePatch(
+                                settings.watermark || ({} as WatermarkSettings),
+                              ),
+                            });
+                          }}
                           className="text-xs text-red-400 hover:text-red-300 transition-colors flex items-center gap-1"
                         >
                           <Trash2 className="w-3 h-3" /> Remove

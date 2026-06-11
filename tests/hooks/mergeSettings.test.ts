@@ -6,7 +6,13 @@ import { defaultSettings, type WatermarkSettings } from '@/types/mashup';
 // defaultSettings.watermark doesn't satisfy, tsc --noEmit will error here
 // before the test suite even runs. Update defaultSettings in types/mashup.ts
 // when adding new WatermarkSettings fields, then update the runtime checks below.
-const _watermarkShape: Required<WatermarkSettings> = defaultSettings.watermark!;
+//
+// V1.7.1-M3.2b-WATERMARK-DISK: `imageRef` is OPTIONAL (legacy stores
+// predate it; the migration populates it). So the strict `Required<>`
+// guard no longer fits — we cast the required-field subset to keep the
+// compile-time check on the still-required fields, and assert the
+// optional field's absence (or presence) at runtime below.
+const _watermarkRequiredShape: Omit<Required<WatermarkSettings>, 'imageRef'> = defaultSettings.watermark!;
 
 // POLISH-018 regression gate. mergeSettings deep-merges loaded IDB
 // payloads into the running settings. If it regresses to a shallow

@@ -194,6 +194,34 @@ export interface WatermarkSettings {
   position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
   opacity: number;
   scale: number;
+  /**
+   * V1.7.1-M3.2b-WATERMARK-DISK: persistent reference to the on-disk
+   * watermark file. Optional for backward compat with stores that
+   * pre-date M3.2b — see lib/watermarks/migrate.ts for the upgrade
+   * path. When `image` is a data-URL and `imageRef` is missing, the
+   * migration runs once on next hydration and writes `imageRef` back.
+   */
+  imageRef?: WatermarkImageRef;
+}
+
+/**
+ * V1.7.1-M3.2b-WATERMARK-DISK: a thin reference to the on-disk
+ * watermark file. The `image` field on `WatermarkSettings` is still
+ * the runtime-loadable URL (asset:// in Tauri, data: in the migration
+ * path / web preview); `imageRef` is what gets persisted and survives
+ * across restarts. The migration in lib/watermarks/migrate.ts
+ * populates `imageRef` from a legacy in-store data-URL the first time
+ * the store hydrates.
+ */
+export interface WatermarkImageRef {
+  /** Content-addressed 8-char hex hash (FNV-1a 32-bit, see storage.ts). */
+  hash: string;
+  /** On-disk filename relative to the watermark dir, e.g. "wm_1f2e3a4b.png". */
+  filename: string;
+  /** MIME type as uploaded — drives the extension AND the runtime src. */
+  mimeType: 'image/png' | 'image/jpeg' | 'image/svg+xml' | 'image/webp' | 'image/gif';
+  /** Byte size — used for the settings UI "Logo: 320 KB" line. */
+  size: number;
 }
 
 export interface AgentPersonality {
