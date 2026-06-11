@@ -376,7 +376,7 @@ jobs:
           Get-ChildItem $zipPath | Select-Object Name, Length
 
       - name: Upload build artifacts for release job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tauri-nsis-bundle
           # Directory path (not multi-glob). upload-artifact@v4 stores
