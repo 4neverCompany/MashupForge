@@ -331,12 +331,18 @@ function makeBudgetStopCondition(
 // ---------------------------------------------------------------------------
 
 /**
- * Pull the final prompt text out of the SDK's
- * `GenerateTextResult`. The model is instructed to emit
- * the prompt as its terminal assistant text, so
- * `result.text` is the canonical source. The fallback to
- * the last `generate_prompt` tool result covers a model
- * that *only* uses tool calls and never writes text.
+ * Pull the final prompt text out of the SDK's `GenerateTextResult`.
+ *
+ * V1.7.0-DIRECTOR-PROMPT-FIX: the LAST `generate_prompt` tool draft is
+ * now the canonical source — NOT `result.text`. The draft is the clean,
+ * <think>-stripped, length-validated prompt that critique scored and the
+ * loop approved. `result.text` is the model's terminal *commentary*,
+ * which in practice is a whole report: a `<think>` block, an iteration
+ * log, "Final prompt (copy-paste ready):", "Niches anchored", and a
+ * "Ready to feed to generate_image — just say the word" sign-off. Feeding
+ * THAT to the image model (the old precedence) dumped the entire report
+ * into the prompt. We only fall back to a sanitized `result.text` when
+ * the model never produced a draft (text-only response).
  */
 function extractFinalPrompt(args: {
   resultText: string;
@@ -344,24 +350,35 @@ function extractFinalPrompt(args: {
     toolResults: ReadonlyArray<{ toolName: string; output: unknown }>;
   }>;
 }): string {
-  const trimmed = (args.resultText ?? '').trim();
-  if (trimmed.length > 0) return trimmed;
-  // Walk the steps in reverse, looking for the most
-  // recent `generate_prompt` tool result.
+  // 1. Canonical: the most recent `generate_prompt` tool draft.
   for (let i = args.stepResults.length - 1; i >= 0; i--) {
     const tr = args.stepResults[i]?.toolResults ?? [];
     for (const r of tr) {
       if (r.toolName !== 'generate_prompt') continue;
-      // Output type is GeneratePromptOutput (see
-      // lib/agent-tools/schemas.ts) but the loop
-      // receives it as `unknown` — narrow safely.
       const out = r.output as { draft?: unknown } | null | undefined;
       if (out && typeof out.draft === 'string' && out.draft.trim().length > 0) {
         return out.draft.trim();
       }
     }
   }
-  return '';
+  // 2. Fallback: a text-only response. Strip the <think> reasoning so a
+  //    reasoning model's chain-of-thought never reaches the image model.
+  return stripDirectorReasoning(args.resultText ?? '');
+}
+
+/**
+ * Strip `<think>…</think>` reasoning (terminated or truncated-leading)
+ * from a Director text response. Mirrors `stripThinkBlocks` in
+ * lib/aiClient.ts / `cleanModelOutput` in generate-prompt.ts; duplicated
+ * here to avoid importing the SSE client into the agent loop.
+ */
+function stripDirectorReasoning(raw: string): string {
+  let out = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  const openIdx = out.indexOf('<think>');
+  if (openIdx !== -1 && !out.slice(openIdx).includes('</think>')) {
+    out = out.slice(0, openIdx).trim();
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

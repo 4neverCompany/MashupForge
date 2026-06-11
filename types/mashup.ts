@@ -180,6 +180,12 @@ export interface GenerateOptions {
    * just looks like fewer-than-expected images came back.
    */
   onModelError?: (modelId: string, modelName: string, error: string) => void;
+  // V1.7.0-PROVIDER-LOG: fired once per image that reaches `ready`, with the
+  // actual backend provider ('leonardo' | 'higgsfield' | 'minimax' | …) that
+  // produced it. The pipeline wires this to the activity log so the user can
+  // see WHICH provider generated each image (the gallery badge already shows
+  // it post-hoc; this surfaces it live in the run timeline).
+  onModelSuccess?: (modelId: string, modelName: string, provider: string) => void;
 }
 
 export interface WatermarkSettings {
