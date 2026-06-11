@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useStableCallback } from '@/hooks/useStableCallback';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -1177,7 +1178,10 @@ export function MainContent() {
    * re-watermarked image (composited onto its clean originalUrl, so no
    * double-stacking) is persisted via saveImage.
    */
-  const handleReapplyWatermark = async (img: GeneratedImage) => {
+  // M3.1: identity-stable so it can be passed to the memoized
+  // GalleryCard directly (the previous per-card `() => handle…(img)`
+  // lambda gave every card a fresh prop identity each render).
+  const handleReapplyWatermark = useStableCallback(async (img: GeneratedImage) => {
     const result = await reapplyWatermark(
       img,
       settings.watermark ?? { enabled: false, image: null, position: 'bottom-right', opacity: 0.8, scale: 0.05 },
@@ -1189,7 +1193,7 @@ export function MainContent() {
     } else {
       showToast(result.reason, 'error');
     }
-  };
+  });
 
   /**
    * REFACTOR-001 / SHOULDFIX-002 — single shared fan-out for carousel
@@ -1846,6 +1850,14 @@ export function MainContent() {
     [savedImages],
   );
 
+  // M3.1: id-lookup Set for the per-card `isSaved` check. The previous
+  // inline `savedImages.some(...)` inside the card map was O(cards ×
+  // savedImages) on every render of the grid.
+  const savedIdSet = useMemo(
+    () => new Set(savedImages.map((s) => s.id)),
+    [savedImages],
+  );
+
   const displayedImages = useMemo(() => {
     // V080-DEV-002: hide images whose ScheduledPosts are all 'rejected'.
     // BUG-DEV-003 stopped these from being orphaned (pipelinePending is
@@ -2102,7 +2114,8 @@ export function MainContent() {
     }
   };
 
-  const handleAnimate = async (img: GeneratedImage, isBatch: boolean = false) => {
+  // M3.1: identity-stable — passed to the memoized GalleryCard.
+  const handleAnimate = useStableCallback(async (img: GeneratedImage, isBatch: boolean = false) => {
     if (!img.imageId && !img.url) {
       if (!isBatch) showToast('This image has no source for animation.', 'error');
       return;
@@ -2257,7 +2270,7 @@ export function MainContent() {
     } finally {
       setImageStatus(img.id, 'ready');
     }
-  };
+  });
 
   const handleBatchAnimate = async () => {
     const imagesToAnimate = savedImages.filter(img => selectedForBatch.has(img.id) && (img.imageId || img.url) && !img.isVideo);
@@ -5010,7 +5023,7 @@ export function MainContent() {
           ) : (
             <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 pb-12`}>
               {displayedImages.map((img, idx) => {
-                const isSaved = savedImages.some(s => s.id === img.id);
+                const isSaved = savedIdSet.has(img.id);
                 return (
                   <GalleryCard
                     key={img.id}
@@ -5041,7 +5054,7 @@ export function MainContent() {
                     deleteImage={deleteImage}
                     generatePostContent={generatePostContent}
                     autoTagImage={autoTagImage}
-                    onReapplyWatermark={() => handleReapplyWatermark(img)}
+                    onReapplyWatermark={handleReapplyWatermark}
                   />
                 );
               })}

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, ReactNode } from 'react';
+import { useStableCallbacks } from '../hooks/useStableCallback';
 
 // Re-export everything from types/mashup so existing imports keep working
 export {
@@ -574,20 +575,21 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     setGenImageStatus(id, status);
   };
 
-  const value: MashupContextType = {
-    isLoaded,
-    view,
+  // ── M3.1 render-perf (V1.8) ────────────────────────────────────────
+  // Every function field goes through ONE identity-stable bag. The
+  // source hooks (useImages, useImageGeneration, useSocial, …) don't
+  // useCallback their functions, so before this every provider render
+  // handed every consumer ~50 fresh function identities — React.memo
+  // on expensive children (GalleryCard) could never bail out, and a
+  // pipeline-log tick re-rendered the entire tree. The stable wrappers
+  // always dispatch to the latest implementation (useEvent semantics),
+  // so behavior is unchanged; only identity is pinned. NOT for
+  // render-phase calls — every field here is an event/effect handler.
+  const stableFns = useStableCallbacks({
     setView,
-    images,
     setImages,
-    savedImages,
-    collections,
-    isGenerating,
-    progress,
-    settings,
     updateSettings,
     clearSettings,
-    settingsSaveState,
     generateImages,
     generatePostContent,
     rerollImage,
@@ -604,20 +606,14 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     autoTagImage,
     setImageStatus: handleSetImageStatus,
     autoGenerateCollectionInfo,
-    comparisonResults,
     pickComparisonWinner,
     clearComparison,
     deleteComparisonResult,
-    generationError,
     clearGenerationError,
-    comparisonError,
     clearComparisonError,
     generateNegativePrompt,
-    comparisonPrompt,
     setComparisonPrompt,
-    comparisonOptions,
     setComparisonOptions,
-    ideas,
     addIdea,
     updateIdeaStatus,
     deleteIdea,
@@ -634,26 +630,15 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     requestIdeasLoad,
     requestSettingsLoad,
     requestComparisonLoad,
-    isSidebarOpen,
     setIsSidebarOpen,
-    pipelineEnabled: pipelineHook.pipelineEnabled,
-    pipelineRunning: pipelineHook.pipelineRunning,
-    pipelineQueue: pipelineHook.pipelineQueue,
-    pipelineProgress: pipelineHook.pipelineProgress,
-    pipelineLog: pipelineHook.pipelineLog,
-    pipelineDelay: pipelineHook.pipelineDelay,
     setPipelineDelay: pipelineHook.setPipelineDelay,
     togglePipeline: pipelineHook.togglePipeline,
     startPipeline: pipelineHook.startPipeline,
     stopPipeline: pipelineHook.stopPipeline,
     skipCurrentIdea: pipelineHook.skipCurrentIdea,
-    pipelineContinuous: pipelineHook.pipelineContinuous,
     toggleContinuous: pipelineHook.toggleContinuous,
-    pipelineInterval: pipelineHook.pipelineInterval,
     setPipelineInterval: pipelineHook.setPipelineInterval,
-    pipelineTargetDays: pipelineHook.pipelineTargetDays,
     setPipelineTargetDays: pipelineHook.setPipelineTargetDays,
-    pipelineIdeasPerCycle: pipelineHook.pipelineIdeasPerCycle,
     setPipelineIdeasPerCycle: pipelineHook.setPipelineIdeasPerCycle,
     clearPipelineLog: pipelineHook.clearPipelineLog,
     approveScheduledPost,
@@ -661,11 +646,75 @@ export function MashupProvider({ children }: { children: ReactNode }) {
     bulkApproveScheduledPosts,
     bulkRejectScheduledPosts,
     updateScheduledPostsCaption,
-    pendingResume: pipelineHook.pendingResume,
     acceptResume: pipelineHook.acceptResume,
     dismissResume: pipelineHook.dismissResume,
+  });
+
+  // The value object is memoized on DATA fields only (stableFns never
+  // changes identity). Consumers still re-render when data they read
+  // changes — but a provider re-render whose data is untouched (or a
+  // memo'd child whose props are untouched) can now bail out.
+  const value: MashupContextType = useMemo(() => ({
+    isLoaded,
+    view,
+    images,
+    savedImages,
+    collections,
+    isGenerating,
+    progress,
+    settings,
+    settingsSaveState,
+    comparisonResults,
+    generationError,
+    comparisonError,
+    comparisonPrompt,
+    comparisonOptions,
+    ideas,
+    isSidebarOpen,
+    pipelineEnabled: pipelineHook.pipelineEnabled,
+    pipelineRunning: pipelineHook.pipelineRunning,
+    pipelineQueue: pipelineHook.pipelineQueue,
+    pipelineProgress: pipelineHook.pipelineProgress,
+    pipelineLog: pipelineHook.pipelineLog,
+    pipelineDelay: pipelineHook.pipelineDelay,
+    pipelineContinuous: pipelineHook.pipelineContinuous,
+    pipelineInterval: pipelineHook.pipelineInterval,
+    pipelineTargetDays: pipelineHook.pipelineTargetDays,
+    pipelineIdeasPerCycle: pipelineHook.pipelineIdeasPerCycle,
+    pendingResume: pipelineHook.pendingResume,
     weekFillStatus: pipelineHook.weekFillStatus,
-  };
+    ...stableFns,
+  }), [
+    isLoaded,
+    view,
+    images,
+    savedImages,
+    collections,
+    isGenerating,
+    progress,
+    settings,
+    settingsSaveState,
+    comparisonResults,
+    generationError,
+    comparisonError,
+    comparisonPrompt,
+    comparisonOptions,
+    ideas,
+    isSidebarOpen,
+    pipelineHook.pipelineEnabled,
+    pipelineHook.pipelineRunning,
+    pipelineHook.pipelineQueue,
+    pipelineHook.pipelineProgress,
+    pipelineHook.pipelineLog,
+    pipelineHook.pipelineDelay,
+    pipelineHook.pipelineContinuous,
+    pipelineHook.pipelineInterval,
+    pipelineHook.pipelineTargetDays,
+    pipelineHook.pipelineIdeasPerCycle,
+    pipelineHook.pendingResume,
+    pipelineHook.weekFillStatus,
+    stableFns,
+  ]);
 
   return (
     <MashupContext.Provider value={value}>
