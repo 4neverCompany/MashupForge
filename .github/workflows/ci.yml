@@ -25,7 +25,7 @@ jobs:
       # which was removed in v1.4.4 (bun.lock is the only lockfile).
       # Bun installs are cached separately below.
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with: { node-version: '22' }
 
       - name: Setup Bun
