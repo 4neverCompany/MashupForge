@@ -213,6 +213,10 @@ export function useImages() {
     if (hydrationFailedRef.current) return;
     const timer = setTimeout(() => {
       if (loadInFlightRef.current || hydrationFailedRef.current) return;
+      // M3.2: no store writes mid-migration — each would serialize the
+      // still-mostly-fat array (seconds of JSON.stringify at 200 MB).
+      // The migration triggers one final write when it completes.
+      if (migratingRef.current) return;
       void set('mashup_saved_images', savedImages).catch(() => {});
       // Auto-backup to Documents folder (survives reinstall)
       void autoBackupImages(savedImages);
@@ -300,6 +304,16 @@ export function useImages() {
   // Idempotent: slimmed records no longer match the predicate, and a
   // failed write leaves the fat record for the next launch.
   const migrationRanRef = useRef(false);
+  // While the backlog migration runs, the 200ms-debounced store write
+  // is suppressed (see the debounce effect): each slim patch resets
+  // the timer, and any write that slips between patches serializes the
+  // still-mostly-fat array — at 200 MB that is seconds of main-thread
+  // JSON.stringify, potentially dozens of times on the first launch.
+  // One write fires after the migration completes. Crash-safety: a
+  // crash mid-migration loses only the slim PATCHES — the files are on
+  // disk, the store still holds the fat records, and the next launch
+  // re-runs the (idempotent, same-filename) migration.
+  const migratingRef = useRef(false);
   useEffect(() => {
     if (!loadTriggered || !isImagesLoaded) return;
     if (hydrationFailedRef.current) return;
@@ -308,12 +322,19 @@ export function useImages() {
     let cancelled = false;
     void (async () => {
       const fat = savedImagesRef.current.filter(hasEmbeddedPixels);
+      if (fat.length > 0) migratingRef.current = true;
       for (const img of fat) {
-        if (cancelled) return;
+        if (cancelled) { migratingRef.current = false; return; }
         await slimAndPatch(img);
         // Yield between writes — keeps the main thread responsive
         // while the first post-update launch migrates the backlog.
         await new Promise((r) => setTimeout(r, 50));
+      }
+      migratingRef.current = false;
+      if (fat.length > 0 && !cancelled) {
+        // Re-arm the debounce so the final slim state persists now.
+        markDirty();
+        setSavedImages(prev => [...prev]);
       }
       // Refresh stale asset URLs: the persisted `url` of a slimmed
       // record embeds an ABSOLUTE path (convertFileSrc), which goes
