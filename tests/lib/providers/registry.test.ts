@@ -63,10 +63,6 @@ describe('registry.getProvider', () => {
     const p = getProvider('higgsfield');
     expect(p.name).toBe('higgsfield');
   });
-  it('returns an MmxCliAdapter for "mmx"', () => {
-    const p = getProvider('mmx');
-    expect(p.name).toBe('mmx');
-  });
   it('returns a LeonardoHttpAdapter for "leonardo"', () => {
     const p = getProvider('leonardo');
     expect(p.name).toBe('leonardo');
@@ -98,7 +94,6 @@ describe('registry.getProvider', () => {
     expect(BUILTIN_PROVIDER_IDS).toEqual([
       'higgsfield',
       'higgsfield-text',
-      'mmx',
       'leonardo',
       'minimax-text',
       'minimax-video',
@@ -131,9 +126,9 @@ describe('registry.getFirstAvailable', () => {
   it('returns the first available provider in priority order', async () => {
     __registerProvider('higgsfield', new FakeAdapter('higgsfield', false));
     __registerProvider('higgsfield-text', new FakeAdapter('higgsfield-text', false));
-    __registerProvider('mmx', new FakeAdapter('mmx', true));
+    __registerProvider('leonardo', new FakeAdapter('leonardo', true));
     const p = await getFirstAvailable();
-    expect(p!.name).toBe('mmx');
+    expect(p!.name).toBe('leonardo');
   });
 
   it('returns null when no provider is available', async () => {

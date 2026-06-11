@@ -54,6 +54,14 @@ skills-lock.json
 pnpm-lock.yaml
 pnpm-workspace.yaml
 
+# M3.3-P1 (2026-06-12): marketing / landing-page artifacts that don't
+# belong in a desktop-app repo. The PNGs are staging assets for an
+# external landing page; the bmad docs are an unused BMAD-method
+# installation. The full content is preserved at
+# I:\MashupForge-handoff\backup\m33-pre-cleanup-2026-06-12\.
+docs/working-folder/
+docs/bmad/
+
 # Higgsfield CLI staged for installer bundling by
 # scripts/install-higgsfield-cli.ps1 -Dest src-tauri/resources/higgsfield-cli
 # (a fetched node_modules artifact, like resources/node and resources/camofox).
