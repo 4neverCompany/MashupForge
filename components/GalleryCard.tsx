@@ -11,7 +11,7 @@
 // No visual regression: the JSX is a verbatim move; only state that
 // used to live in MainContent's local scope is now arrived at via props.
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useImageSrc } from '@/hooks/useImageSrc';
 import { motion } from 'motion/react';
@@ -81,11 +81,23 @@ interface GalleryCardProps {
   deleteImage: (id: string, fromSaved: boolean) => void;
   generatePostContent: (image: GeneratedImage) => Promise<GeneratedImage | undefined>;
   autoTagImage: (id: string, providedImage?: GeneratedImage) => Promise<void>;
-  /** V1.5: re-apply the current watermark to this image (images only). */
-  onReapplyWatermark?: () => void;
+  /** V1.5: re-apply the current watermark to this image (images only).
+   *  M3.1: takes the image as an argument so MainContent can pass ONE
+   *  stable handler instead of a per-card inline lambda — a fresh
+   *  lambda identity per render would defeat the React.memo below. */
+  onReapplyWatermark?: (image: GeneratedImage) => void;
 }
 
-export function GalleryCard({
+// M3.1 (V1.8): memoized with default shallow comparison — NOT a custom
+// comparator that whitelists fields (that would silently drop renders
+// when e.g. tags/caption/approved change). Effective because every
+// handler prop now has a stable identity (MashupContext routes all
+// function fields through useStableCallbacks; MainContent's local
+// handlers use useStableCallback) and `displayedImages` is memoized,
+// so unrelated provider ticks (pipeline log lines, progress) no longer
+// re-render N cards — each of which re-runs useImageSrc's async
+// asset:// resolution (O(N) Tauri IPC calls per tick while scrolling).
+export const GalleryCard = memo(function GalleryCard({
   image: img,
   index: idx,
   view,
@@ -553,7 +565,7 @@ export function GalleryCard({
                       id: 'reapply-watermark',
                       label: 'Re-apply watermark',
                       icon: Stamp,
-                      onSelect: onReapplyWatermark,
+                      onSelect: () => onReapplyWatermark(img),
                     }
                   : null;
               const items: (KebabMenuItem | null)[] =
@@ -683,4 +695,4 @@ export function GalleryCard({
       </div>
     </motion.div>
   );
-}
+});
