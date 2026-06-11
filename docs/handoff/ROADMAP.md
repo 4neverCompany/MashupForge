@@ -2,7 +2,7 @@
 
 > Erstellt 2026-06-10 aus Maurice' 10 Punkten, fundiert durch eine 7-Agent
 > Code-Investigation (jeder Punkt root-gecaused + Aufwand + Abhängigkeiten).
-> Status: 🟡 geplant · 🔵 in Arbeit · ✅ done. Aktuelle App-Version: **1.6.0**.
+> Status: 🟡 geplant · 🔵 in Arbeit · ✅ done. Aktuelle App-Version: **1.7.0**.
 > Release-Konvention: NICHT pro Fix taggen — pro Milestone EIN gebündeltes
 > Release vorschlagen + Maurice' OK abwarten (siehe .claude/rules/release-flow.md).
 
@@ -16,28 +16,29 @@
 
 ## ▶ NÄCHSTER EINSTIEG (für den nächsten Agent-Run)
 
-**Start bei M2 — "Smartere AI" (→ v1.7.0).** Kein offener Rest aus M1/v1.6.0;
-das Release ist published, Highlights im Body, Handoff aktuell. Konkret:
+**M2 ist als v1.7.0 released (2026-06-11, 00:41 UTC)** — PRs #69 (Camera),
+#70 (Skills), #71 (Director-Clean-Prompt), #72 (Pipeline nutzt Higgsfield
+wirklich), #73 (Watermark-Timeout). **Start bei M3 — "Schneller & sauberer"
+(→ v1.8.0)**, plus zwei Ops-Pflichten:
 
-1. **M2.1 Kontextueller Camera-Angle** (Quick-Win, Option 1A — kein
-   Agent-Loop nötig): Im Ideen-Generierungs-Prompt `cameraAngle` pro Item
-   anfordern (14-Angle-Katalog aus `lib/camera-angles.ts` als Menü mitgeben),
-   dann `item.cameraAngle` statt `settings.cameraAngle` lesen
-   (`hooks/useImageGeneration.ts:1011`). `buildMcslaFragment` resolved Slugs
-   bereits — Builder-Seite null Änderung. Settings-Picker wird zum
-   "Default/Lock" umdeklariert.
-2. **M2.2 Automatische Skill-Selektion**: Skill-INDEX (name+description aus
-   `SkillMeta`) statt aller Bodies injizieren (`lib/skill-loader.ts`,
-   `buildSkillSystemBlock` dumpt aktuell ALLE aktiven Skills) + Anweisung
-   "wende nur passende an". Agentic-Variante (select_skill-Tool) ist jetzt
-   möglich, da der Director seit v1.6.0 der Default-Pfad ist.
-3. **Arbeitsweise**: Feature-Branch → PR → CI grün → Merge (Squash-Titel
-   conventional!). NICHT taggen — M2 sammeln und EIN v1.7.0-Release
+0. **Ops zuerst:** (a) GitHub-Actions Node-20-Deprecation — am **16.06.**
+   erzwingt GitHub Node 24; die Dependabot-PRs #15 (checkout@6), #18
+   (setup-node@6), #40 (upload-artifact@7), #17 (download-artifact@8),
+   #13 (cache@5) mergen (+ Cargo-Patches #16/#20/#23/#25/#41). (b) Der
+   camofox-integration.yml-YAML-Fix ist auf main (unquoted Doppelpunkte in
+   Step-Namen — produzierte seit 09.06. einen roten 0s-Run pro Push).
+1. **M3.1 Re-Render-Storm** (größter gefühlter Speed-Win): `useMemo` aufs
+   MashupContext-Value (MashupContext.tsx:577), `React.memo` auf GalleryCard
+   (Comparator id/localPath/url/status), gefilterte Listen in MainContent
+   memoizen.
+2. **M3.2 Comparison-Results auf Disk** (100MB-JSON-Problem zweite Hälfte).
+3. **M3.3 Cleanup-Phasen** (pi/nca/mmx-Dead-Code ~2300 LOC, 27MB
+   Landing-PNGs — VORHER Maurice' offene Frage zu docs/working-folder/bmad
+   klären, siehe "Entscheidungen"). Dazu der deferred v1.6.0-Review-Befund
+   (Pre-Hydration-Opt-out-Fenster).
+4. **Arbeitsweise**: Feature-Branch → PR → CI grün → Merge (Squash-Titel
+   conventional!). NICHT taggen — M3 sammeln, EIN v1.8.0-Release
    vorschlagen, Maurice' OK abwarten (release-flow.md).
-
-**Vorher kurz prüfen:** `gh release view v1.6.0` (User-Feedback/Issues nach
-dem Auto-Update?) und ob Maurice den Director im Alltag stabil erlebt —
-falls nein, hat Stabilisierung Vorrang vor M2.
 
 ## Maurice' 10 Punkte → 5 Milestones
 
@@ -115,7 +116,7 @@ Free-Tier wurde **Feb 2026 abgeschafft** (jetzt ~$5/1k).
 
 ---
 
-## 🔵 M2 — "Smartere AI" (Skills + Camera-Angle kontextuell) → v1.7.0
+## ✅ M2 — "Smartere AI" (Skills + Camera-Angle kontextuell) → v1.7.0 (RELEASED 2026-06-11)
 
 **Warum danach:** Baut auf M1 (funktionierender Director). **Aufwand ~2–3 Tage.**
 **Kernproblem:** Skills sind statischer System-Prompt-Kontext (ALLE aktiven

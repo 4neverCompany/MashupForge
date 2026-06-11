@@ -4,6 +4,14 @@
 
 ---
 
+## 2026-06-11 (Session 8 — parallele Claude-Code-Session: M2 → v1.7.0) [rekonstruiert]
+
+Eine parallele Session (nicht diese) hat M2 komplett gebaut und als v1.7.0 released (00:41 UTC): **#69** kontextueller Camera-Angle pro Bild (Idea-Generator wählt aus dem 14-Angle-Katalog; Settings-Picker = optionaler Lock), **#70** automatische Skill-Selektion (Skill-Index + Routing-Anweisung statt Komplett-Dump; Studio-Route + Director), **#71** Director-Clean-Prompt-Fix (Image-Model bekam vorher den ganzen Terminal-Report inkl. `<think>` und Sign-off statt des kritisierten Drafts) + Provider-Name im Pipeline-Log, **#72** Pipeline routet `higgsfield:<slug>` jetzt wirklich zu Higgsfield (vorher silent Leonardo-Fallback; verbraucht jetzt echte Credits), **#73** applyWatermark 15s-Timeout (Infinite-Hang bei toten CDN-Quellen). Build 21m23s grün, alle 4 Assets. Handoff wurde NICHT nachgezogen (in Session 9 erledigt). Hinweis: Die Session squash-mergte wieder mit prosa-nahen Titeln, aber conventional-prefixed (feat:/fix:) — Guard hat das Release diesmal gesehen.
+
+## 2026-06-11 (Session 9 — Claude Code: Lagebild + camofox-YAML-Fix + Handoff-Sync, dann M3)
+
+Einstieg per Maurice: "look at my Project repo … go on with the roadmap". Lagebild: v1.7.0 war über Nacht geshippt (Session 8), Handoff stale (sagte 1.6.0) → nachgezogen (beide Orte). **Must-Fix gefunden + gefixt:** camofox-integration.yml hatte unquoted Doppelpunkte in drei Step-Namen ("Run scenario: boot") → YAML-Parse-Error → GitHub legte seit #56 (09.06.) auf JEDEM Push einen roten 0s-Run an (100/100 letzte Runs = failure, reine Noise, blockierte nichts). Fix: Namen gequotet + Warn-Kommentar. **Offene Ops:** Node-20-Actions-Deadline 16.06. (Dependabot #15/#18/#40/#17/#13), Cargo-Patches, PR #29-Triage. Danach M3-Start (Re-Render-Storm).
+
 ## 2026-06-10 (Session 7 — Claude Code: Roadmap → M1-Bundle → Director-Default → v1.6.0)
 
 **Roadmap erstellt** aus Maurice' 10 Punkten (7-Agent-Investigation, jeder Punkt root-gecaused → 5 Milestones M1–M4 in ROADMAP.md). Maurice' Entscheidungen: M1 komplett zuerst, Serper als Trending-Default, Director wird Default-Pfad.

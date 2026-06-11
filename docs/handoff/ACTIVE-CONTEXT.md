@@ -2,19 +2,27 @@
 
 > **Was ist grad in flight?** Lese das hier, um zu wissen welche Threads offen sind, ohne SESSION-LOG durchsuchen zu müssen.
 
-## ⚡ AKTUELL (2026-06-10 23:30): NICHTS in flight — v1.6.0 SHIPPED, Einstieg = M2
+## ⚡ AKTUELL (2026-06-11): v1.7.0 SHIPPED (M2 ✅) — Einstieg = M3 + Ops-Pflichten
 
-**v1.6.0 ist published** (Build 16m09s grün, alle 4 Assets, Highlights im
-Release-Body, Auto-Update live). Inhalt: M1 komplett (PR #65) + Director als
-Default-Pipeline-Pfad inkl. Review-Härtung (PR #66). Kein offener Rest.
+**v1.7.0 published** (00:41 UTC, von einer parallelen Session): M2 komplett
+(#69 Camera-Angle per Image, #70 Skill-Routing) + #71 Director-Clean-Prompt,
+#72 Pipeline-Higgsfield (verbraucht jetzt echte Credits!), #73
+Watermark-Timeout. Handoff wurde von dieser Session NICHT nachgezogen —
+jetzt erledigt.
 
-**▶ Nächster Run startet bei M2** ("Smartere AI" → v1.7.0) — konkreter
-Einstiegsplan steht oben in ROADMAP.md ("NÄCHSTER EINSTIEG"):
-M2.1 kontextueller Camera-Angle (Option 1A, `item.cameraAngle` statt
-`settings.cameraAngle`, useImageGeneration.ts:1011), dann M2.2 automatische
-Skill-Selektion (Skill-Index statt Body-Dump in lib/skill-loader.ts).
-Vorher kurz checken: User-Feedback zu v1.6.0 / läuft der Director bei
-Maurice stabil? Falls nein → Stabilisierung vor M2.
+**Ops-Pflichten (vor/neben M3):**
+1. ✅ camofox-integration.yml-YAML-Fix (unquoted `:` in Step-Namen → roter
+   0s-Run auf JEDEM Push seit 09.06., 100/100 Failures) — auf main.
+2. ⏳ **GitHub Actions Node-20-Deadline 16.06.**: Dependabot-PRs #15/#18/
+   #40/#17/#13 (checkout@6, setup-node@6, upload-artifact@7,
+   download-artifact@8, cache@5) mergen; Cargo-Patches #16/#20/#23/#25/#41
+   dazu. PR #29 (ci-guard-allowlists, 03.06.) auf Supersession prüfen.
+   Vercel-Drafts #67/#11 = Maurice' Call.
+
+**▶ Dann M3** ("Schneller & sauberer" → v1.8.0): M3.1 Re-Render-Storm
+(Context-Memo + GalleryCard-memo — größter gefühlter Speed-Win), M3.2
+Comparison-to-Disk, M3.3 Cleanup (vorher Maurice' working-folder/bmad-Frage
+klären). Plan im ROADMAP-Einstiegsblock.
 
 **Operating Rules (unverändert gültig):** Batch-Releases (nicht pro PR
 taggen, Maurice' OK abwarten — .claude/rules/release-flow.md im App-Repo);
