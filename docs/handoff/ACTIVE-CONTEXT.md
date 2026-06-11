@@ -35,15 +35,34 @@ jetzt erledigt.
   (Tauri-Marker-Guard — sonst 404-Beacons bei jedem Desktop-Start);
   Drafts #67/#11 als superseded geschlossen. Daten fließen, sobald
   Analytics im Vercel-Dashboard fürs Projekt aktiv ist.
-- ▶ **M3.2 Comparison-to-Disk** = NÄCHSTER EINSTIEG (useComparison.ts:
-  mashup_comparison_results speichert GeneratedImage[] MIT base64 →
-  Pixel auf Disk wie v1.4.4-Gallery-Pattern, Metadaten im Store).
+- ✅ **M3.2 Store-Slimming** gemerged (PR #77, 11187fc). WICHTIG —
+  Roadmap-Annahme war FALSCH: comparison_results war LEER; die echten
+  217,7 MB = 103 MB saved_images (236/259 Einträge mit data:-URLs,
+  NULL localPath — v1.4.4-File-per-Image hing am toten generateImages-
+  Pfad) + 103 MB Backup-Duplikat + 11 MB Settings. Fix: lib/images/
+  slim.ts, saveImage slimmt async, Once-per-Session-Backlog-Migration
+  (Store-Writes währenddessen unterdrückt), Backup geslimmt
+  (localPath-Guard), ensureHostedUrl mit asset-Branch VOR dem
+  http-Passthrough (Windows-Form http://asset.localhost!). Geslimmte
+  Records tragen die asset-URL im url-Feld → null Render-/Posting-
+  Stellen geändert. **Maurice sollte nach dem nächsten Release einen
+  Desktop-Smoke machen**: Migration läuft beim ersten Launch (~236
+  Disk-Writes), danach Bilder sichtbar + Post Now testen.
+- ▶ **M3.2b = NÄCHSTER EINSTIEG: settings.watermark = 10,7 MB** —
+  das Wasserzeichen-BILD liegt als data-URL in den Settings; JEDER
+  Settings-Save (300ms-Debounce) serialisiert 11 MB, der beforeunload-
+  localStorage-Flush kämpft mit der Quota. Fix-Richtung: Bild als
+  Datei (images-Dir oder config-Dir), Pfad/Referenz in den Settings;
+  Konsumenten: applyWatermark, lib/pipeline-finalize, SettingsModal-
+  Upload-UI, lib/caption-edit?-nein. Danach ist der Store KB-groß.
 - ▶ **M3.3 Cleanup — Maurice' OK liegt vor (11.06.)**: docs/bmad (+
   docs/working-folder, 27MB Landing-PNGs) waren Produktions-Artefakte,
   werden nicht mehr genutzt → aus dem Repo entfernen (vorher lokales
   Backup außerhalb git ziehen!). Dazu pi/nca/mmx-Dead-Code (~2300 LOC)
   und der deferred Pre-Hydration-Befund. KEIN Tag bis das M3-Bundle
   steht → EIN v1.8.0-Vorschlag, Maurice' OK abwarten.
+- Rest-Notiz: PostReadyCarouselCard weiterhin unmemoized; Export-
+  Funktion (exportImagesToFile) exportiert weiterhin fette Records.
 
 **Operating Rules (unverändert gültig):** Batch-Releases (nicht pro PR
 taggen, Maurice' OK abwarten — .claude/rules/release-flow.md im App-Repo);
