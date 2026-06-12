@@ -67,10 +67,6 @@ describe('registry.getProvider', () => {
     const p = getProvider('leonardo');
     expect(p.name).toBe('leonardo');
   });
-  it('returns a MinimaxTextAdapter for "minimax-text"', () => {
-    const p = getProvider('minimax-text');
-    expect(p.name).toBe('minimax-text');
-  });
   it('returns a MinimaxVideoAdapter for "minimax-video"', () => {
     const p = getProvider('minimax-video');
     expect(p.name).toBe('minimax-video');
@@ -95,7 +91,6 @@ describe('registry.getProvider', () => {
       'higgsfield',
       'higgsfield-text',
       'leonardo',
-      'minimax-text',
       'minimax-video',
     ]);
   });
