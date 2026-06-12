@@ -131,6 +131,38 @@ jobs:
 
           echo "✅ bun.lock is fresh (or newer than package-lock.json)"
 
+  no-pnpm:
+    name: No pnpm artifacts tracked
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify no pnpm-workspace.yaml / pnpm-lock.yaml is committed
+        run: |
+          # M3.4-Q6: MashupForge is bun-primary. A stray `pnpm install`
+          # (e.g. from a CI runner with stale corepack, or a contributor
+          # pasting a recipe from another repo) regenerates these files
+          # AND creates a node_modules/.pnpm store that the bun install
+          # in pr-checks.yml then refuses to overwrite — the install
+          # step falls back to npm and the resulting node_modules is
+          # missing native bindings (better-sqlite3, sharp, koffi).
+          #
+          # .gitignore already lists both filenames, so a clean tree has
+          # nothing tracked. This guard catches the case where someone
+          # `git add -f`'d them.
+          FAILED=0
+          for FILE in pnpm-workspace.yaml pnpm-lock.yaml; do
+            if git ls-files --error-unmatch "$FILE" >/dev/null 2>&1; then
+              echo "❌ $FILE is tracked. MashupForge is bun-primary; remove it with:"
+              echo "     git rm --cached $FILE"
+              echo "   (.gitignore already lists it, so the working-tree copy will be ignored.)"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            exit 1
+          fi
+          echo "✅ No pnpm artifacts tracked"
+
   no-any:
     name: No `as any` in src/
     runs-on: ubuntu-latest
