@@ -29,7 +29,7 @@ import {
   pickFromPool,
   dedupeByUrl,
   type PiMode as PromptMode,
-} from '@/app/api/pi/prompt/route';
+} from '@/lib/ai-prompt-helpers';
 
 // Kept in sync with /api/pi/prompt. See module-level comment.
 const TRENDING_PER_QUERY_COUNT = 2;
