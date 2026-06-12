@@ -17,5 +17,6 @@ export {
   extractLeonardoErrorMessage,
   type LeonardoHttpAdapterOptions,
 } from './leonardo/http-adapter';
-export { MinimaxTextAdapter, minimaxTextAdapter, type MinimaxTextAdapterOptions } from './minimax/text-adapter';
+// M3.3-P3 commit b: minimax-text adapter deleted with the mmx-TEXT
+// path. vercel-ai is the new home for text/idea/caption generation.
 export { MinimaxVideoAdapter, minimaxVideoAdapter, type MinimaxVideoAdapterOptions } from './minimax/video-adapter';

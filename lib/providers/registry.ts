@@ -24,7 +24,9 @@ import {
 import { higgsfieldAdapter, HiggsfieldCliAdapter } from './higgsfield/cli-adapter';
 import { higgsfieldTextAdapter, HiggsfieldTextAdapter } from './higgsfield/text-adapter';
 import { leonardoAdapter, LeonardoHttpAdapter } from './leonardo/http-adapter';
-import { minimaxTextAdapter, MinimaxTextAdapter } from './minimax/text-adapter';
+// M3.3-P3 commit b: minimax-text adapter deleted with the mmx-TEXT
+// path. The vercel-ai route is the new home for text/idea/caption
+// generation.
 import { minimaxVideoAdapter, MinimaxVideoAdapter } from './minimax/video-adapter';
 
 // ---------------------------------------------------------------------------
@@ -40,7 +42,6 @@ export const BUILTIN_PROVIDER_IDS = [
   'higgsfield',
   'higgsfield-text',
   'leonardo',
-  'minimax-text',
   'minimax-video',
 ] as const;
 
@@ -72,7 +73,6 @@ const FACTORIES: Record<string, () => ProviderAdapter> = {
   higgsfield: () => new HiggsfieldCliAdapter({ cliToken: _runtimeConfig.higgsfieldCliToken }),
   'higgsfield-text': () => new HiggsfieldTextAdapter({ cliToken: _runtimeConfig.higgsfieldCliToken }),
   leonardo: () => new LeonardoHttpAdapter(),
-  'minimax-text': () => new MinimaxTextAdapter(),
   'minimax-video': () => new MinimaxVideoAdapter(),
 };
 
@@ -224,6 +224,5 @@ export {
   higgsfieldAdapter,
   higgsfieldTextAdapter,
   leonardoAdapter,
-  minimaxTextAdapter,
   minimaxVideoAdapter,
 };

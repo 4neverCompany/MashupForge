@@ -3524,8 +3524,6 @@ export function MainContent() {
           piError={piError}
           piSetupMsg={piSetupMsg}
           handlePiSetup={handlePiSetup}
-          ncaSetupMsg={ncaSetupMsg}
-          onNcaSetupComplete={setNcaSetupMsg}
           refreshPiStatus={refreshPiStatus}
           collections={collections}
           savedImages={savedImages}
