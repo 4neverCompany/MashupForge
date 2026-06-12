@@ -79,22 +79,14 @@ export interface StreamAIOptions {
   genres?: string[];
   /**
    * AI-AGENT-ROUTING: which AI agent backend handles this call. Mirrors
-   * UserSettings.activeAiAgent. Default 'pi' so callers that don't yet
-   * thread the user setting through stay on the pre-routing behavior.
-   * 'mmx' is kept as a back-compat alias for 'nca' (see module-level
-   * comment) — existing settings values keep working post-migration.
+   * UserSettings.activeAiAgent.
    *
-   * LLM-INTEGRATION-0513 added 'vercel-ai' — direct Vercel AI SDK
-   * provider, no subprocess. Same SSE wire contract as pi/nca, served
-   * by /api/ai/prompt.
-   *
-   * 0513-CONSOLIDATION: the vercel-ai backend chain was trimmed from
-   * {MiniMax, OpenAI, Anthropic, OpenRouter} to {MiniMax, OpenAI}.
-   * MiniMax stays the default; OpenAI is the only fallback. 'nca'
-   * and 'mmx' are kept as deprecated aliases for back-compat with
-   * installs that selected them before v1.0.1.
+   * M3.3-P3 commit a: narrowed from `'pi' | 'nca' | 'mmx' | 'vercel-ai'`
+   * to just `'vercel-ai'`. The pi/nca/mmx subprocess agents are
+   * retired in v1.8.0; a one-shot IDB migration in `useSettings.ts`
+   * rewrites any persisted legacy value to `'vercel-ai'` on first load.
    */
-  provider?: 'pi' | 'nca' | 'mmx' | 'vercel-ai';
+  provider?: 'vercel-ai';
   /**
    * Optional per-call model override, forwarded to the underlying
    * provider route as `body.model`. Currently only honoured by the
@@ -148,26 +140,15 @@ export async function* streamAI(
   options?: StreamAIOptions
 ): AsyncGenerator<string, void, void> {
   // AI-AGENT-ROUTING: pick the route based on the caller's provider hint.
-  // 'mmx' is a back-compat alias for 'nca' — the mmx chat path was retired
-  // on 2026-05-02 (NCA-INTEGRATION-DEV) but old settings.activeAiAgent
-  // values keep working without forcing a one-shot migration. All
-  // provider routes expose the same SSE contract, so the rest of the
-  // streaming/parsing loop is provider-agnostic.
-  //
-  // LLM-INTEGRATION-0513: 'vercel-ai' routes to /api/ai/prompt (direct
-  // Vercel AI SDK call, no subprocess). 0513-CONSOLIDATION trimmed the
-  // underlying provider chain in that route from
-  // {MiniMax, OpenAI, Anthropic, OpenRouter} to {MiniMax, OpenAI}; the
-  // client-side provider enum is unchanged.
-  const provider = options?.provider ?? 'pi';
-  let url: string;
-  if (provider === 'vercel-ai') {
-    url = '/api/ai/prompt';
-  } else if (provider === 'nca' || provider === 'mmx') {
-    url = '/api/nca/prompt';
-  } else {
-    url = '/api/pi/prompt';
-  }
+  // M3.3-P3 commit a: `provider` is now strictly `'vercel-ai'`; the
+  // nca + pi URL branches are gone and the canonical route is
+  // `/api/ai/prompt`. A one-shot IDB migration in `useSettings.ts`
+  // rewrites any persisted `'pi' | 'nca' | 'mmx'` value to
+  // `'vercel-ai'` on first load, so callers that thread
+  // `settings.activeAiAgent` through this option never see the
+  // legacy variants here.
+  const provider = options?.provider ?? 'vercel-ai';
+  const url = '/api/ai/prompt';
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
