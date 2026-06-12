@@ -147,38 +147,18 @@ import { computeCarouselView as computeCarouselViewPure, type PostItem } from '@
 import { sortPostItems } from '@/lib/post-ready-sort';
 import { proposeTagGroups } from '@/hooks/useCollections';
 
-/**
- * Auto-sizing textarea that grows with its content. Resets to
- * scrollHeight on every render so deletions shrink it too. Shared by
- * Captioning Studio and Post Ready tabs so long captions don't get
- * clipped behind a fixed row count.
- */
-interface AutoTextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
-  minRows?: number;
-}
-function AutoTextarea({ minRows = 2, className, value, ...rest }: AutoTextareaProps) {
-  const ref = React.useRef<HTMLTextAreaElement>(null);
-  React.useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight}px`;
-  }, [value]);
-  return (
-    <textarea
-      ref={ref}
-      rows={minRows}
-      value={value}
-      className={`resize-none overflow-hidden ${className || ''}`}
-      {...rest}
-    />
-  );
-}
-
+// M3.3-P4 Batch 1: AutoTextarea moved to components/AutoTextarea.tsx
 import { useAuth } from '@/hooks/useAuth';
 import { useDesktopConfig } from '@/hooks/useDesktopConfig';
 import { showToast } from '@/components/Toast';
 import { reapplyWatermark } from '@/lib/watermark';
+// M3.3-P4 Batch 1: extracted hooks + sub-components
+import { useMainContentScheduling } from '@/hooks/useMainContentScheduling';
+import { useMainContentAutoPoster } from '@/hooks/useMainContentAutoPoster';
+import { useMainContentBatchOps } from '@/hooks/useMainContentBatchOps';
+import { AutoTextarea } from './AutoTextarea';
+import { CaptioningView } from './MainContent/CaptioningView';
+import { CarouselPickerModal } from './MainContent/CarouselPickerModal';
 
 export function MainContent() {
   const { logout } = useAuth();
@@ -226,6 +206,84 @@ export function MainContent() {
     isSidebarOpen,
     setIsSidebarOpen
   } = useMashup();
+  // M3.3-P4 Batch 1: extracted hooks
+  const scheduling = useMainContentScheduling({
+    settings,
+    updateSettings,
+    savedImages,
+    saveImage,
+    generatePostContent,
+    setSelectedImage: (img: GeneratedImage) => setSelectedImage(img),
+    setPreparingPostId: (id: string | null) => setPreparingPostId(id),
+  });
+  const batchOps = useMainContentBatchOps();
+  useMainContentAutoPoster({
+    settings,
+    savedImages,
+    updateSettings,
+    setPostStatus: scheduling.setPostStatus,
+  });
+  // Destructure hook returns into local aliases so the post-ready /
+  // captioning JSX (which still references these names) compiles without
+  // mass renames. Behavior is identical to the pre-refactor version.
+  const {
+    postPlatformSel, togglePlatformFor, getSelectedPlatforms, availablePlatformsList,
+    postSchedule, getSchedule, setScheduleFor,
+    postBusy, postStatus, setPostStatus,
+    patchImage, formatPost, removeHashtag, fanCaptionToGroup, propagateCaptionToGroup,
+    handleReapplyWatermark, copyWithFeedback, copiedId,
+    postImageNow, postCarouselNow, scheduleImage, scheduleCarousel,
+    unschedulePost, unscheduleCarousel, findScheduleCollision, findExtraSlots,
+    buildCredentialsPayload,
+    heatmapEnabled, toggleHeatmap, heatmapHover, setHeatmapHover, heatmapHoverTimer,
+    postReadyHandlers, latestScheduleFor,
+    postReadySelected, setPostReadySelected, allScheduledPosts,
+  } = scheduling;
+  const {
+    selectedForBatch, setSelectedForBatch, dragOverCollection, setDragOverCollection,
+    handleBatchAnimate, handleBatchDelete, handleSelectAllGallery, handleClearGallerySelection,
+    handleBatchAddToCollection, handleSelectApproved, handleSelectInCollection,
+    handleInvertSelection, handleBatchCreateCollection, handleAutoOrganizeByTag,
+  } = batchOps;
+  // The hook's batch handlers take args (closure-style). GalleryFilterBar
+  // expects zero-arg handlers. Wrap them here so MainContent provides the
+  // bind sites (savedImages, deleteImage, setView, etc. are in scope here).
+  const handleBatchCaption = () => {
+    if (selectedForBatch.size === 0) return;
+    setView('captioning');
+  };
+  const handleBatchPostReady = async () => {
+    const targets = savedImages.filter((img) => selectedForBatch.has(img.id));
+    if (targets.length === 0) return;
+    await Promise.allSettled(
+      targets.map((img) => saveImage({ ...img, isPostReady: true })),
+    );
+    setSelectedForBatch(new Set());
+    setView('post-ready');
+  };
+  const handleBatchAnimateBound = () =>
+    handleBatchAnimate(async (img: GeneratedImage, isBatch?: boolean) => {
+      const imagesToAnimate = savedImages.filter(
+        (it) => selectedForBatch.has(it.id) && (it.imageId || it.url) && !it.isVideo,
+      );
+      if (imagesToAnimate.length === 0) return;
+      await Promise.allSettled(imagesToAnimate.map((it) => handleAnimate(it, true)));
+    });
+  const handleBatchDeleteBound = () => handleBatchDelete(deleteImage);
+  const handleBatchAddToCollectionBound = (collectionId: string) =>
+    handleBatchAddToCollection(collectionId, addImageToCollection, collections);
+  const handleBatchCreateCollectionBound = () =>
+    handleBatchCreateCollection(setShowCollectionModal);
+  const handleAutoOrganizeByTagBound = () =>
+    handleAutoOrganizeByTag(savedImages, createCollection, addImageToCollection);
+  // Same wrapping for the selection handlers (they take displayedImages
+  // / selectedCollectionId in the hook but GalleryFilterBar calls them
+  // with no args).
+  const handleSelectAllGalleryBound = () => handleSelectAllGallery(displayedImages);
+  const handleSelectApprovedBound = () => handleSelectApproved(displayedImages);
+  const handleSelectInCollectionBound = () =>
+    handleSelectInCollection(displayedImages, selectedCollectionId);
+  const handleInvertSelectionBound = () => handleInvertSelection(displayedImages);
   const [selectedImage, setSelectedImage] = useState<GeneratedImage | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -234,8 +292,7 @@ export function MainContent() {
   const [filterUniverse, setFilterUniverse] = useState('all');
   const [tagQuery, setTagQuery] = useState('');
   const [selectedCollectionId, setSelectedCollectionId] = useState('all');
-  const [selectedForBatch, setSelectedForBatch] = useState<Set<string>>(new Set());
-  const [dragOverCollection, setDragOverCollection] = useState<string | null>(null);
+  // selectedForBatch + dragOverCollection now live in useMainContentBatchOps.
   const [showCollectionModal, setShowCollectionModal] = useState(false);
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
@@ -312,44 +369,23 @@ export function MainContent() {
   const [preparingPostId, setPreparingPostId] = useState<string | null>(null);
   const [taggingId, setTaggingId] = useState<string | null>(null);
 
-  // Captioning Studio tab state
-  const [captioningFilter, setCaptioningFilter] = useState<'all' | 'captioned' | 'uncaptioned'>('all');
-  // Whether the tab auto-groups similar images into carousel cards
-  // (reuses the Post Ready computeCarouselView logic). Default ON.
+  // Captioning Studio tab state — most of it lives inside CaptioningView now.
+  // captioningGrouped stays here because openCarouselPicker (MainContent)
+  // flips it to true after creating a fresh group, and CaptioningView
+  // receives the setter as a callback.
   const [captioningGrouped, setCaptioningGrouped] = useState(true);
-  // When grouping is OFF, users can check individual cards and manually
-  // promote a selection to a carousel group.
-  const [captioningSelected, setCaptioningSelected] = useState<Set<string>>(new Set());
   // Carousel picker modal: multi-source image picker for grouping
   // savedImages into a carousel from ANY subset (not just auto-detected).
+  // The picker modal itself moved to CarouselPickerModal; the parent
+  // owns the show/hide state + the target group id.
   const [showCarouselPicker, setShowCarouselPicker] = useState(false);
   const [pickerTargetGroupId, setPickerTargetGroupId] = useState<string | null>(null);
-  const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
-  // Post-Ready manual carousel grouping selection (parallel to
-  // captioningSelected). Lets the user check 2+ Post-Ready single cards
-  // and promote them into a carousel group without leaving the tab.
-  const [postReadySelected, setPostReadySelected] = useState<Set<string>>(new Set());
-  const [batchCaptioning, setBatchCaptioning] = useState(false);
-  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
-  // Captioning tab "remove" confirmation — tracks which image id is pending
-  // confirmation so we can show an inline ✓/✗ pair instead of window.confirm.
-  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
-  // Image id currently copied (for the brief "Copied" affordance on the
-  // Post Ready tab). Auto-clears after a short timeout.
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // ── Post Ready scheduling state ────────────────────────────────────
-  // PostPlatform is exported from @/types/mashup and shared with the
-  // useSmartScheduler hook + SmartScheduleModal component.
+  // Per-card platform/date/posting state moved to useMainContentScheduling.
+  // Heatmap overlay state (heatmapEnabled, heatmapHover, heatmapHoverTimer)
+  // also moved. View toggle + calendar nav + DnD state stay here.
 
-  // Per-card platform selection (defaults set when the card first renders).
-  const [postPlatformSel, setPostPlatformSel] = useState<Record<string, PostPlatform[]>>({});
-  // Per-card date/time pickers.
-  const [postSchedule, setPostSchedule] = useState<Record<string, { date: string; time: string }>>({});
-  // Per-card posting spinner state ('posting' | 'scheduling' | null).
-  const [postBusy, setPostBusy] = useState<Record<string, 'posting' | 'scheduling' | null>>({});
-  // Transient status line per card ('Posted!', 'Scheduled for ...', error msg).
-  const [postStatus, setPostStatus] = useState<Record<string, string | null>>({});
   // Post Ready view toggle + calendar navigation.
   const [postReadyView, setPostReadyView] = useState<'grid' | 'calendar' | 'history'>('grid');
   // V082-POST-READY-SORT: user-chosen sort for the grid view.
@@ -371,11 +407,6 @@ export function MainContent() {
   // a confirmation dialog before the post is removed from settings.
   const [dragOverTrash, setDragOverTrash] = useState(false);
   const [pendingTrashId, setPendingTrashId] = useState<string | null>(null);
-  // V040-001: engagement heatmap overlay. Persisted to settings on toggle
-  // so the user's choice survives reloads.
-  const [heatmapEnabled, setHeatmapEnabled] = useState<boolean>(
-    () => settings.heatmapEnabled ?? false,
-  );
   // V082-CAL-HISTORY: when ON, successfully published posts stay
   // visible on the calendar as emerald chips with a ✓ prefix. Default
   // ON (so users can see what was shipped when), but togglable for
@@ -383,14 +414,6 @@ export function MainContent() {
   // Not persisted — this is a per-session visual preference, not a
   // workflow change.
   const [calendarShowPosted, setCalendarShowPosted] = useState<boolean>(true);
-  const [heatmapHover, setHeatmapHover] = useState<{
-    cellKey: string;
-    rect: DOMRect;
-    date: Date;
-    hour: number;
-    isAvailable: boolean;
-  } | null>(null);
-  const heatmapHoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Fix 4 (mmx brief): the calendar's inline edit popover renders above
   // the week grid, so opening a chip near the bottom would force the user
   // to scroll up to see it. Scroll the popover into view whenever the
@@ -420,204 +443,24 @@ export function MainContent() {
   // Batch "Schedule All" mini-modal state.
   const [showScheduleAll, setShowScheduleAll] = useState(false);
 
-  const hasPlatformCreds = (p: PostPlatform): boolean => {
-    switch (p) {
-      case 'instagram':
-        if (settings.apiKeys.instagram?.accessToken && settings.apiKeys.instagram?.igAccountId) return true;
-        if (isDesktop && desktopCreds.hasInstagramToken && desktopCreds.hasInstagramAccountId) return true;
-        return false;
-      case 'pinterest':
-        if (settings.apiKeys.pinterest?.accessToken) return true;
-        if (isDesktop && desktopCreds.hasPinterestCreds) return true;
-        return false;
-      case 'twitter':
-        if (settings.apiKeys.twitter?.appKey && settings.apiKeys.twitter?.appSecret &&
-            settings.apiKeys.twitter?.accessToken && settings.apiKeys.twitter?.accessSecret) return true;
-        if (isDesktop && desktopCreds.hasTwitterCreds) return true;
-        return false;
-      case 'discord':
-        if (settings.apiKeys.discordWebhook) return true;
-        if (isDesktop && desktopCreds.hasDiscordCreds) return true;
-        return false;
-    }
-  };
-
-  const availablePlatforms = (): PostPlatform[] => {
-    return (['instagram', 'pinterest', 'twitter', 'discord'] as PostPlatform[]).filter(hasPlatformCreds);
-  };
-
-  // M3.1b: identity-stable variant of availablePlatforms() for props
-  // of memoized cards (PostReadyCard). The function builds a fresh
-  // array per call, which as a prop would defeat React.memo on every
-  // render. Recomputes only when the credential inputs change.
-  const availablePlatformsList = useMemo(
-    () => (['instagram', 'pinterest', 'twitter', 'discord'] as PostPlatform[]).filter(hasPlatformCreds),
-    // hasPlatformCreds is a render-fresh closure; its actual inputs are
-    // listed here instead.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings.apiKeys, isDesktop, desktopCreds],
-  );
-
   // PROP-016: smart scheduler hook — owns slot computation state.
+  // (hasPlatformCreds / availablePlatforms / availablePlatformsList /
+  // getSelectedPlatforms / toggleHeatmap / togglePlatformFor / getSchedule /
+  // setScheduleFor / buildCredentialsPayload / postImageNow /
+  // findScheduleCollision / findExtraSlots / scheduleImage /
+  // unschedulePost / unscheduleCarousel all moved to
+  // useMainContentScheduling. The destructure alias at the top of
+  // the function re-exposes them as local names so the post-ready
+  // JSX compiles without mass renames.)
   const smartScheduler = useSmartScheduler({
     postCount: 1,                          // updated per-call via trigger options
     scheduledPosts: settings.scheduledPosts || [],
-    defaultPlatforms: availablePlatforms(),
+    defaultPlatforms: scheduling.availablePlatforms(),
     igAccessToken: settings.apiKeys?.instagram?.accessToken,
     igAccountId: settings.apiKeys?.instagram?.igAccountId,
   });
 
-  /** Return the per-card selection, initialising to "all available" on
-   *  first access. M3.1b: the fallback is the memoized list so the
-   *  returned identity is stable for cards without an explicit pick. */
-  const getSelectedPlatforms = (id: string): PostPlatform[] => {
-    if (postPlatformSel[id]) return postPlatformSel[id];
-    return availablePlatformsList;
-  };
-
-  // V040-001: keep React state and persisted setting in sync. Persists
-  // through `updateSettings` so it survives page reloads and matches
-  // the rest of the toggle-button pattern used in this file.
-  const toggleHeatmap = useCallback(() => {
-    setHeatmapEnabled((prev) => {
-      const next = !prev;
-      updateSettings({ heatmapEnabled: next });
-      return next;
-    });
-    // Closing the overlay also closes any in-flight tooltip.
-    setHeatmapHover(null);
-    if (heatmapHoverTimer.current) {
-      clearTimeout(heatmapHoverTimer.current);
-      heatmapHoverTimer.current = null;
-    }
-  }, [updateSettings]);
-
-  // V040-001: hide tooltip on scroll / Escape. Scroll closes immediately
-  // because the anchor rect would otherwise drift away from the cell.
-  useEffect(() => {
-    if (!heatmapHover) return;
-    const close = () => setHeatmapHover(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [heatmapHover]);
-
-  const togglePlatformFor = (id: string, p: PostPlatform) => {
-    setPostPlatformSel((prev) => {
-      const current = prev[id] || availablePlatforms();
-      const next = current.includes(p) ? current.filter((x) => x !== p) : [...current, p];
-      return { ...prev, [id]: next };
-    });
-  };
-
-  /** Default schedule — today's date, an hour from now. Memoised per image id. */
-  const getSchedule = (id: string): { date: string; time: string } => {
-    if (postSchedule[id]) return postSchedule[id];
-    const d = new Date(Date.now() + 60 * 60 * 1000);
-    const date = d.toISOString().slice(0, 10);
-    const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    return { date, time };
-  };
-
-  const setScheduleFor = (id: string, patch: Partial<{ date: string; time: string }>) => {
-    setPostSchedule((prev) => ({
-      ...prev,
-      [id]: { ...getSchedule(id), ...patch },
-    }));
-  };
-
-  const buildCredentialsPayload = () => ({
-    instagram: settings.apiKeys.instagram,
-    twitter: settings.apiKeys.twitter,
-    pinterest: settings.apiKeys.pinterest,
-    discord: { webhookUrl: settings.apiKeys.discordWebhook },
-  });
-
-  /** Post a single image immediately to the selected platforms. */
-  const postImageNow = async (img: GeneratedImage, platforms: PostPlatform[]) => {
-    if (platforms.length === 0) return;
-    // BUG-CRIT-011: enforce the approval gate at the manual click site.
-    // Without this check, Post Now bypassed ScheduledPost.status entirely
-    // and rejected/pending pipeline content went live anyway.
-    const block = findPostingBlock([img.id], settings.scheduledPosts);
-    if (block) {
-      setPostStatus((prev) => ({ ...prev, [img.id]: block.message }));
-      return;
-    }
-    setPostBusy((prev) => ({ ...prev, [img.id]: 'posting' }));
-    setPostStatus((prev) => ({ ...prev, [img.id]: null }));
-    try {
-      // POST-413-FIX phase 3 (2026-05-21): hoist the image to a public
-      // host BEFORE sending the post request so the body to /api/social/
-      // post stays a few hundred bytes. JPEG@0.92 (phase 2, 578f8c2)
-      // brought single-image posts under Vercel's 4.5MB serverless body
-      // limit but a 3840x3840 GPT Image-2 output can still trip it, and
-      // carousels of 2+ images cross it reliably. ensureHostedUrl is a
-      // no-op for already-https sources and uploads data: URLs to uguu.
-      const source = img.url || (img.base64 ? `data:image/jpeg;base64,${img.base64}` : '');
-      if (!source) throw new Error('No image source — both url and base64 are missing');
-      const hostedUrl = await ensureHostedUrl(source);
-      const res = await fetch('/api/social/post', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          caption: formatPost(img),
-          platforms,
-          mediaUrl: hostedUrl,
-          credentials: buildCredentialsPayload(),
-        }),
-      });
-      let data: { error?: string };
-      try {
-        data = await res.json() as { error?: string };
-      } catch {
-        throw new Error(`Server error (HTTP ${res.status}) — check logs`);
-      }
-      if (!res.ok) throw new Error(data.error || 'Post failed');
-      patchImage(img, {
-        postedAt: Date.now(),
-        postedTo: platforms,
-        postError: undefined,
-      });
-      recordOutcome({
-        imageId: img.id,
-        prompt: img.prompt,
-        style: img.style ?? '',
-        aspectRatio: img.aspectRatio ?? '',
-        model: img.modelInfo?.modelName ?? img.modelInfo?.modelId ?? '',
-        status: 'posted',
-        platform: platforms.join(','),
-        timestamp: Date.now(),
-      });
-      setPostStatus((prev) => ({
-        ...prev,
-        [img.id]: `Posted to ${platforms.join(', ')} ✓`,
-      }));
-    } catch (e: unknown) {
-      const reason = getErrorMessage(e);
-      patchImage(img, { postError: reason });
-      setPostStatus((prev) => ({
-        ...prev,
-        [img.id]: `Error: ${reason}`,
-      }));
-    } finally {
-      setPostBusy((prev) => ({ ...prev, [img.id]: null }));
-    }
-  };
-
-  /**
-   * Persist or update a ScheduledPost in settings.scheduledPosts.
-   *
-   * If an existing non-carousel scheduled post already references this
-   * image, we patch it in place instead of appending — otherwise clicking
-   * Schedule after editing the date/time/caption would create a duplicate
-   * card for the same image. Carousel-bound posts are owned by
-   * scheduleCarousel and intentionally skipped here.
-   */
+  // findScheduleCollision + findExtraSlots + scheduleImage + unschedulePost + unscheduleCarousel moved to useMainContentScheduling.
   /**
    * Collision check for manual scheduling.
    * Treats a slot as taken when a non-terminal ScheduledPost shares the
@@ -625,137 +468,7 @@ export function MainContent() {
    * being rescheduled and (for carousels) siblings in the same group.
    * Returns the colliding post or null.
    */
-  const findScheduleCollision = (
-    date: string,
-    time: string,
-    platforms: readonly string[],
-    ignoreImageIds: Set<string>,
-    ignoreCarouselGroupId?: string | null,
-  ): ScheduledPost | null => {
-    const existing = settings.scheduledPosts || [];
-    const wanted = new Set<string>(platforms);
-    for (const p of existing) {
-      if (p.status === 'posted' || p.status === 'rejected' || p.status === 'failed') continue;
-      if (ignoreImageIds.has(p.imageId)) continue;
-      if (ignoreCarouselGroupId && p.carouselGroupId === ignoreCarouselGroupId) continue;
-      if (p.date !== date || p.time !== time) continue;
-      const pPlatforms = p.platforms || [];
-      if (pPlatforms.some((pl) => wanted.has(pl))) return p;
-    }
-    return null;
-  };
-
-  /**
-   * BUG-FIX: when smart schedule has fewer slots than posts, find the
-   * next-best unconsumed slots so remaining posts spread rather than
-   * piling onto the same form.{date,time}. `consumedKeys` tracks slots
-   * already allocated in the same confirm pass.
-   */
-  const findExtraSlots = (
-    needed: number,
-    existingPosts: ScheduledPost[],
-    consumedKeys: Set<string>,
-  ): SlotScore[] => {
-    const allScheduled: ExistingPost[] = [
-      ...existingPosts.map((p) => ({ date: p.date, time: p.time, status: p.status })),
-      ...[...consumedKeys].map((key) => {
-        const [date, time] = key.split('T');
-        return { date, time, status: 'scheduled' as const };
-      }),
-    ];
-    return findBestSlots(allScheduled, needed);
-  };
-
-  const scheduleImage = (img: GeneratedImage, platforms: PostPlatform[], date: string, time: string) => {
-    if (!date || !time || platforms.length === 0) return;
-    const collision = findScheduleCollision(date, time, platforms, new Set([img.id]));
-    if (collision) {
-      const wanted = new Set<string>(platforms);
-      const platformLabel = (collision.platforms || []).find((pl) => wanted.has(pl)) || 'that platform';
-      showToast(`Already scheduled at ${date} ${time} on ${platformLabel}.`, 'error');
-      return;
-    }
-    const caption = formatPost(img);
-    updateSettings((prev) => {
-      const existingPosts = prev.scheduledPosts || [];
-      // RESCHED-FIX: only reuse the entry if it's still active. A 'posted'
-      // or 'rejected' entry is terminal — patching it would silently
-      // rewrite history and the Post Ready card would keep showing the
-      // terminal status for the new schedule. Treat 'failed' as active so
-      // the user can retry by re-scheduling.
-      const editableIdx = existingPosts.findIndex(
-        (p) =>
-          p.imageId === img.id &&
-          !p.carouselGroupId &&
-          p.status !== 'posted' &&
-          p.status !== 'rejected',
-      );
-      if (editableIdx !== -1) {
-        const reusedId = existingPosts[editableIdx].id;
-        // RESCHED-FIX: mirror the in-place reschedule to the server
-        return {
-          scheduledPosts: existingPosts.map((p, i) =>
-            i === editableIdx
-              ? { ...p, date, time, platforms, caption, status: 'scheduled' }
-              : p
-          ),
-        };
-      }
-      const scheduled: ScheduledPost = {
-        id: `sched-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        imageId: img.id,
-        date,
-        time,
-        platforms,
-        caption,
-        status: 'scheduled',
-      };
-      return { scheduledPosts: [...existingPosts, scheduled] };
-    });
-    // BUG-CRIT-013: surface the image in the Post Ready tab. Before
-    // this, scheduling from anywhere outside Post Ready (e.g. directly
-    // from a calendar slot or a captioning card) created the
-    // ScheduledPost but left the image with isPostReady=false, so it
-    // was invisible in Post Ready even though it had a real schedule.
-    if (!img.isPostReady) patchImage(img, { isPostReady: true });
-    setPostStatus((prev) => ({
-      ...prev,
-      [img.id]: `Scheduled for ${date} ${time}`,
-    }));
-  };
-
-  /**
-   * Cancel a scheduled post for this image WITHOUT rejecting it.
-   *
-   * Distinct from `rejectScheduledPost` (which flips status to 'rejected'
-   * so the daemon stops acting on it) and from `deleteImage` (which blows
-   * the image away entirely). "Cancel schedule" just drops any
-   * non-posted ScheduledPost entries for the image so the card reverts
-   * to the plain "Ready" state — the user can then re-schedule or post
-   * now. Already-posted entries are preserved so posting history is
-   * never retroactively hidden.
-   */
-  const unschedulePost = (img: GeneratedImage) => {
-    // SCHED-POST-ROBUST: cancel any matching server queue entries
-    // before the local filter wipes them. Best-effort.
-    updateSettings((prev) => ({
-      scheduledPosts: (prev.scheduledPosts || []).filter(
-        (p) => p.imageId !== img.id || p.status === 'posted',
-      ),
-    }));
-    setPostStatus((prev) => ({ ...prev, [img.id]: 'Schedule canceled' }));
-  };
-
-  /** Cancel schedule for every image in a carousel item. */
-  const unscheduleCarousel = (images: GeneratedImage[], statusKey: string) => {
-    const ids = new Set(images.map((i) => i.id));
-    updateSettings((prev) => ({
-      scheduledPosts: (prev.scheduledPosts || []).filter(
-        (p) => !ids.has(p.imageId) || p.status === 'posted',
-      ),
-    }));
-    setPostStatus((prev) => ({ ...prev, [statusKey]: 'Schedule canceled' }));
-  };
+  // findScheduleCollision + findExtraSlots + scheduleImage + unschedulePost + unscheduleCarousel moved to useMainContentScheduling.
 
   // ── Calendar helpers ───────────────────────────────────────────────
   /** Start-of-day for a Date (strips time). */
@@ -794,23 +507,7 @@ export function MainContent() {
   /** 24-hour labels 00..23 used by the week-view row header. */
   const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => `${String(h).padStart(2, '0')}:00`);
 
-  /** Look up the most relevant scheduled post for an image id.
-   *  RESCHED-FIX: prefer an active (non-terminal) post over older
-   *  posted/rejected entries so the Post Ready card reflects the
-   *  user's most recent reschedule, not a stale terminal entry. */
-  const latestScheduleFor = (imageId: string): ScheduledPost | undefined => {
-    const all = settings.scheduledPosts || [];
-    let active: ScheduledPost | undefined;
-    let fallback: ScheduledPost | undefined;
-    for (let i = all.length - 1; i >= 0; i--) {
-      const p = all[i];
-      if (p.imageId !== imageId) continue;
-      const isTerminal = p.status === 'posted' || p.status === 'rejected';
-      if (!isTerminal && !active) active = p;
-      else if (!fallback) fallback = p;
-    }
-    return active ?? fallback;
-  };
+  // latestScheduleFor now lives in useMainContentScheduling.
 
   // ── Carousel grouping (Post Ready tab) ─────────────────────────────
   // Pure logic lives in lib/carouselView.ts (TEST-001). This wrapper
@@ -957,462 +654,36 @@ export function MainContent() {
     return () => window.removeEventListener('keydown', handler);
   }, [undoLastDndMove]);
 
-  /** Open the multi-source image picker for an existing or new group. */
+  /** Open the multi-source image picker for an existing or new group.
+   *  The picker modal (CarouselPickerModal) owns its own `pickerSelected`
+   *  state now — seeding moved into the modal's useEffect on
+   *  pickerTargetGroupId. We only need to flip the show flag + the target. */
   const openCarouselPicker = (targetGroupId: string | null) => {
     setPickerTargetGroupId(targetGroupId);
-    // Seed selection with the group's current members when editing.
-    if (targetGroupId) {
-      const g = (settings.carouselGroups || []).find((x) => x.id === targetGroupId);
-      setPickerSelected(new Set(g?.imageIds || []));
-    } else {
-      setPickerSelected(new Set());
-    }
     setShowCarouselPicker(true);
   };
 
   /** Confirm picker selection → persist a new or updated carousel group. */
-  const confirmCarouselPicker = () => {
-    const ids = Array.from(pickerSelected);
+  const confirmCarouselPicker = (ids: string[]) => {
     if (ids.length < 2) {
       setShowCarouselPicker(false);
+      setPickerTargetGroupId(null);
       return;
     }
     const id = pickerTargetGroupId || `manual-${ids[0]}`;
     persistCarouselGroup(id, ids);
     setShowCarouselPicker(false);
     setPickerTargetGroupId(null);
-    setPickerSelected(new Set());
     // After creating a fresh group, flip the tab into grouped view so
     // the user sees the result immediately.
     if (!pickerTargetGroupId) setCaptioningGrouped(true);
   };
 
-  /**
-   * Schedule a whole carousel: creates one ScheduledPost per image in the
-   * group at the shared date/time/platforms. The auto-post worker picks
-   * these up when the time hits; Instagram carousel-mode is still handled
-   * by postCarouselNow when the user clicks Post Now.
-   *
-   * If an existing carouselGroupId already covers exactly this set of
-   * images, we patch those posts in place so re-editing date/time/caption
-   * doesn't duplicate the carousel.
-   */
-  const scheduleCarousel = (
-    item: Extract<PostItem, { kind: 'carousel' }>,
-    platforms: PostPlatform[],
-    date: string,
-    time: string
-  ) => {
-    if (platforms.length === 0 || !date || !time || item.images.length === 0) return;
-    const imageIds = new Set(item.images.map((i) => i.id));
-    // Match the existing group-match logic below: if a group already
-    // covers exactly these images, we're rescheduling it (no collision).
-    const existingForGroup = (settings.scheduledPosts || []).filter(
-      (p) => p.carouselGroupId && imageIds.has(p.imageId),
-    );
-    const existingGroupId = existingForGroup[0]?.carouselGroupId ?? null;
-    const collision = findScheduleCollision(date, time, platforms, imageIds, existingGroupId);
-    if (collision) {
-      const wanted = new Set<string>(platforms);
-      const platformLabel = (collision.platforms || []).find((pl) => wanted.has(pl)) || 'that platform';
-      showToast(`Already scheduled at ${date} ${time} on ${platformLabel}.`, 'error');
-      return;
-    }
-    const caption = item.group?.caption || formatPost(item.images[0]);
-
-    updateSettings((prev) => {
-      const existingPosts = prev.scheduledPosts || [];
-
-      // Find an existing carouselGroupId whose posts cover exactly this
-      // item's image set. Iterating to the end means the LAST match wins
-      // if the user somehow has stale duplicates — newest grouping is kept.
-      const byGroup = new Map<string, ScheduledPost[]>();
-      for (const p of existingPosts) {
-        if (!p.carouselGroupId || !imageIds.has(p.imageId)) continue;
-        const list = byGroup.get(p.carouselGroupId) || [];
-        list.push(p);
-        byGroup.set(p.carouselGroupId, list);
-      }
-      let matchGroupId: string | null = null;
-      for (const [gid, posts] of byGroup) {
-        const postImgIds = new Set(posts.map((p) => p.imageId));
-        if (
-          postImgIds.size === imageIds.size &&
-          [...imageIds].every((id) => postImgIds.has(id))
-        ) {
-          matchGroupId = gid;
-        }
-      }
-
-      if (matchGroupId) {
-        return {
-          scheduledPosts: existingPosts.map((p) =>
-            p.carouselGroupId === matchGroupId
-              ? { ...p, date, time, platforms, caption }
-              : p
-          ),
-        };
-      }
-
-      const nowStamp = Date.now();
-      const groupId = `carousel-grp-${nowStamp}-${Math.random().toString(36).slice(2, 8)}`;
-      const newPosts: ScheduledPost[] = item.images.map((img, idx) => ({
-        id: `post-${nowStamp}-${idx}-${Math.random().toString(36).slice(2, 8)}`,
-        imageId: img.id,
-        date,
-        time,
-        platforms,
-        caption,
-        status: 'scheduled' as const,
-        carouselGroupId: groupId,
-      }));
-      // SCHED-POST-ROBUST: mirror to the server queue. Each carousel
-      // member is pushed with its own mediaUrl; the cron groups by
-      // carouselGroupId and assembles mediaUrls = [member1.url, ...]
-      // (see app/api/social/cron-fire/route.ts:fireOne). All members
-      return { scheduledPosts: [...existingPosts, ...newPosts] };
-    });
-    // BUG-CRIT-013: surface every image in the carousel in Post Ready,
-    // matching scheduleImage's per-image behaviour. Without this,
-    // scheduling a carousel from outside Post Ready left all siblings
-    // invisible in the Post Ready tab.
-    for (const img of item.images) {
-      if (!img.isPostReady) patchImage(img, { isPostReady: true });
-    }
-    setPostStatus((prev) => ({
-      ...prev,
-      [`carousel-${item.id}`]: `Scheduled carousel for ${date} ${time}`,
-    }));
-  };
-
-  /** Post a whole carousel now — fans out to platforms with the full mediaUrls array. */
-  const postCarouselNow = async (
-    item: Extract<PostItem, { kind: 'carousel' }>,
-    platforms: PostPlatform[]
-  ) => {
-    if (platforms.length === 0 || item.images.length === 0) return;
-    const key = `carousel-${item.id}`;
-    // BUG-CRIT-011: a single rejected (or pending-approval) sibling
-    // blocks the whole carousel. Bulk-rejecting in the approval queue
-    // marks each ScheduledPost in the group; without this gate the
-    // user could still publish the entire carousel via Post Now.
-    const block = findPostingBlock(
-      item.images.map((i) => i.id),
-      settings.scheduledPosts,
-    );
-    if (block) {
-      setPostStatus((prev) => ({ ...prev, [key]: block.message }));
-      return;
-    }
-    setPostBusy((prev) => ({ ...prev, [key]: 'posting' }));
-    setPostStatus((prev) => ({ ...prev, [key]: null }));
-    try {
-      const caption = item.group?.caption || formatPost(item.images[0]);
-      // POST-413-FIX phase 3 (2026-05-21): carousels were the failure
-      // case after phase 2 (578f8c2). N watermarked JPEG@0.92 data URLs
-      // each in mediaUrls reliably blow Vercel's 4.5MB body limit once
-      // N >= 2. ensureHostedUrls passes through https URLs unchanged and
-      // parallel-uploads data: URLs to uguu so the body stays tiny.
-      const rawSources = item.images
-        .map((i) => i.url || (i.base64 ? `data:image/jpeg;base64,${i.base64}` : ''))
-        .filter(Boolean);
-      if (rawSources.length === 0) throw new Error('Carousel has no usable image sources');
-      const mediaUrls = await ensureHostedUrls(rawSources);
-      const res = await fetch('/api/social/post', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          caption,
-          platforms,
-          mediaUrls,
-          credentials: buildCredentialsPayload(),
-        }),
-      });
-      // POST-NONJSON-DIAG (2026-05-21): defensively wrap res.json() to
-      // match the other three /api/social/post call sites. Without this,
-      // a non-JSON response body bubbled the raw V8 SyntaxError directly
-      // into the carousel-post toast ("Unexpected token R, Request En...
-      // is not valid JSON"), masking which upstream produced the failure.
-      let data: { error?: string };
-      try {
-        data = await res.json() as { error?: string };
-      } catch {
-        throw new Error(`Server error (HTTP ${res.status}) — check logs`);
-      }
-      if (!res.ok) throw new Error(data.error || 'Carousel post failed');
-      const stamp = Date.now();
-      for (const ci of item.images) {
-        patchImage(ci, {
-          postedAt: stamp,
-          postedTo: platforms,
-          postError: undefined,
-        });
-      }
-      setPostStatus((prev) => ({ ...prev, [key]: `Posted carousel to ${platforms.join(', ')} ✓` }));
-    } catch (e: unknown) {
-      const reason = getErrorMessage(e);
-      for (const ci of item.images) {
-        patchImage(ci, { postError: reason });
-      }
-      setPostStatus((prev) => ({ ...prev, [key]: `Error: ${reason}` }));
-    } finally {
-      setPostBusy((prev) => ({ ...prev, [key]: null }));
-    }
-  };
-
-  /** Write text to clipboard and flash a "Copied" state on the given key. */
-  const copyWithFeedback = async (text: string, feedbackKey: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(feedbackKey);
-      setTimeout(() => {
-        setCopiedId((current) => (current === feedbackKey ? null : current));
-      }, 1500);
-    } catch {
-      showToast('Failed to copy to clipboard', 'error');
-    }
-  };
-
-  /** Format a single image's caption + hashtags as a ready-to-paste post. */
-  const formatPost = (img: GeneratedImage): string => {
-    const caption = img.postCaption || '';
-    const tags = (img.postHashtags || []).join(' ');
-    return tags ? `${caption}\n\n${tags}` : caption;
-  };
-
-  /** Merge partial updates into an image and persist. */
-  const patchImage = (img: GeneratedImage, patch: Partial<GeneratedImage>) => {
-    saveImage({ ...img, ...patch });
-  };
-
-  /**
-   * V1.5: re-apply the current watermark to an already-saved image.
-   * Shared by the Captioning, Post-Ready, and Gallery surfaces. Skips
-   * videos and disabled-watermark cases with a toast; on success the
-   * re-watermarked image (composited onto its clean originalUrl, so no
-   * double-stacking) is persisted via saveImage.
-   */
-  // M3.1: identity-stable so it can be passed to the memoized
-  // GalleryCard directly (the previous per-card `() => handle…(img)`
-  // lambda gave every card a fresh prop identity each render).
-  const handleReapplyWatermark = useStableCallback(async (img: GeneratedImage) => {
-    const result = await reapplyWatermark(
-      img,
-      settings.watermark ?? { enabled: false, image: null, position: 'bottom-right', opacity: 0.8, scale: 0.05 },
-      settings.channelName,
-    );
-    if (result.ok) {
-      saveImage(result.image);
-      showToast('Watermark re-applied.', 'success');
-    } else {
-      showToast(result.reason, 'error');
-    }
-  });
-
-  /**
-   * REFACTOR-001 / SHOULDFIX-002 — single shared fan-out for carousel
-   * captions, covering both the "call AI on anchor, propagate" path AND
-   * the "anchor already has a caption, propagate verbatim" path.
-   *
-   * Four sites used to have parallel inline copies of "get a caption
-   * for the anchor (via AI or via its existing caption), then propagate
-   * caption + hashtags to siblings": batchCaptionImages' needsAi=true
-   * branch, batchCaptionImages' needsAi=false propagation-only branch
-   * (SHOULDFIX-002), the captioning-view per-card Generate button, and
-   * the post-ready Regen button. The copies drifted (notably WARN-1's
-   * per-image overwrite guard existed only in batch).
-   *
-   * Source of truth rule:
-   *   - If anchor has no caption OR caller forces regen → call AI.
-   *   - Otherwise → reuse anchor's existing caption (no AI cost).
-   *
-   * Callers pass `{ force: true }` when an explicit user "Regenerate"
-   * should overwrite siblings' existing captions AND re-call AI even
-   * when the anchor is already captioned.
-   *
-   * Returns the (possibly updated) anchor for callers that need it.
-   */
-  const fanCaptionToGroup = async (
-    anchor: GeneratedImage,
-    rest: GeneratedImage[],
-    opts: { force?: boolean } = {},
-  ): Promise<GeneratedImage | undefined> => {
-    const force = opts.force === true;
-    // SHOULDFIX-002: if anchor already has a caption and caller didn't
-    // force regen, propagate it verbatim — no AI call. Unifies what
-    // used to be an inline branch in batchCaptionImages.
-    const useExisting = !force && !!anchor.postCaption;
-    const withCaption = useExisting ? anchor : await generatePostContent(anchor);
-    if (!withCaption?.postCaption) return withCaption;
-    // V040-003: route the sibling fan-out through the shared verbatim
-    // propagator so the WARN-1 "don't overwrite a manually-edited
-    // sibling caption" guard lives in exactly one place.
-    propagateCaptionToGroup(rest, withCaption.postCaption, withCaption.postHashtags, {
-      skipExisting: !force,
-      excludeId: anchor.id,
-    });
-    return withCaption;
-  };
-
-  /**
-   * V040-003: verbatim caption propagation across a carousel group.
-   * Single helper for every "set this caption on every image in the
-   * group" action — captioning-view and post-ready-view textarea
-   * onChange (where the user just typed something), plus
-   * fanCaptionToGroup's sibling fan-out after AI generation.
-   *
-   * - `skipExisting`: when true, leaves images that already carry a
-   *   `postCaption` untouched. Matches fanCaptionToGroup's WARN-1
-   *   guard. Live-typing call sites pass false (or omit) so every
-   *   image stays in sync with the editor.
-   * - `excludeId`: when set, skips the image with that id entirely.
-   *   fanCaptionToGroup uses it to avoid re-patching the anchor
-   *   (which `generatePostContent` already wrote).
-   * - `hashtags === undefined` leaves each image's hashtags intact —
-   *   the textarea callers don't touch hashtags.
-   */
-  const propagateCaptionToGroup = (
-    group: GeneratedImage[],
-    caption: string,
-    hashtags: string[] | undefined,
-    opts: { skipExisting?: boolean; excludeId?: string } = {},
-  ) => {
-    const { skipExisting = false, excludeId } = opts;
-    for (const ci of group) {
-      if (excludeId && ci.id === excludeId) continue;
-      if (skipExisting && ci.postCaption) continue;
-      const patch: Partial<GeneratedImage> = { postCaption: caption };
-      if (hashtags !== undefined) patch.postHashtags = hashtags;
-      patchImage(ci, patch);
-    }
-  };
-
-  /** Remove one hashtag by index and persist. */
-  const removeHashtag = (img: GeneratedImage, index: number) => {
-    const next = (img.postHashtags || []).filter((_, i) => i !== index);
-    patchImage(img, { postHashtags: next });
-  };
-
-  // ── M3.1b: identity-stable props for the memoized PostReadyCard ────
-  // The single-image Post Ready call site used to pass 13 fresh inline
-  // lambdas per card per render, defeating any memo. One stable bag
-  // (handlers take the image / id as their first argument — the card
-  // threads it back at call time) + a memoized scheduledPosts list.
-  const allScheduledPosts = useMemo(
-    () => settings.scheduledPosts ?? [],
-    [settings.scheduledPosts],
-  );
-
-  const postReadyHandlers = useStableCallbacks({
-    onPreviewClick: (img: GeneratedImage) => setSelectedImage(img),
-    onCaptionChange: (img: GeneratedImage, next: string) =>
-      patchImage(img, { postCaption: next }),
-    onRemoveHashtag: (img: GeneratedImage, i: number) => removeHashtag(img, i),
-    onTogglePlatform: (imgId: string, p: PostPlatform) => togglePlatformFor(imgId, p),
-    onPostNow: (img: GeneratedImage, platforms: PostPlatform[]) =>
-      postImageNow(img, platforms),
-    onSchedule: (img: GeneratedImage, platforms: PostPlatform[], date: string, time: string) =>
-      scheduleImage(img, platforms, date, time),
-    onCopy: (img: GeneratedImage) =>
-      copyWithFeedback(formatPost(img), `all-${img.id}`),
-    onRegen: async (img: GeneratedImage) => {
-      setPreparingPostId(img.id);
-      try {
-        await generatePostContent(img);
-      } finally {
-        setPreparingPostId(null);
-      }
-    },
-    onUnready: (img: GeneratedImage) => patchImage(img, { isPostReady: false }),
-    onCancelSchedule: (img: GeneratedImage) => unschedulePost(img),
-    onReapplyWatermark: (img: GeneratedImage) => handleReapplyWatermark(img),
-    // Functional updater (the old inline lambda read the closure
-    // snapshot of postReadySelected — equivalent here, but the
-    // functional form is also safe under rapid toggles).
-    onGroupingToggle: (imgId: string, checked: boolean) => {
-      setPostReadySelected((prev) => {
-        const next = new Set(prev);
-        if (checked) next.add(imgId);
-        else next.delete(imgId);
-        return next;
-      });
-    },
-  });
-
-  /**
-   * Generate captions for every visible uncaptioned image.
-   *
-   * PROP-019/OPT-004: runs up to CONCURRENCY entries in parallel via a
-   * worker pool. Cap matches PROP-017's pipeline captioning pool and
-   * respects pi.dev rate limits.
-   *
-   * Carousel-aware: when the captioning view is grouped, each carousel
-   * counts as ONE caption job — caption the anchor once, fan the result
-   * out to every image in the group. Mirrors the per-card Generate button.
-   */
-  const batchCaptionImages = async (candidates: GeneratedImage[]) => {
-    type Entry =
-      | { kind: 'single'; img: GeneratedImage }
-      | { kind: 'carousel'; anchor: GeneratedImage; rest: GeneratedImage[] };
-
-    const entries: Entry[] = [];
-    if (captioningGrouped) {
-      for (const v of computeCarouselView(candidates)) {
-        if (v.kind === 'carousel') {
-          if (v.images.every((i) => i.postCaption)) continue;
-          const [anchor, ...rest] = v.images;
-          // SHOULDFIX-002: fanCaptionToGroup internally decides whether
-          // to call AI (anchor has no caption) or propagate the
-          // anchor's existing caption (no AI cost). Both branches live
-          // in the helper now — no inline divergence.
-          entries.push({ kind: 'carousel', anchor, rest });
-        } else if (!v.img.postCaption) {
-          entries.push({ kind: 'single', img: v.img });
-        }
-      }
-    } else {
-      for (const img of candidates) {
-        if (!img.postCaption) entries.push({ kind: 'single', img });
-      }
-    }
-
-    if (entries.length === 0) return;
-    const total = entries.length;
-    setBatchCaptioning(true);
-    setBatchProgress({ done: 0, total });
-    try {
-      const CONCURRENCY = 3;
-      let cursor = 0;
-      let done = 0;
-      const runWorker = async () => {
-        while (true) {
-          const i = cursor++;
-          if (i >= total) return;
-          const entry = entries[i];
-          const anchor = entry.kind === 'single' ? entry.img : entry.anchor;
-          setPreparingPostId(anchor.id);
-          try {
-            if (entry.kind === 'carousel') {
-              await fanCaptionToGroup(anchor, entry.rest);
-            } else {
-              await generatePostContent(anchor);
-            }
-          } catch {
-            // individual batch failure — continue to next entry
-          }
-          done++;
-          setBatchProgress({ done, total });
-        }
-      };
-      const workerCount = Math.min(CONCURRENCY, total);
-      await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
-    } finally {
-      setPreparingPostId(null);
-      setBatchCaptioning(false);
-      // Leave the final progress on screen briefly so the user sees "N/N".
-      setTimeout(() => setBatchProgress(null), 2000);
-    }
-  };
+  // scheduleCarousel / postCarouselNow / copyWithFeedback / formatPost /
+  // patchImage / handleReapplyWatermark / fanCaptionToGroup /
+  // propagateCaptionToGroup / removeHashtag / allScheduledPosts /
+  // postReadyHandlers / batchCaptionImages all moved to
+  // useMainContentScheduling (M3.3-P4 Batch 1).
 
   // Pi.dev runtime status, polled when the Settings panel is open.
   const [piStatus, setPiStatus] = useState<PiStatus | null>(null);
@@ -1659,282 +930,7 @@ export function MainContent() {
     perModelOverrides,
   ]);
 
-  // BUG-CRIT-011: live ref so the auto-poster can re-check status
-  // immediately before each fetch. The outer effect's snapshot is taken
-  // when the tick fires; if the user rejects a post mid-loop the
-  // snapshot still says 'scheduled' and the post would publish anyway.
-  // Reading scheduledPostsRef.current at fetch time closes that race.
-  const scheduledPostsRef = useRef(settings.scheduledPosts);
-  useEffect(() => {
-    scheduledPostsRef.current = settings.scheduledPosts;
-  }, [settings.scheduledPosts]);
-
-  // Auto-posting effect
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      if (!settings.scheduledPosts || settings.scheduledPosts.length === 0) return;
-
-      const now = new Date();
-      // Snapshot the list of posts we'll consider for THIS tick. We only
-      // compute statuses against this snapshot, but persist via a
-      // functional updater that merges patches by id — so any new posts
-      // the user (or the pipeline) added during the async loop are
-      // preserved instead of being clobbered.
-      const snapshot = [...settings.scheduledPosts];
-
-      // Shared credentials payload — same shape as postCarouselNow /
-      // postImageNow so the /api/social/post route doesn't care whether
-      // the publish was triggered manually or by the worker.
-      const credentials = {
-        instagram: settings.apiKeys.instagram,
-        twitter: settings.apiKeys.twitter,
-        pinterest: settings.apiKeys.pinterest,
-        discord: { webhookUrl: settings.apiKeys.discordWebhook },
-      };
-
-      // Posts handled as part of a carousel group — we skip these when
-      // we encounter their siblings later in the loop so each group is
-      // published exactly once.
-      const processedIds = new Set<string>();
-      // id → next status. Applied via functional updater at the end so
-      // we never overwrite the latest scheduledPosts list.
-      const statusPatches = new Map<string, ScheduledPost['status']>();
-
-      for (const post of snapshot) {
-        if (processedIds.has(post.id)) continue;
-        if (post.status !== 'scheduled') continue;
-        // AUTOPOST-INVALID-DATE-FIX: see lib/autopost-due.ts. The previous
-        // inline `if (now < postDate) continue;` let malformed date/time
-        // fields fall through (Invalid Date comparisons are false) so
-        // single-image posts with corrupted scheduling fields fired
-        // unconditionally on the first auto-poster tick.
-        const due = postDueState(post, now);
-        if (due === 'invalid') {
-          console.error('[auto-poster] skipping post with invalid date/time', {
-            postId: post.id,
-            date: post.date,
-            time: post.time,
-            status: post.status,
-          });
-          continue;
-        }
-        if (due === 'future') continue;
-
-        // ── Carousel branch ────────────────────────────────────────
-        if (post.carouselGroupId) {
-          const groupPosts = snapshot.filter(
-            (p) => p.carouselGroupId === post.carouselGroupId && p.status === 'scheduled'
-          );
-
-          // They share a date/time by construction, but double-check
-          // in case the user edited one of them.
-          const allDue = groupPosts.every((p) => postDueState(p, now) === 'due');
-          if (!allDue) {
-            groupPosts.forEach((gp) => processedIds.add(gp.id));
-            continue;
-          }
-
-          const groupImages = groupPosts
-            .map((gp) => savedImages.find((img) => img.id === gp.imageId))
-            .filter((x): x is GeneratedImage => !!x);
-
-          if (groupImages.length === 0) {
-            groupPosts.forEach((gp) => {
-              statusPatches.set(gp.id, 'failed');
-              processedIds.add(gp.id);
-            });
-            continue;
-          }
-
-          // BUG-CRIT-011: re-check live status of every group member
-          // right before the fetch. If the user rejected any sibling
-          // between snapshot and now, abort the whole carousel publish.
-          const liveScheduledPosts = scheduledPostsRef.current;
-          const groupStillPostable = groupPosts.every((gp) =>
-            isStillScheduled(gp.id, liveScheduledPosts),
-          );
-          if (!groupStillPostable) {
-            groupPosts.forEach((gp) => processedIds.add(gp.id));
-            continue;
-          }
-
-          try {
-            // POST-413-FIX phase 3 (2026-05-21): see manual-carousel
-            // counterpart above. Same uguu hoist so the autopost path
-            // doesn't trip Vercel's 4.5MB body limit for high-res carousels.
-            const rawSources = groupImages
-              .map((i) => i.url || (i.base64 ? `data:image/jpeg;base64,${i.base64}` : ''))
-              .filter(Boolean);
-            // Fix 5 (mmx brief): old content sometimes lands here with
-            // every Leonardo URL expired AND no base64 fallback. Bail
-            // early with an actionable error instead of letting the
-            // server try to fetch dead URLs.
-            if (rawSources.length === 0) {
-              throw new Error(
-                'No usable image source — every carousel member is missing both url and base64 (Leonardo URL likely expired)'
-              );
-            }
-            const mediaUrls = await ensureHostedUrls(rawSources);
-            // V1.7.0-PRE-PROD-FIX: defensive filter. Even if `post.platforms`
-            // still references a now-disabled platform (e.g. user
-            // toggled Pinterest off in PipelineTab but the dialog
-            // chose "only new posts" so old posts kept the platform),
-            // the auto-poster never sends to it. The intersection of
-            // (post.platforms) and (settings.pipelinePlatforms) is the
-            // ground truth at the actual post site.
-            const livePlatforms = (post.platforms || []).filter((pl) =>
-              (settings.pipelinePlatforms || []).includes(pl),
-            );
-            if (livePlatforms.length === 0) {
-              // No live platforms left — skip silently. The
-              // findPostingBlock guard already refuses posts with no
-              // viable platforms, but this is a defense-in-depth
-              // check in case the guard runs before the platform
-              // setting hydrates.
-              processedIds.add(post.id);
-              continue;
-            }
-            const res = await fetch('/api/social/post', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                caption: post.caption,
-                platforms: livePlatforms,
-                mediaUrls,
-                credentials,
-              }),
-            });
-            let data: { error?: string };
-            try { data = await res.json() as { error?: string }; }
-            catch { throw new Error(`Server error (HTTP ${res.status})`); }
-            if (!res.ok) throw new Error(data.error || 'Failed to post carousel');
-
-            groupPosts.forEach((gp) => {
-              statusPatches.set(gp.id, 'posted');
-              processedIds.add(gp.id);
-            });
-          } catch (e: unknown) {
-            const reason = e instanceof Error ? e.message : String(e);
-            // Fix 5: surface the failure reason on every member's chip
-            // and log structured context so old-content failures are
-            // diagnosable instead of mysteriously red.
-            console.error('[auto-poster] carousel publish failed', {
-              postId: post.id,
-              carouselGroupId: post.carouselGroupId,
-              date: post.date,
-              time: post.time,
-              platforms: post.platforms,
-              memberCount: groupPosts.length,
-              reason,
-            });
-            const groupKey = `carousel-${post.carouselGroupId ?? post.id}`;
-            setPostStatus((prev) => ({ ...prev, [groupKey]: `Error: ${reason}` }));
-            groupPosts.forEach((gp) => {
-              statusPatches.set(gp.id, 'failed');
-              processedIds.add(gp.id);
-              setPostStatus((prev) => ({ ...prev, [gp.imageId]: `Error: ${reason}` }));
-            });
-            showToast(`Scheduled carousel post failed: ${reason}`, 'error');
-          }
-          continue;
-        }
-
-        // ── Single-image branch (existing behaviour) ─────────────
-        const image = savedImages.find((img) => img.id === post.imageId);
-        if (!image) {
-          // Fix 5: explain the missing-image case so users understand
-          // why an old post failed (image was pruned from gallery).
-          const reason = `Source image ${post.imageId} no longer exists in gallery`;
-          console.error('[auto-poster] image missing', { postId: post.id, imageId: post.imageId });
-          setPostStatus((prev) => ({ ...prev, [post.imageId]: `Error: ${reason}` }));
-          statusPatches.set(post.id, 'failed');
-          continue;
-        }
-
-        // BUG-CRIT-011: re-check live status right before the fetch.
-        // If the user rejected this post between snapshot and now,
-        // skip without marking failed — the rejection is a normal
-        // outcome, not a posting error.
-        if (!isStillScheduled(post.id, scheduledPostsRef.current)) {
-          continue;
-        }
-
-        try {
-          // Fix 5 (mmx brief): old content fails when both image.url is
-          // a stale Leonardo signed URL AND no base64 fallback survives.
-          // Pre-flight the missing-source case so the failure reason is
-          // user-actionable instead of a generic "Failed to post".
-          if (!image.url && !image.base64) {
-            throw new Error(
-              'No usable image source — both url and base64 are missing (Leonardo URL likely expired and image was never re-hosted)'
-            );
-          }
-          if (!post.platforms || post.platforms.length === 0) {
-            throw new Error('No platforms selected on the scheduled post');
-          }
-          // V1.7.0-PRE-PROD-FIX: defensive filter for the manual-single
-          // (non-carousel) auto-poster. Same contract as the carousel
-          // path above. Even if `post.platforms` still references a
-          // now-disabled platform, only the intersection with
-          // `settings.pipelinePlatforms` is sent.
-          const livePlatformsManual = (post.platforms || []).filter((pl) =>
-            (settings.pipelinePlatforms || []).includes(pl),
-          );
-          if (livePlatformsManual.length === 0) {
-            processedIds.add(post.id);
-            continue;
-          }
-          // POST-413-FIX phase 3 (2026-05-21): see manual-single
-          // counterpart above. ensureHostedUrl uploads data: URLs to uguu
-          // and passes https URLs through unchanged.
-          const source = image.url || (image.base64 ? `data:image/jpeg;base64,${image.base64}` : '');
-          const hostedUrl = await ensureHostedUrl(source);
-          const res = await fetch('/api/social/post', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              caption: post.caption,
-              platforms: livePlatformsManual,
-              mediaUrl: hostedUrl,
-              credentials,
-            }),
-          });
-
-          let data: { error?: string };
-          try { data = await res.json() as { error?: string }; }
-          catch { throw new Error(`Server error (HTTP ${res.status})`); }
-          if (!res.ok) throw new Error(data.error || 'Failed to post');
-
-          statusPatches.set(post.id, 'posted');
-        } catch (e: unknown) {
-          const reason = e instanceof Error ? e.message : String(e);
-          console.error('[auto-poster] single publish failed', {
-            postId: post.id,
-            imageId: post.imageId,
-            date: post.date,
-            time: post.time,
-            platforms: post.platforms,
-            hasUrl: !!image.url,
-            hasBase64: !!image.base64,
-            reason,
-          });
-          setPostStatus((prev) => ({ ...prev, [post.imageId]: `Error: ${reason}` }));
-          statusPatches.set(post.id, 'failed');
-          showToast(`Scheduled post failed: ${reason}`, 'error');
-        }
-      }
-
-      if (statusPatches.size > 0) {
-        updateSettings((prev) => ({
-          scheduledPosts: (prev.scheduledPosts || []).map((p) =>
-            statusPatches.has(p.id) ? { ...p, status: statusPatches.get(p.id)! } : p
-          ),
-        }));
-      }
-    }, 60000); // Check every minute
-
-    return () => clearInterval(interval);
-  }, [settings.scheduledPosts, settings.apiKeys, savedImages, updateSettings]);
+  // Auto-poster (60s interval daemon) moved to useMainContentAutoPoster.
 
   const allTags = useMemo(
     () => Array.from(new Set(savedImages.flatMap(img => img.tags || []))).sort(),
@@ -2363,117 +1359,13 @@ export function MainContent() {
     }
   });
 
-  const handleBatchAnimate = async () => {
-    const imagesToAnimate = savedImages.filter(img => selectedForBatch.has(img.id) && (img.imageId || img.url) && !img.isVideo);
-    if (imagesToAnimate.length === 0) {
-      showToast('No valid images selected for animation.', 'error');
-      return;
-    }
-    setSelectedForBatch(new Set());
-    await Promise.allSettled(imagesToAnimate.map(img => handleAnimate(img, true)));
-  };
-
-
-  const handleBatchDelete = () => {
-    const ids = Array.from(selectedForBatch);
-    if (ids.length === 0) return;
-    for (const id of ids) deleteImage(id, true);
-    setSelectedForBatch(new Set());
-    showToast(`Deleted ${ids.length} image${ids.length === 1 ? '' : 's'}.`, 'success');
-  };
-
-  const handleBatchCaption = () => {
-    if (selectedForBatch.size === 0) return;
-    setView('captioning');
-  };
-
-  const handleBatchPostReady = async () => {
-    const targets = savedImages.filter(img => selectedForBatch.has(img.id));
-    if (targets.length === 0) return;
-    await Promise.allSettled(
-      targets.map(img => saveImage({ ...img, isPostReady: true })),
-    );
-    setSelectedForBatch(new Set());
-    setView('post-ready');
-  };
-
-  const handleSelectAllGallery = () => {
-    setSelectedForBatch(new Set(displayedImages.map(img => img.id)));
-  };
-
-  const handleClearGallerySelection = () => {
-    setSelectedForBatch(new Set());
-  };
-
-  const handleBatchAddToCollection = (collectionId: string) => {
-    const ids = Array.from(selectedForBatch);
-    if (ids.length === 0) return;
-    for (const id of ids) addImageToCollection(id, collectionId);
-    setSelectedForBatch(new Set());
-    const collection = collections.find(c => c.id === collectionId);
-    showToast(
-      `${ids.length} image${ids.length === 1 ? '' : 's'} added to ${collection?.name ?? 'collection'}.`,
-      'success',
-    );
-  };
-
-  const handleSelectApproved = () => {
-    setSelectedForBatch(new Set(displayedImages.filter(img => img.approved).map(img => img.id)));
-  };
-
-  const handleSelectInCollection = () => {
-    if (selectedCollectionId === 'all') return;
-    setSelectedForBatch(
-      new Set(displayedImages.filter(img => img.collectionId === selectedCollectionId).map(img => img.id)),
-    );
-  };
-
-  const handleInvertSelection = () => {
-    setSelectedForBatch(
-      prev => new Set(displayedImages.filter(img => !prev.has(img.id)).map(img => img.id)),
-    );
-  };
-
-  // V082-COLLECTION-FEATURES: open the collection modal in "batch" mode.
-  // The existing onCreate wiring already forwards selectedForBatch ids
-  // and pi.dev auto-naming, but it stopped short of assigning images.
-  // See the CollectionModal block below for the assign step added in
-  // the same commit.
-  const handleBatchCreateCollection = () => {
-    if (selectedForBatch.size === 0) return;
-    setShowCollectionModal(true);
-  };
-
-  // V082-COLLECTION-FEATURES: scan saved images, bucket them by tag, and
-  // for each bucket ≥ 3 images create a collection and assign every
-  // matching image to it. Uses window.confirm for scope — a bespoke
-  // preview modal would be nicer but pushes this past the designer
-  // autonomy budget. Existing collection membership is respected:
-  // images already in a collection are skipped.
-  const handleAutoOrganizeByTag = async () => {
-    if (savedImages.length === 0) return;
-    const proposals = proposeTagGroups(savedImages, 3);
-    if (proposals.length === 0) {
-      window.alert('No tag groups found. Tag at least 3 images with the same tag first.');
-      return;
-    }
-    const preview = proposals
-      .slice(0, 8)
-      .map((g) => `  • ${g.displayName} (${g.imageIds.length})`)
-      .join('\n');
-    const more = proposals.length > 8 ? `\n  … +${proposals.length - 8} more` : '';
-    const ok = window.confirm(
-      `Auto-organize will create ${proposals.length} collection${proposals.length === 1 ? '' : 's'}:\n\n${preview}${more}\n\nContinue?`,
-    );
-    if (!ok) return;
-    for (const group of proposals) {
-      const collection = await createCollection(group.displayName, undefined, undefined, undefined);
-      for (const imageId of group.imageIds) {
-        const img = savedImages.find((i) => i.id === imageId);
-        if (img && !img.collectionId) addImageToCollection(imageId, collection.id);
-      }
-    }
-  };
+  // Batch handlers (handleBatchAnimate, handleBatchDelete, handleBatchCaption,
+  // handleBatchPostReady, handleSelectAllGallery, handleClearGallerySelection,
+  // handleBatchAddToCollection, handleSelectApproved, handleSelectInCollection,
+  // handleInvertSelection, handleBatchCreateCollection, handleAutoOrganizeByTag)
+  // moved to useMainContentBatchOps. The destructure alias at the top of
+  // this function re-exposes them as local names so the GalleryFilterBar
+  // JSX compiles without renames.
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden relative">
@@ -2624,16 +1516,16 @@ export function MainContent() {
                   onBulkTag={() => setShowBulkTagModal(true)}
                   onBatchPostReady={handleBatchPostReady}
                   onBatchCaption={handleBatchCaption}
-                  onBatchAnimate={handleBatchAnimate}
-                  onBatchDelete={handleBatchDelete}
-                  onBatchCreateCollection={handleBatchCreateCollection}
-                  onBatchAddToCollection={handleBatchAddToCollection}
-                  onAutoOrganizeByTag={handleAutoOrganizeByTag}
-                  onSelectAll={handleSelectAllGallery}
+                  onBatchAnimate={handleBatchAnimateBound}
+                  onBatchDelete={handleBatchDeleteBound}
+                  onBatchCreateCollection={handleBatchCreateCollectionBound}
+                  onBatchAddToCollection={handleBatchAddToCollectionBound}
+                  onAutoOrganizeByTag={handleAutoOrganizeByTagBound}
+                  onSelectAll={handleSelectAllGalleryBound}
                   onClearSelection={handleClearGallerySelection}
-                  onSelectApproved={handleSelectApproved}
-                  onSelectInCollection={handleSelectInCollection}
-                  onInvertSelection={handleInvertSelection}
+                  onSelectApproved={handleSelectApprovedBound}
+                  onSelectInCollection={handleSelectInCollectionBound}
+                  onInvertSelection={handleInvertSelectionBound}
                 />
               )}
 
@@ -3008,459 +1900,22 @@ export function MainContent() {
                 </div>
               )}
 
-              {view === 'captioning' && (() => {
-                // Source of truth: savedImages (persisted). Captioning is a
-                // curated workflow — ephemeral gallery images shouldn't
-                // pollute this tab. Images promoted to Post Ready are
-                // excluded so the two tabs form a clean pipeline.
-                const all = savedImages.filter((i) => !i.isPostReady && i.approved);
-                const captioned = all.filter((i) => !!i.postCaption);
-                const uncaptioned = all.filter((i) => !i.postCaption);
-                const visible =
-                  captioningFilter === 'captioned'
-                    ? captioned
-                    : captioningFilter === 'uncaptioned'
-                      ? uncaptioned
-                      : all;
-
-                return (
-                  <div className="space-y-6">
-                    {/* Header */}
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="icon-box-blue">
-                          <Edit3 className="w-5 h-5 text-[#00e6ff]" />
-                        </div>
-                        <div>
-                        <h2 className="type-title">Captioning Studio</h2>
-                        <p className="text-xs text-zinc-500 mt-1">
-                          {captioned.length} / {all.length} captioned
-                          {batchProgress && (
-                            <span className="ml-3 text-[#00e6ff]">
-                              Batch: {batchProgress.done}/{batchProgress.total}
-                            </span>
-                          )}
-                        </p>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        {/* Filter tabs */}
-                        <div className="flex bg-zinc-900 border border-zinc-800/60 rounded-full p-0.5">
-                          {(['all', 'captioned', 'uncaptioned'] as const).map((f) => (
-                            <button
-                              key={f}
-                              onClick={() => setCaptioningFilter(f)}
-                              className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
-                                captioningFilter === f
-                                  ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30'
-                                  : 'text-zinc-500 hover:text-zinc-300'
-                              }`}
-                            >
-                              {f === 'all' ? 'All' : f === 'captioned' ? 'Captioned' : 'Uncaptioned'}
-                            </button>
-                          ))}
-                        </div>
-
-                        {/* Group Similar toggle */}
-                        <button
-                          onClick={() => {
-                            setCaptioningGrouped(!captioningGrouped);
-                            // Leaving grouped mode clears any stale selection.
-                            if (captioningGrouped) setCaptioningSelected(new Set());
-                          }}
-                          className={`px-3 py-1.5 text-xs font-medium rounded-full transition-colors flex items-center gap-1.5 border ${
-                            captioningGrouped
-                              ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/30'
-                              : 'bg-zinc-900 text-zinc-400 border-zinc-700 hover:border-zinc-500'
-                          }`}
-                        >
-                          <LayoutGrid className="w-3.5 h-3.5" />
-                          {captioningGrouped ? 'Grouped' : 'Group Similar'}
-                        </button>
-
-                        {/* Create Carousel — always visible in grouped mode.
-                            Opens the multi-source picker so the user can
-                            pick any combination of images. */}
-                        {captioningGrouped && (
-                          <button
-                            onClick={() => openCarouselPicker(null)}
-                            className="btn-blue-sm rounded-full"
-                          >
-                            <LayoutGrid className="w-3.5 h-3.5" />
-                            Create Carousel
-                          </button>
-                        )}
-
-                        {/* Manual "Group Selected" — only when grouping toggle is off
-                            and the user has picked 2+ images with checkboxes. */}
-                        {!captioningGrouped && captioningSelected.size >= 2 && (
-                          <button
-                            onClick={() => {
-                              const ids = Array.from(captioningSelected);
-                              persistCarouselGroup(`manual-${ids[0]}`, ids);
-                              setCaptioningSelected(new Set());
-                              setCaptioningGrouped(true);
-                            }}
-                            className="btn-blue-sm rounded-full"
-                          >
-                            <LayoutGrid className="w-3.5 h-3.5" />
-                            Group Selected ({captioningSelected.size})
-                          </button>
-                        )}
-
-                        <button
-                          onClick={() => batchCaptionImages(visible)}
-                          disabled={batchCaptioning || uncaptioned.length === 0}
-                          className="btn-blue-sm rounded-full"
-                        >
-                          {batchCaptioning ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Wand2 className="w-3.5 h-3.5" />
-                          )}
-                          Batch Caption
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Empty state */}
-                    {all.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-16 space-y-3 text-center">
-                        <ImageIcon className="w-10 h-10 text-zinc-700" />
-                        <p className="text-sm text-zinc-500">
-                          No saved images yet. Save images from the gallery to start captioning.
-                        </p>
-                        <button
-                          onClick={() => setView('gallery')}
-                          className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl text-sm"
-                        >
-                          Go to Gallery
-                        </button>
-                      </div>
-                    ) : visible.length === 0 ? (
-                      <div className="py-12 text-center text-sm text-zinc-500">
-                        No {captioningFilter} images in this view.
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                        {(captioningGrouped ? computeCarouselView(visible) : visible.map((img) => ({ kind: 'single' as const, img }))).map((entry) => {
-                          // ── Carousel card (captioning) ────────────────
-                          if (entry.kind === 'carousel') {
-                            const anchor = entry.images[0];
-                            const isWorking = preparingPostId === anchor.id;
-                            const isExplicit = !!entry.group;
-                            return (
-                              <div
-                                key={`c-${entry.id}`}
-                                className="card overflow-hidden flex flex-col"
-                              >
-                                {/* Image strip */}
-                                <div className="relative bg-zinc-950 overflow-x-auto">
-                                  <div className="flex gap-1 p-2" style={{ minHeight: 140 }}>
-                                    {entry.images.map((ci) => (
-                                      <div key={ci.id} className="relative shrink-0 group/ci">
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                        <img
-                                          src={ci.url}
-                                          alt={ci.prompt}
-                                          loading="lazy"
-                                          onClick={() => setSelectedImage(ci)}
-                                          className="h-32 w-32 object-cover rounded-xl cursor-zoom-in"
-                                        />
-                                        {isExplicit && (
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              removeFromCarousel(entry.id, ci.id);
-                                            }}
-                                            className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-600/90 hover:bg-red-500 text-white flex items-center justify-center opacity-0 group-hover/ci:opacity-100 transition-opacity"
-                                            title="Remove from carousel"
-                                          >
-                                            <X className="w-3 h-3" />
-                                          </button>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <span className="absolute top-3 left-3 inline-flex items-center gap-1 px-2 py-0.5 bg-[#00e6ff]/15 border border-[#00e6ff]/30 text-[10px] font-medium text-[#00e6ff] rounded-full">
-                                    <LayoutGrid className="w-3 h-3" /> Carousel · {entry.images.length} images
-                                  </span>
-                                  {isExplicit && (
-                                    <button
-                                      onClick={() => openCarouselPicker(entry.id)}
-                                      className="absolute top-3 right-3 px-2 py-0.5 text-[10px] font-medium bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-full flex items-center gap-1 transition-colors"
-                                      title="Add more images to this carousel"
-                                    >
-                                      <Plus className="w-3 h-3" /> Add
-                                    </button>
-                                  )}
-                                  {isWorking && (
-                                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center gap-2 text-xs text-white">
-                                      <Loader2 className="w-4 h-4 animate-spin" /> Generating caption…
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Shared caption body */}
-                                <div className="flex-1 p-4 space-y-3">
-                                  <p className="text-[11px] text-zinc-500 line-clamp-2" title={anchor.prompt}>
-                                    {anchor.prompt}
-                                  </p>
-                                  <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                                      Shared caption
-                                    </label>
-                                    <AutoTextarea
-                                      value={anchor.postCaption || ''}
-                                      onChange={(e) => {
-                                        // Fan edits to every image so Post Now
-                                        // and per-card Copy pick up the same text.
-                                        propagateCaptionToGroup(entry.images, e.target.value, undefined);
-                                      }}
-                                      placeholder="No caption yet…"
-                                      minRows={2}
-                                      className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:border-[#c5a062]/50 focus:outline-none transition-colors"
-                                    />
-                                  </div>
-                                  {(anchor.postHashtags || []).length > 0 && (
-                                    <div className="flex flex-wrap gap-1">
-                                      {(anchor.postHashtags ?? []).map((tag, i) => (
-                                        <span
-                                          key={`${tag}-${i}`}
-                                          className="px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded-full text-[10px] text-zinc-300"
-                                        >
-                                          {tag}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Footer actions */}
-                                <div className="border-t border-[#c5a062]/15 p-3 flex items-center gap-2">
-                                  <button
-                                    disabled={isWorking || batchCaptioning}
-                                    onClick={async () => {
-                                      // Generate ONE caption using the anchor's
-                                      // prompt, then fan it out. Explicit
-                                      // user click → force overwrite siblings.
-                                      setPreparingPostId(anchor.id);
-                                      try {
-                                        await fanCaptionToGroup(anchor, entry.images, { force: true });
-                                      } finally {
-                                        setPreparingPostId(null);
-                                      }
-                                    }}
-                                    className="btn-blue-sm flex-1 justify-center"
-                                  >
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                    {anchor.postCaption ? 'Regenerate' : 'Generate'}
-                                  </button>
-                                  <button
-                                    disabled={!anchor.postCaption}
-                                    onClick={() => {
-                                      // Mark every image in the group as ready.
-                                      for (const ci of entry.images) {
-                                        patchImage(ci, { isPostReady: true });
-                                      }
-                                    }}
-                                    className="btn-blue-sm justify-center"
-                                    title="Mark all as ready to post"
-                                  >
-                                    <Check className="w-3.5 h-3.5" />
-                                  </button>
-                                  {isExplicit ? (
-                                    <button
-                                      onClick={() => separateCarousel(entry.id)}
-                                      className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl flex items-center justify-center gap-1.5 transition-colors"
-                                      title="Ungroup"
-                                    >
-                                      <Columns className="w-3.5 h-3.5" />
-                                    </button>
-                                  ) : (
-                                    <button
-                                      onClick={() => persistCarouselGroup(`manual-${anchor.id}`, entry.images.map((i) => i.id))}
-                                      className="btn-blue-sm justify-center"
-                                      title="Lock this auto-detected grouping"
-                                    >
-                                      <LayoutGrid className="w-3.5 h-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          }
-
-                          // ── Single-image card (original) ─────────────
-                          const img = entry.img;
-                          const isWorking = preparingPostId === img.id;
-                          const isSelected = captioningSelected.has(img.id);
-                          return (
-                            <div
-                              key={img.id}
-                              className={`bg-zinc-900/80 backdrop-blur-sm border rounded-2xl overflow-hidden flex flex-col transition-all duration-200 ${
-                                isSelected ? 'border-[#00e6ff]/50 shadow-[0_0_16px_rgba(0,230,255,0.08)]' : 'border-[#c5a062]/20 hover:border-[#c5a062]/40'
-                              }`}
-                            >
-                              {/* Thumbnail */}
-                              <div className="relative aspect-square bg-zinc-950">
-                                {img.url ? (
-                                  <LazyImg
-                                    src={img.url}
-                                    alt={img.prompt}
-                                    className="w-full h-full object-cover"
-                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center">
-                                    <ImageOff className="w-8 h-8 text-zinc-700" />
-                                  </div>
-                                )}
-                                {isWorking && (
-                                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center gap-2 text-xs text-white">
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                    Generating caption…
-                                  </div>
-                                )}
-                                {/* Selection checkbox (manual grouping) —
-                                    only shown when grouping toggle is OFF. */}
-                                {!captioningGrouped && (
-                                  <div className="absolute top-3 left-3 z-20">
-                                    <input
-                                      type="checkbox"
-                                      checked={isSelected}
-                                      onChange={(e) => {
-                                        const next = new Set(captioningSelected);
-                                        if (e.target.checked) next.add(img.id);
-                                        else next.delete(img.id);
-                                        setCaptioningSelected(next);
-                                      }}
-                                      className="w-5 h-5 rounded border-zinc-600 bg-zinc-900/80 backdrop-blur-sm text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-[#c5a062]"
-                                    />
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Body */}
-                              <div className="flex-1 p-4 space-y-3">
-                                <p className="text-[11px] text-zinc-500 line-clamp-2" title={img.prompt}>
-                                  {img.prompt}
-                                </p>
-
-                                <div className="space-y-1">
-                                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                                    Caption
-                                  </label>
-                                  <AutoTextarea
-                                    value={img.postCaption || ''}
-                                    onChange={(e) => patchImage(img, { postCaption: e.target.value })}
-                                    placeholder="No caption yet…"
-                                    minRows={2}
-                                    className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:border-[#c5a062]/50 focus:outline-none transition-colors"
-                                  />
-                                </div>
-
-                                <div className="space-y-1">
-                                  <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                                    Hashtags
-                                  </label>
-                                  {(img.postHashtags || []).length > 0 ? (
-                                    <div className="flex flex-wrap gap-1">
-                                      {(img.postHashtags ?? []).map((tag, i) => (
-                                        <span
-                                          key={`${tag}-${i}`}
-                                          className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-800 border border-zinc-700 rounded-full text-[10px] text-zinc-300"
-                                        >
-                                          {tag}
-                                          <button
-                                            onClick={() => removeHashtag(img, i)}
-                                            className="text-zinc-500 hover:text-red-400"
-                                          >
-                                            <X className="w-2.5 h-2.5" />
-                                          </button>
-                                        </span>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <p className="text-[11px] text-zinc-600 italic">No hashtags.</p>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Footer actions */}
-                              <div className="border-t border-zinc-800 p-3 flex items-center gap-2">
-                                <button
-                                  disabled={isWorking || batchCaptioning}
-                                  onClick={async () => {
-                                    setPreparingPostId(img.id);
-                                    try {
-                                      await generatePostContent(img);
-                                    } finally {
-                                      setPreparingPostId(null);
-                                    }
-                                  }}
-                                  className="btn-blue-sm flex-1 justify-center"
-                                >
-                                  <Sparkles className="w-3.5 h-3.5" />
-                                  {img.postCaption ? 'Regenerate' : 'Generate'}
-                                </button>
-                                {!img.isVideo && (
-                                  <button
-                                    onClick={() => handleReapplyWatermark(img)}
-                                    className="btn-blue-sm justify-center"
-                                    title="Re-apply watermark with current settings"
-                                  >
-                                    <Stamp className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                                <button
-                                  disabled={!img.postCaption}
-                                  onClick={() => patchImage(img, { isPostReady: true })}
-                                  className="btn-blue-sm justify-center"
-                                  title="Mark as ready to post"
-                                >
-                                  <Check className="w-3.5 h-3.5" />
-                                </button>
-                                {pendingRemoveId === img.id ? (
-                                  <div className="flex gap-1" title="Remove from Captioning? Image stays in Gallery.">
-                                    <button
-                                      onClick={() => {
-                                        patchImage(img, { approved: false, postCaption: '', postHashtags: [], tags: [] });
-                                        setPendingRemoveId(null);
-                                      }}
-                                      className="px-2 py-1.5 text-xs bg-red-600/90 hover:bg-red-500 text-white rounded-lg flex items-center gap-1 transition-colors"
-                                      title="Confirm remove"
-                                    >
-                                      <Check className="w-3 h-3" /> Remove
-                                    </button>
-                                    <button
-                                      onClick={() => setPendingRemoveId(null)}
-                                      className="px-2 py-1.5 text-xs bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded-lg transition-colors"
-                                      title="Cancel"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <button
-                                    onClick={() => setPendingRemoveId(img.id)}
-                                    className="px-3 py-1.5 text-xs bg-red-600/20 hover:bg-red-600/80 text-red-400 hover:text-white rounded-xl flex items-center justify-center gap-1.5 transition-colors"
-                                    title="Remove from Captioning (image stays in Gallery)"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                  </div>
-                );
-              })()}
+              <CaptioningView
+            savedImages={savedImages}
+            setView={setView}
+            setSelectedImage={setSelectedImage}
+            generatePostContent={generatePostContent}
+            patchImage={patchImage}
+            removeHashtag={removeHashtag}
+            handleReapplyWatermark={handleReapplyWatermark}
+            computeCarouselView={computeCarouselView}
+            propagateCaptionToGroup={propagateCaptionToGroup}
+            fanCaptionToGroup={fanCaptionToGroup}
+            persistCarouselGroup={persistCarouselGroup}
+            separateCarousel={separateCarousel}
+            openCarouselPicker={openCarouselPicker}
+            setPreparingPostId={setPreparingPostId}
+          />
               {view === 'post-ready' && (() => {
                 const ready = postReadyImages;
                 // Carousel-aware view used by Smart Schedule so grouped
@@ -3763,7 +2218,7 @@ export function MainContent() {
                             : new Map();
                         const heatmapTopRanks = new Map<string, 1 | 2 | 3>();
                         if (heatmapEnabled && heatmapEngagement) {
-                          const platforms = availablePlatforms();
+                          const platforms = scheduling.availablePlatforms();
                           const top = findBestSlots(
                             scheduled,
                             3,
@@ -4931,132 +3386,17 @@ export function MainContent() {
                   Captioning view so Post-Ready (and any other tab) can
                   trigger it. Source pool is every approved OR post-ready
                   saved image so users can mix both stages into one carousel. */}
-              {showCarouselPicker && (() => {
-                const pickerSource = savedImages.filter((i) => i.approved || i.isPostReady);
-                return (
-                  <div
-                    className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4"
-                    onClick={() => setShowCarouselPicker(false)}
-                  >
-                    <div
-                      className="bg-zinc-900/95 backdrop-blur-xl border-0 sm:border border-[#c5a062]/25 rounded-none sm:rounded-2xl w-full sm:max-w-4xl h-full sm:h-auto max-h-[100dvh] sm:max-h-[85vh] flex flex-col"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="flex items-center justify-between p-5 border-b border-zinc-800/60">
-                        <div className="flex items-center gap-3">
-                          <div className="icon-box-blue">
-                            <LayoutGrid className="w-5 h-5 text-[#00e6ff]" />
-                          </div>
-                          <div>
-                            <h3 className="type-title">
-                              {pickerTargetGroupId ? 'Edit Carousel' : 'Create Carousel'}
-                            </h3>
-                            <p className="text-xs text-zinc-500">
-                              Pick 2 or more images to group them into a single multi-image post.
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => setShowCarouselPicker(false)}
-                          className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-full"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      <div className="flex-1 overflow-y-auto p-5">
-                        {pickerSource.length === 0 ? (
-                          <p className="text-sm text-zinc-500 text-center py-8">
-                            No approved saved images yet.
-                          </p>
-                        ) : (
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                            {pickerSource.map((img) => {
-                              const inAnotherGroup = (settings.carouselGroups || []).some(
-                                (g) => g.id !== pickerTargetGroupId && g.imageIds.includes(img.id)
-                              );
-                              const selected = pickerSelected.has(img.id);
-                              return (
-                                <motion.button
-                                  key={img.id}
-                                  whileHover={inAnotherGroup ? undefined : { scale: 1.03, transition: { type: "spring", stiffness: 300, damping: 25 } }}
-                                  whileTap={inAnotherGroup ? undefined : { scale: 0.9 }}
-                                  onClick={() => {
-                                    if (inAnotherGroup) return;
-                                    const next = new Set(pickerSelected);
-                                    if (next.has(img.id)) next.delete(img.id);
-                                    else next.add(img.id);
-                                    setPickerSelected(next);
-                                  }}
-                                  disabled={inAnotherGroup}
-                                  className={`relative aspect-square rounded-xl overflow-hidden border-2 transition-all ${
-                                    inAnotherGroup
-                                      ? 'border-zinc-800/40 opacity-30 cursor-not-allowed'
-                                      : selected
-                                        ? 'border-emerald-500 ring-2 ring-emerald-500/30'
-                                        : 'border-zinc-800/60 hover:border-zinc-600'
-                                  }`}
-                                  title={inAnotherGroup ? 'Already in another carousel' : img.prompt}
-                                >
-                                  {img.url ? (
-                                    <LazyImg
-                                      src={img.url}
-                                      alt={img.prompt}
-                                      className="w-full h-full object-cover"
-                                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                    />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center bg-zinc-950">
-                                      <ImageOff className="w-6 h-6 text-zinc-700" />
-                                    </div>
-                                  )}
-                                  {img.isPostReady && (
-                                    <span className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-emerald-600/90 text-[8px] font-medium text-white rounded">
-                                      Post Ready
-                                    </span>
-                                  )}
-                                  {selected && (
-                                    <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-emerald-500 text-white flex items-center justify-center">
-                                      <Check className="w-3 h-3" />
-                                    </div>
-                                  )}
-                                </motion.button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex items-center justify-between p-4 border-t border-zinc-800/60">
-                        <span className="text-xs text-zinc-500">
-                          {pickerSelected.size} selected
-                          {pickerSelected.size < 2 && (
-                            <span className="text-amber-400 ml-2">
-                              Pick at least 2 images to form a carousel.
-                            </span>
-                          )}
-                        </span>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setShowCarouselPicker(false)}
-                            className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            onClick={confirmCarouselPicker}
-                            disabled={pickerSelected.size < 2}
-                            className="btn-blue-sm"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            {pickerTargetGroupId ? 'Update Carousel' : 'Create Carousel'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
+              <CarouselPickerModal
+          open={showCarouselPicker}
+          onClose={() => {
+            setShowCarouselPicker(false);
+            setPickerTargetGroupId(null);
+          }}
+          pickerTargetGroupId={pickerTargetGroupId}
+          savedImages={savedImages}
+          carouselGroups={settings.carouselGroups || []}
+          onConfirm={confirmCarouselPicker}
+        />
 
               {(view === 'studio' || view === 'gallery') && (
                 displayedImages.length === 0 && !isGenerating ? (
