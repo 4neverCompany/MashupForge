@@ -426,7 +426,7 @@ Return ONLY a JSON array of objects with "concept" and "context" fields. Example
   }, []);
 
   /**
-   * Runs the outer pipeline loop end-to-end: pi-precheck, engagement fetch,
+   * Runs the outer pipeline loop end-to-end: engagement fetch,
    * one-or-many cycles of idea processing, continuous-mode sleep, cleanup.
    * Caller provides processIdea (built by useIdeaProcessor).
    *
@@ -477,52 +477,13 @@ Return ONLY a JSON array of objects with "concept" and "context" fields. Example
         addLog(
           'pipeline-start',
           '',
-          'success',
-          `Pipeline started${pipelineContinuous ? ' (continuous mode)' : ''}`,
+           'success',
+           `Pipeline started${pipelineContinuous ? ' (continuous mode)' : ''}`,
         );
 
-        // pi.dev pre-check.
-        try {
-          const piRes = await fetch('/api/pi/status');
-          if (piRes.ok) {
-            const piStatus = (await piRes.json()) as {
-              installed?: boolean;
-              running?: boolean;
-              lastError?: string | null;
-            };
-            if (!piStatus.installed) {
-              addLog(
-                'pi-precheck',
-                '',
-                'error',
-                'pi.dev not installed — caption/prompt/trending steps will fall back to generic output',
-              );
-            } else if (!piStatus.running) {
-              addLog(
-                'pi-precheck',
-                '',
-                'error',
-                `pi.dev installed but not running${piStatus.lastError ? ` — last error: ${piStatus.lastError}` : ''}`,
-              );
-            } else {
-              addLog('pi-precheck', '', 'success', 'pi.dev reachable — proceeding');
-            }
-          } else {
-            addLog(
-              'pi-precheck',
-              '',
-              'error',
-              `pi.dev status check failed (HTTP ${piRes.status})`,
-            );
-          }
-        } catch (e: unknown) {
-          addLog(
-            'pi-precheck',
-            '',
-            'error',
-            `pi.dev status check threw: ${getErrorMessage(e)}`,
-          );
-        }
+        // M3.3-P3 commit c: the pi.dev pre-check is gone with the pi
+        // routes. A failed vercel-ai call now surfaces through the
+        // existing DIRECTOR_FAILED sentinel path.
 
         // Engagement fetch (24h cached inside smartScheduler).
         let engagement: CachedEngagement;

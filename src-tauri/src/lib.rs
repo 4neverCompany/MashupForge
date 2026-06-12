@@ -1058,20 +1058,7 @@ pub fn run() {
                 return Err(msg.into());
             }
 
-            // ---- step 3: pi.dev runtime install dir (user-writable)
-            let app_data_dir_for_pi = app.path().app_data_dir()?;
-            let pi_install_dir = app_data_dir_for_pi.join("pi");
-            if let Err(e) = std::fs::create_dir_all(&pi_install_dir) {
-                startup_log_line(
-                    &log_dir,
-                    &format!(
-                        "could not create pi_install_dir {}: {}",
-                        pi_install_dir.display(),
-                        e
-                    ),
-                );
-            }
-
+            // ---- step 3: pi.dev runtime install dir (user-writable) — M3.3-P3 commit c: gone with the pi deletion.
             // ---- step 4: resolve loopback port (stable for IndexedDB
             // persistence, ephemeral fallback if the stable port is
             // already in use — see STORY-121).
@@ -1126,7 +1113,6 @@ pub fn run() {
                 .env("HOST", "127.0.0.1")
                 .env("NODE_ENV", "production")
                 .env("MASHUPFORGE_RESOURCES_DIR", &resource_dir)
-                .env("MASHUPFORGE_PI_DIR", &pi_install_dir)
                 .env("MASHUPFORGE_LOG_DIR", &log_dir)
                 .env("MASHUPFORGE_CRASH_DIR", log_dir.join("crashes"))
                 .env("MASHUPFORGE_DESKTOP", "1")

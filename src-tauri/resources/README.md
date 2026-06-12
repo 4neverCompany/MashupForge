@@ -20,11 +20,9 @@ resources/
     └── node_modules/       trace-minimized runtime deps
 ```
 
-Note: pi.dev is **not** bundled at build time. It is installed at runtime
-via Settings → "Install pi.dev". `PI_BIN` is resolved by `lib/pi-setup.ts`
-after install completes.
-
-The Tauri Rust launcher (`src/lib.rs`) resolves `resource_dir` at runtime
+Note: pi.dev is no longer supported (M3.3-P3 commit c). The previous
+`PI_BIN` / `MASHUPFORGE_PI_DIR` env-var surface is gone with the
+deletion. The Tauri Rust launcher (`src/lib.rs`) resolves `resource_dir` at runtime
 and spawns `node/node.exe` with `app/start.js`, passing a random ephemeral
 `PORT`.
 

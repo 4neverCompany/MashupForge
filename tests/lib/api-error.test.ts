@@ -43,11 +43,14 @@ describe('error builders', () => {
   });
 
   it('httpApiError with 429 is rate_limit', () => {
-    expect(httpApiError('pi', 429).code).toBe('rate_limit');
+    // M3.3-P3 commit c: 'pi' source is gone; 'leonardo' is the
+    // closest remaining example (Leonardo is the only HTTP API
+    // that historically took the retry-budget path).
+    expect(httpApiError('leonardo', 429).code).toBe('rate_limit');
   });
 
   it('networkApiError is always retryable', () => {
-    const e = networkApiError('pi', new Error('ECONNRESET'));
+    const e = networkApiError('leonardo', new Error('ECONNRESET'));
     expect(e.retryable).toBe(true);
     expect(e.code).toBe('network');
     expect(e.message).toContain('ECONNRESET');
@@ -64,9 +67,8 @@ describe('error builders', () => {
 });
 
 describe('RETRY_BUDGET', () => {
-  it('matches the spec: leonardo 3, pi 2, social 1', () => {
+  it('matches the spec: leonardo 3, social 1 (pi retired in M3.3-P3 commit c)', () => {
     expect(RETRY_BUDGET.leonardo).toBe(3);
-    expect(RETRY_BUDGET.pi).toBe(2);
     expect(RETRY_BUDGET.social).toBe(1);
   });
 });
@@ -84,7 +86,8 @@ describe('toastMessageForApiError', () => {
   });
 
   it('network error references connection', () => {
-    const msg = toastMessageForApiError(networkApiError('pi', new Error('x')));
+    // M3.3-P3 commit c: 'pi' source gone; use 'leonardo'.
+    const msg = toastMessageForApiError(networkApiError('leonardo', new Error('x')));
     expect(msg).toMatch(/connection/i);
   });
 });

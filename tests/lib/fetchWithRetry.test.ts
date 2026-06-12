@@ -115,12 +115,13 @@ describe('fetchApi (Result-returning)', () => {
     }
   });
 
-  it('uses the per-API budget by default (pi: 2 on 503)', async () => {
+  it('uses the per-API budget by default (leonardo: 3 on 503)', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(503));
-    const promise = fetchApi('pi', 'https://example.test/x');
+    // M3.3-P3 commit c: 'pi' source is gone. Leonardo has budget=3.
+    const promise = fetchApi('leonardo', 'https://example.test/x');
     await vi.runAllTimersAsync();
     await promise;
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
   });
 
   it('uses the per-API budget by default (social: 1 — no retry on 503)', async () => {
@@ -162,10 +163,11 @@ describe('fetchApi (Result-returning)', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockRejectedValue(new Error('ECONNRESET'));
-    const promise = fetchApi('pi', 'https://example.test/x');
+    // M3.3-P3 commit c: 'pi' source gone. Leonardo has budget=3.
+    const promise = fetchApi('leonardo', 'https://example.test/x');
     await vi.runAllTimersAsync();
     const r = await promise;
-    expect(fetchSpy).toHaveBeenCalledTimes(2); // pi budget = 2
+    expect(fetchSpy).toHaveBeenCalledTimes(3); // leonardo budget = 3
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.error.code).toBe('budget_exhausted');

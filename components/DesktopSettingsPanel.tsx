@@ -17,7 +17,9 @@ import { AutoStartSettings } from './Settings/AutoStartSettings';
 
 // Provider/model changes need pi to respawn so the new env reaches the
 // child process. The next prompt will auto-restart pi after stop().
-const PI_RESTART_KEYS = new Set(['PI_PROVIDER', 'PI_DEFAULT_MODEL']);
+// M3.3-P3 commit c: the pi-restart logic + PI_RESTART_KEYS set are
+// gone with the pi routes. The persist() function still exists for
+// the non-pi desktop config keys (api keys, model defaults, etc.).
 
 // ── PROP-005: Tauri auto-launch toggle ────────────────────────────────────────
 // Dynamically imported so the web build (no Tauri) never bundles the plugin.
@@ -337,7 +339,7 @@ export function DesktopSettingsPanel() {
 
   // ── Save ──────────────────────────────────────────────────────────────────
 
-  const persist = useCallback(async (snapshot: Record<string, string>, restartPi: boolean) => {
+  const persist = useCallback(async (snapshot: Record<string, string>) => {
     setSaveState('saving');
     setSaveError('');
     try {
@@ -358,11 +360,8 @@ export function DesktopSettingsPanel() {
       // Refresh config so configPath / savedKeys reflect the write.
       const refreshed = await fetch('/api/desktop/config').then((r) => r.json() as Promise<DesktopConfigResponse>);
       setConfig(refreshed);
-      // Provider/model changes need a pi respawn so the new env reaches
-      // the child process. Fire-and-forget: next prompt auto-starts pi.
-      if (restartPi) {
-        void fetch('/api/pi/stop', { method: 'POST' }).catch(() => {});
-      }
+      // M3.3-P3 commit c: the pi-respawn side-effect is gone with the
+      // pi routes. The desktop config still persists cleanly without it.
     } catch (e) {
       setSaveState('error');
       setSaveError((e as Error).message ?? 'Network error.');
@@ -377,10 +376,9 @@ export function DesktopSettingsPanel() {
       ({ key }) => (draft[key] ?? '') !== (config.keys[key] ?? '')
     );
     if (changedKeys.length === 0) return;
-    const restartPi = changedKeys.some(({ key }) => PI_RESTART_KEYS.has(key));
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(() => {
-      void persist(draft, restartPi);
+      void persist(draft);
     }, AUTOSAVE_DEBOUNCE_MS);
     return () => {
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
