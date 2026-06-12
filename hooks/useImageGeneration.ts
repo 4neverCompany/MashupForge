@@ -26,97 +26,43 @@ import { persistImageToDisk } from '../lib/images/storage';
 import { buildCameraAngleMenu, isCameraAngleId, resolveEffectiveCameraAngle } from '../lib/camera-angles';
 import { applyWatermark } from '../lib/watermark';
 
-function getModelName(id: string): string {
-  return getImageModel(id)?.name || id;
-}
-
-interface GeneratedItem {
-  prompt: string;
-  aspectRatio?: string;
-  tags?: string[];
-  selectedNiches?: string[];
-  selectedGenres?: string[];
-  negativePrompt?: string;
-  // V1.7.0-M2.1: per-item camera angle chosen by the idea model from the
-  // 14-slug catalog. Validated against the catalog at parse time; an
-  // invalid/absent value falls back to settings.cameraAngle.
-  cameraAngle?: string;
-}
-
-function pickStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const strs = value.filter((v): v is string => typeof v === 'string');
-  return strs.length > 0 ? strs : undefined;
-}
-
-// V1.7.0-M2.1: exported for unit tests (per-item cameraAngle validation).
-export function parseGeneratedItems(raw: string): GeneratedItem[] {
-  return extractJsonArrayFromLLM(raw)
-    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
-    .map((item) => ({
-      prompt: typeof item.prompt === 'string' ? item.prompt : '',
-      aspectRatio: typeof item.aspectRatio === 'string' ? item.aspectRatio : undefined,
-      tags: pickStringArray(item.tags),
-      selectedNiches: pickStringArray(item.selectedNiches),
-      selectedGenres: pickStringArray(item.selectedGenres),
-      negativePrompt: typeof item.negativePrompt === 'string' ? item.negativePrompt : undefined,
-      // V1.7.0-M2.1: only accept a catalog slug; anything else (model
-      // hallucinated a label, free text, etc.) is dropped so the composer
-      // never sees an unresolvable angle.
-      cameraAngle: isCameraAngleId(item.cameraAngle) ? item.cameraAngle : undefined,
-    }))
-    .filter((item) => item.prompt.length > 0);
-}
+// M3.4-P4-B3: pure parsing + moderation helpers + shared types lifted
+// out of this hook into `lib/image-generation/`. The imports below
+// re-export the public surface so the unit tests + `useComparison.ts`
+// continue to work unchanged.
+import {
+  getModelName,
+  pickStringArray,
+  parseGeneratedItems,
+  type GeneratedItem,
+} from '../lib/image-generation/parseGeneratedItems';
+import {
+  buildModerationRewriteInstruction,
+  markPromptNamesAllowed,
+} from '../lib/image-generation/moderation';
+import type {
+  LeonardoSubmitParams,
+  LeonardoSuccess,
+  LeonardoGenerationError,
+  AiImageSubmitParams,
+  AiImageSubmitResult,
+  MinimaxImageParams,
+  HiggsfieldImageParams,
+  HiggsfieldImageResult,
+  ModerationRetryCallback,
+  SubmitResult,
+  AiImageContext,
+  LastGenerationError,
+  UseImageGenerationDeps,
+} from '../lib/image-generation/types';
+export { parseGeneratedItems, buildModerationRewriteInstruction };
+export type { LeonardoGenerationError, LastGenerationError, GeneratedItem };
 
 // V1.5: applyWatermark moved to lib/watermark.ts (it has no hook/React
 // dependencies — a pure canvas op). Imported for this hook's own
 // generation path AND re-exported so every existing importer
 // (MashupContext, useComparison, …) keeps working unchanged.
 export { applyWatermark };
-
-/**
- * Submit-and-poll helper used by both the main generate loop and
- * rerollImage. Returns the Leonardo success payload or throws. On
- * FAILED the thrown Error is annotated with `moderationClassification`
- * and `failedPrompt` so callers can detect content-moderation blocks
- * and decide whether to rewrite + retry.
- */
-interface LeonardoSubmitParams {
-  prompt: string;
-  negativePrompt?: string;
-  /** V1.0.7-PROMPT-ENG-A4: anti-AI-look curated negative prompts from
-   *  buildEnhancedPrompt. Joined with `negativePrompt` inside
-   *  submitLeonardoAndPoll before sending to the API. Empty array
-   *  means "no anti-AI-look" — equivalent to the prior behavior. */
-  antiAiLookNegatives?: string[];
-  modelId: string;
-  width: number;
-  height: number;
-  styleIds?: string[];
-  apiKey?: string;
-  quality?: string;
-  /**
-   * IMG-INVEST-001 issue 1: Leonardo's `prompt_enhance` knob, threaded
-   * from the model spec via lib/image-prompt-builder.ts. When omitted,
-   * the API route defaults to `'ON'` for back-compat. Pipeline-style
-   * model specs that set `prompt_enhance: 'OFF'` (to skip Leonardo's
-   * own rewrite because the client already enhanced) finally land
-   * through this field instead of being silently dropped.
-   */
-  promptEnhance?: 'ON' | 'OFF';
-}
-
-interface LeonardoSuccess {
-  url: string;
-  imageId?: string;
-  seed?: number;
-}
-
-export type LeonardoGenerationError = Error & {
-  moderationClassification?: string[];
-  failedPrompt?: string;
-  moderation?: unknown;
-};
 
 /**
  * Poll Leonardo's status endpoint until the generation is COMPLETE,
@@ -215,35 +161,6 @@ async function submitLeonardoAndPoll(params: LeonardoSubmitParams): Promise<Leon
  * retry, which has already produced a rewritten prompt and just wants
  * the Leonardo submit half).
  */
-interface AiImageSubmitParams {
-  idea: string;
-  modelId: string;
-  width: number;
-  height: number;
-  styleIds?: string[];
-  quality?: 'LOW' | 'MEDIUM' | 'HIGH';
-  negativePrompt?: string;
-  /** V1.0.7-PROMPT-ENG-A4: same as LeonardoSubmitParams.antiAiLookNegatives
-   *  — joined with `negativePrompt` in submitViaAiImage before the
-   *  /api/ai/image request body. */
-  antiAiLookNegatives?: string[];
-  systemPrompt?: string;
-  niches?: string[];
-  genres?: string[];
-  apiKey?: string;
-  skipEnhance?: boolean;
-  /**
-   * IMG-INVEST-001 issue 1: forward the model spec's prompt_enhance
-   * value all the way to Leonardo so pipeline-style specs can disable
-   * Leonardo's own enhancement (we already MiniMax-enhanced server-side).
-   */
-  promptEnhance?: 'ON' | 'OFF';
-}
-
-interface AiImageSubmitResult extends LeonardoSuccess {
-  enhancedPrompt: string;
-}
-
 async function submitViaAiImage(params: AiImageSubmitParams): Promise<AiImageSubmitResult> {
   // V1.0.7-PROMPT-ENG-A4: same join pattern as submitLeonardoAndPoll.
   const joinedNegatives = [params.negativePrompt, ...(params.antiAiLookNegatives ?? [])]
@@ -301,15 +218,6 @@ async function submitViaAiImage(params: AiImageSubmitParams): Promise<AiImageSub
  * produces so the downstream watermark/state/tag pipeline doesn't need
  * to branch on provider.
  */
-interface MinimaxImageParams {
-  prompt: string;
-  width: number;
-  height: number;
-  aspectRatio?: string;
-  quantity?: number;
-  promptOptimizer?: boolean;
-  seed?: number;
-}
 
 /**
  * HIGGSFIELD-INTEGRATION: submit a generation through the Higgsfield
@@ -323,30 +231,6 @@ interface MinimaxImageParams {
  * as the message. 401 means the user needs to OAuth their Higgsfield
  * account in Settings (we don't try to re-auth from the client).
  */
-interface HiggsfieldImageParams {
-  prompt: string;
-  modelId: string;            // e.g. 'higgsfield-nano-banana-pro'
-  apiName: string;            // e.g. 'nano_banana_2'
-  aspectRatio?: string;
-  resolution?: '1k' | '2k' | '4k';
-  quality?: 'low' | 'medium' | 'high';
-  submodel?: 'pro' | 'flex' | 'max';
-  referenceImageUrl?: string;
-  seed?: number;
-  /**
-   * V1.4.0: optional CLI token from settings. When present, the
-   * server route uses the CLI binary path (HiggsfieldCliAdapter)
-   * instead of the OAuth MCP path. With `useImageGeneration` now
-   * auto-picking Higgsfield, this is the common case for pipeline
-   * runs.
-   */
-  higgsfieldCliToken?: string;
-}
-
-interface HiggsfieldImageResult extends LeonardoSuccess {
-  enhancedPrompt: string;
-}
-
 async function submitHiggsfieldImage(params: HiggsfieldImageParams): Promise<HiggsfieldImageResult> {
   const res = await fetchWithRetry('/api/higgsfield/image', {
     method: 'POST',
@@ -456,123 +340,6 @@ async function submitMinimaxImage(params: MinimaxImageParams): Promise<LeonardoS
  * TRADEMARK-SELF-HEAL (2026-05-21): the previous one-size-fits-all
  * instruction said "Keep the character names and core concept" — which
  * is exactly the wrong move for TRADEMARK rejections (Leonardo flagged
- * the named character; keeping the name guarantees the retry also
- * fails). Classification-aware now:
- *
- * - TRADEMARK / COPYRIGHT → instruct the AI to swap named IP for
- *   generic descriptors ("Spider-Man" → "a spider-powered hero",
- *   "Grogu" → "a small green alien"). The model already knows the
- *   franchise mappings; embedding a hardcoded mapping table would
- *   rot the moment a new franchise lands. The "core concept" framing
- *   is dropped — for trademark, the concept WAS the violation.
- * - NSFW / EXTREME_VIOLENCE / CHILD → keep names, soften imagery
- *   (the original behaviour, useful for over-aggressive moderation).
- * - Default / unknown → conservative fallback identical to pre-fix.
- *
- * Maurice reported: every pipeline run currently fails on Spider-Man /
- * Grogu / Mandalorian mashups because the rewrite kept the name.
- */
-export function buildModerationRewriteInstruction(
-  failedPrompt: string,
-  classifications: string[] = [],
-): string {
-  const upper = classifications.map((c) => c.toUpperCase());
-  const isTrademark = upper.some((c) => c === 'TRADEMARK' || c === 'COPYRIGHT');
-  const isContentBlock = upper.some((c) => c === 'NSFW' || c === 'EXTREME_VIOLENCE' || c === 'CHILD');
-
-  if (isTrademark) {
-    // TRADEMARK-SURGICAL-REWRITE (2026-05-21): Maurice reported the
-    // previous instruction (4bc046b) was destroying prompts. The
-    // "drop the named-character anchor" framing + the franchise-example
-    // list (e.g. "Black Panther" → "a panther-themed warrior") trained
-    // the LLM to over-generalize — it stripped scene/mood/style/
-    // composition along with the name, and even non-trademarked-but-
-    // adjacent-sounding names (e.g. "Viktor von Doom") got rewritten
-    // because the examples taught the model to recognise IP-shaped
-    // patterns broadly.
-    //
-    // New rule: SURGICAL substitution only. Replace ONLY the specific
-    // trademark trigger with a brief visual descriptor that preserves
-    // the character's distinctive look (colors, silhouette, key props).
-    // Every other word — scene, lighting, action, composition, style,
-    // mood, location — must survive verbatim. One positive example
-    // showing the minimal-edit shape; no franchise list to avoid
-    // teaching the model to recognise more names than it should.
-    return `This prompt was blocked by content moderation for TRADEMARK / COPYRIGHT — one specific named-IP character triggered it.
-
-CRITICAL RULES (read carefully):
-1. Identify which character NAME(S) in the prompt are the likely trademark trigger.
-2. Replace ONLY those name(s) with a brief visual descriptor that preserves the character's distinctive look (colors, silhouette, signature props).
-3. Every OTHER word in the prompt — scene, mood, composition, lighting, action, location, style, era, time-of-day, camera angle, art style, weather, expressions — MUST be preserved EXACTLY as written. Do not paraphrase, condense, or "improve" them.
-4. Do NOT generalize non-trademarked descriptions. If the prompt says "Viktor von Doom" but that's a fictional character not on any trademark list, leave it alone.
-5. Do NOT shorten the prompt. The output should have a similar word count to the input, with only the trigger name swapped.
-
-Surgical edit example:
-- Input:  "Spider-Man swinging through neon Tokyo at night, cinematic lighting, 35mm film grain, dynamic action pose, low angle"
-- Output: "a red and blue spider-themed hero in a web-pattern suit swinging through neon Tokyo at night, cinematic lighting, 35mm film grain, dynamic action pose, low angle"
-
-Notice: only the character name changed. Every other word is identical.
-
-Return ONLY the rewritten prompt — no preamble, no explanation, no list of changes.
-
-BLOCKED PROMPT:
-${failedPrompt}
-
-REWRITTEN PROMPT:`;
-  }
-
-  if (isContentBlock) {
-    return `This prompt was blocked by content moderation (${classifications.join(', ')}). Rewrite it to be cleaner and shorter (40–60 words max). Remove any violence, gore, or explicit language. Keep the character names and core concept. Return ONLY the rewritten prompt.
-
-BLOCKED PROMPT:
-${failedPrompt}
-
-REWRITTEN PROMPT:`;
-  }
-
-  // Unknown / mixed classification — conservative fallback (pre-fix wording).
-  return `This prompt was blocked by content moderation. Rewrite it to be cleaner and shorter (40–60 words max). Remove any violence, gore, or explicit language. Keep the character names and core concept. Return ONLY the rewritten prompt.
-
-BLOCKED PROMPT:
-${failedPrompt}
-
-REWRITTEN PROMPT:`;
-}
-
-interface ModerationRetryCallback {
-  /** Fires once if the first submission hits a moderation block and we're about to rewrite-and-retry. */
-  onRetry: (classifications: string[]) => void;
-}
-
-interface SubmitResult {
-  success: LeonardoSuccess;
-  finalPrompt: string;
-  /** true if the second attempt (rewrite) was used. false means first try succeeded. */
-  retried: boolean;
-}
-
-/**
- * SUCCESS-PATH-ALLOWED-MARKING (2026-05-22): when a generation
- * succeeds on first try (no retry), every trademark-list name that
- * appeared in the submitted prompt is recorded as 'allowed' in the
- * outcome store. Future TRADEMARK blocks involving other prompts that
- * happen to contain these names won't auto-substitute them — the
- * substitution path filters to names with outcome 'blocked' only.
- *
- * setOutcome's sticky-blocked guard (lib/trademark-outcomes.ts) means
- * we can never revive a previously-blocked name to 'allowed' by a
- * coincidental success — once a name has reliably failed, the
- * 'allowed' marking is a no-op.
- *
- * Only call on FIRST-TRY successes (the success path before the
- * retry catch). A success that came AFTER a retry doesn't prove the
- * names are allowed — the retry's substitution may have removed them.
- */
-function markPromptNamesAllowed(prompt: string, modelId: string): void {
-  const names = extractTrademarkNames(prompt);
-  for (const name of names) setOutcome(name, 'allowed', modelId);
-}
-
 /**
  * TRADEMARK-STAGED-PIPELINE (2026-05-22): 3-stage moderation recovery.
  *
@@ -668,12 +435,11 @@ async function submitWithOneRetry(
  * via `/api/ai/image` with `skipEnhance: true` so the orchestrator
  * doesn't re-enhance the already-rewritten text.
  */
-interface AiImageContext {
-  systemPrompt?: string;
-  niches?: string[];
-  genres?: string[];
-  apiKey?: string;
-}
+// M3.4-P4-B3: `buildModerationRewriteInstruction` and
+// `markPromptNamesAllowed` moved to `lib/image-generation/moderation.ts`
+// (pure functions, no React dependencies). Re-imported at the top of
+// this file and re-exported so the existing public surface
+// (Vitest unit tests, useComparison.ts) keeps working.
 
 async function submitViaAiImageWithOneRetry(
   initialIdea: string,
@@ -753,19 +519,6 @@ async function submitViaAiImageWithOneRetry(
       return { success: r, finalPrompt: r.enhancedPrompt, retried: true };
     }
   }
-}
-
-export interface LastGenerationError {
-  message: string;
-  classifications: string[];
-  failedPrompt?: string;
-  /** true when the retry also failed and the user needs to edit manually. */
-  retried: boolean;
-}
-
-interface UseImageGenerationDeps {
-  settings: UserSettings;
-  updateImageTags: (id: string, tags: string[]) => void;
 }
 
 export function useImageGeneration({ settings, updateImageTags }: UseImageGenerationDeps) {
