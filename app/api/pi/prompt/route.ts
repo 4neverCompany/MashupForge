@@ -2,12 +2,29 @@ import { prompt as piPrompt, start as piStart, isRunning } from '@/lib/pi-client
 import { getErrorMessage } from '@/lib/errors';
 import { coerceMemory, formatMemoryForPrompt } from '@/lib/pipeline-memory';
 import { webSearch, extractTrendingTags, type WebSearchResult } from '@/lib/web-search';
+import {
+  buildFocusBlock,
+  buildTrendingQuery,
+  pickFromPool,
+  dedupeByUrl,
+  type PiMode,
+} from '@/lib/ai-prompt-helpers';
 // CAMOFOX-CAMOUFOX-1.1.0 (2026-06-06): camofox sidecar integration
 // (Day 2 of v1.1.0). The `withCamofoxHealth` wrapper tries camofox
 // first (anti-bot stealth browser) and falls back to `webSearch()`
 // (DDG + Brave) if camofox is down. Trending is optional enrichment
 // so a camofox failure must never break the user-facing prompt.
 import { withCamofoxHealth } from '@/lib/camofox';
+
+// M3.3-P3 E1: helpers + PiMode re-exported from the new shared module
+// (lib/ai-prompt-helpers.ts) so the future nca + mmx-TEXT route deletions
+// can re-import from `lib/` without dragging the pi route module along.
+// The signatures and bodies are identical — this is a pure move, not a
+// refactor. Re-exporting here keeps every existing import in the test
+// suite (which still pulls from `@/app/api/pi/prompt/route`) compiling
+// without churn; the re-exports die with the pi route in commit c.
+export { buildFocusBlock, buildTrendingQuery, pickFromPool, dedupeByUrl };
+export type { PiMode };
 
 /**
  * POST /api/pi/prompt
@@ -46,7 +63,6 @@ const TRENDING_MAX_RESULTS = 6;
 const TRENDING_MAX_CHARS = 900; // ≈ 150 words
 const TRENDING_SNIPPET_CHARS = 220;
 const TRENDING_TAG_LIMIT = 10;
-const DEFAULT_NICHES = ['Star Wars', 'Marvel', 'Warhammer 40k'];
 
 /**
  * Freshness/suffix pool. A single fixed suffix ("trending 2026") caused
@@ -112,86 +128,6 @@ function currentRotationBucket(): number {
   return Math.floor(Date.now() / (1000 * 60 * 15));
 }
 
-/**
- * Deterministic pool picker keyed by the rotation bucket + an offset so
- * the fallback query doesn't align with the freshness suffix.
- */
-export function pickFromPool<T>(pool: readonly T[], offset: number, bucket: number): T {
-  if (pool.length === 0) throw new Error('pickFromPool called with empty pool');
-  const idx = Math.abs((bucket + offset) % pool.length);
-  return pool[idx];
-}
-
-function sanitizeStringArray(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim());
-}
-
-/**
- * V080-DES-003 — Build a "focus" system-prompt block from the user's
- * configured niches/genres. Added to the composed system prompt on every
- * mode (not just `idea`) so captions, enhances, tags etc. reflect the
- * user's settings without each caller having to re-word the agentPrompt.
- *
- * Returns an empty string when both arrays are empty so the caller's
- * `.filter(Boolean)` drops it cleanly.
- */
-export function buildFocusBlock(niches: string[], genres: string[]): string {
-  if (niches.length === 0 && genres.length === 0) return '';
-  const nicheClause =
-    niches.length > 0 ? `The user creates content in: ${niches.join(', ')}.` : '';
-  const genreClause =
-    genres.length > 0 ? `Favor themes and styles like: ${genres.join(', ')}.` : '';
-  return ['Focus areas:', nicheClause, genreClause, 'Every output should visibly reflect these areas.']
-    .filter(Boolean)
-    .join(' ');
-}
-
-/**
- * Build the trending-context query from the user's active niches/genres.
- *
- * Picks 2 niches to diversify results — a single fixed query was returning
- * the same cyberpunk thumbnails on every idea run. Two niches joined with
- * "x" rhymes with the crossover framing the LLM already uses ("Darth
- * Vader x Warhammer") and gives DDG/Brave a specific enough signal to
- * surface fresh fan-art coverage.
- *
- * `rng` is injectable so tests can pin a deterministic shuffle.
- */
-export function buildTrendingQuery(
-  niches?: string[],
-  genres?: string[],
-  rng: () => number = Math.random,
-  freshness: string = 'trending 2026',
-  genreIndex: number = 0,
-): string {
-  const cleanedNiches = sanitizeStringArray(niches);
-  const active = cleanedNiches.length > 0 ? cleanedNiches : DEFAULT_NICHES;
-
-  const shuffled = [...active];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  const pick = shuffled.slice(0, Math.min(2, shuffled.length));
-
-  const cleanedGenres = sanitizeStringArray(genres);
-  // Rotate which genre drives the query across calls. With a single
-  // genre this degenerates to index 0 (original behavior); with several
-  // configured, consecutive runs touch different ones so the search
-  // intent shifts instead of always anchoring on cleanedGenres[0].
-  const genreHint =
-    cleanedGenres.length > 0
-      ? cleanedGenres[Math.abs(genreIndex) % cleanedGenres.length]
-      : '';
-
-  return [pick.join(' x '), 'crossover fan art', genreHint, freshness]
-    .filter((s) => s.length > 0)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function formatTrendingContext(results: WebSearchResult[]): string {
   if (!results || results.length === 0) return '';
   // Framing matters: an earlier version ran a single search and led with
@@ -222,33 +158,10 @@ function formatTrendingContext(results: WebSearchResult[]): string {
   return joined.length > TRENDING_MAX_CHARS ? joined.slice(0, TRENDING_MAX_CHARS) + '…' : joined;
 }
 
-/**
- * Dedupe by URL, preserving first-seen order. Different search queries
- * frequently surface the same top-ranked result, so without dedup the
- * trending block fills up with duplicate entries of whatever subreddit
- * or news site is dominating at the moment.
- */
-export function dedupeByUrl(results: WebSearchResult[]): WebSearchResult[] {
-  const seen = new Set<string>();
-  const out: WebSearchResult[] = [];
-  for (const r of results) {
-    const key = r.url;
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(r);
-  }
-  return out;
-}
-
-export type PiMode =
-  | 'chat'
-  | 'generate'
-  | 'idea'
-  | 'enhance'
-  | 'caption'
-  | 'tag'
-  | 'negative-prompt'
-  | 'collection-info';
+// M3.3-P3 E1: dedupeByUrl + PiMode are re-exported from
+// lib/ai-prompt-helpers.ts at the top of this file. The original
+// implementation lived here; the move is a pure relocation, no behavior
+// change. See module-level note above.
 
 const MODE_DIRECTIVES: Record<PiMode, string> = {
   chat:
@@ -324,8 +237,15 @@ export async function POST(req: Request) {
   // V080-DES-003 — compute focus block once per request so every mode
   // benefits, not just `idea` (which also uses niches/genres below to
   // build its trending-search query).
-  const focusNiches = sanitizeStringArray(niches);
-  const focusGenres = sanitizeStringArray(genres);
+  // M3.3-P3 E1: sanitizeStringArray moved to lib/ai-prompt-helpers as
+  // a module-private helper; the focus-block input still needs the same
+  // shape, so the route re-implements the same one-liner inline.
+  const focusNiches = Array.isArray(niches)
+    ? niches.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim())
+    : [];
+  const focusGenres = Array.isArray(genres)
+    ? genres.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim())
+    : [];
   const focusBlock = buildFocusBlock(focusNiches, focusGenres);
 
   if (mode === 'idea' || mode === 'generate') {
