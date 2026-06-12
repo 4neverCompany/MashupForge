@@ -11,7 +11,6 @@ export * from './cli-utils';
 export * from './registry';
 
 export { HiggsfieldCliAdapter, higgsfieldAdapter } from './higgsfield/cli-adapter';
-export { MmxCliAdapter, mmxAdapter } from './mmx/cli-adapter';
 export {
   LeonardoHttpAdapter,
   leonardoAdapter,
