@@ -162,15 +162,63 @@ export function applyV160DirectorDefaultMigration<
  * Composition of every load-time settings migration, applied by
  * useSettings on each hydration path. Order: oldest first, so later
  * migrations see the post-migration state of earlier ones.
+ *
+ * M3.3-P3 commit a: added `applyM33AiAgentFlip` as the innermost
+ * step — runs first so the older migrations see the post-flip
+ * `activeAiAgent` / `aiAgentProvider` values. The flip is a pure
+ * rewrite of legacy `'pi' | 'nca' | 'mmx'` string values to
+ * `'vercel-ai'`. Idempotent: a value that's already `'vercel-ai'`
+ * (or `undefined`) returns the input reference unchanged.
  */
 export function applySettingsMigrations<
   T extends {
     pipelineAutoApprove?: AutoApproveMap;
     useDirectorPipeline?: boolean;
     directorPipelineUserSet?: boolean;
+    activeAiAgent?: string;
+    aiAgentProvider?: string;
   },
 >(settings: T): T {
-  return applyV160DirectorDefaultMigration(applyV040AutoApproveMigration(settings));
+  return applyV160DirectorDefaultMigration(
+    applyV040AutoApproveMigration(applyM33AiAgentFlip(settings)),
+  );
+}
+
+/**
+ * M3.3-P3 commit a — aiClient-default flip.
+ *
+ * Retires the pi/nca/mmx subprocess agents in v1.8.0. The runtime
+ * default in `lib/aiClient.ts` now reads `?? 'vercel-ai'`; this
+ * shim rewrites the *persisted* user choice so a v1.7.0 install
+ * that explicitly picked 'pi' (or 'nca' / 'mmx') silently lands
+ * on the new default on first post-upgrade load — no broken
+ * /api/pi/prompt 404, no user-visible "please re-pick" prompt.
+ *
+ * Writes the rewrite back to the persisted store via the
+ * settings-hydration caller (see useSettings.ts:applySettingsMigrations
+ * invocation), so the next debounced save round-trips the cleaned
+ * state. Idempotent + referential-equality friendly: a value that's
+ * already 'vercel-ai' (or undefined) returns the input reference
+ * unchanged.
+ *
+ * Q1 of the M3.3-P3 recon: picked option A1 (one-shot IDB rewrite
+ * on first load) over A2 (rely on union narrowing to crash) and
+ * A3 (keep the legacy routes as no-op fallbacks for one release).
+ */
+export function applyM33AiAgentFlip<
+  T extends { activeAiAgent?: string; aiAgentProvider?: string },
+>(settings: T): T {
+  const LEGACY = new Set(['pi', 'nca', 'mmx']);
+  const aaa = settings.activeAiAgent;
+  const aap = settings.aiAgentProvider;
+  const aaaIsLegacy = typeof aaa === 'string' && LEGACY.has(aaa);
+  const aapIsLegacy = typeof aap === 'string' && LEGACY.has(aap);
+  if (!aaaIsLegacy && !aapIsLegacy) return settings;
+  return {
+    ...settings,
+    ...(aaaIsLegacy ? { activeAiAgent: 'vercel-ai' } : {}),
+    ...(aapIsLegacy ? { aiAgentProvider: 'vercel-ai' } : {}),
+  };
 }
 
 /** Hard timeout error thrown by the per-idea race in usePipelineDaemon. */

@@ -598,7 +598,11 @@ async function submitWithOneRetry(
   initialPrompt: string,
   baseParams: Omit<LeonardoSubmitParams, 'prompt'>,
   callbacks: ModerationRetryCallback,
-  provider?: 'pi' | 'nca' | 'mmx' | 'vercel-ai',
+  // M3.3-P3 commit a: narrowed to `'vercel-ai' | undefined`. The
+  // provider argument is now purely a forwarder to
+  // `lib/aiClient.ts:streamAIToString`; the legacy pi/nca/mmx routes
+  // are gone.
+  provider?: 'vercel-ai',
 ): Promise<SubmitResult> {
   // STAGE 1 — original prompt verbatim.
   try {

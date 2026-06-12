@@ -545,15 +545,14 @@ export function SettingsModal({
     }
   };
 
-  // AI-AGENT-SETTINGS: read the canonical aiAgentProvider but fall back to
-  // the legacy activeAiAgent so users with older persisted settings keep
-  // their selection. Writes go to both fields below until activeAiAgent
-  // is fully retired (see types/mashup.ts deprecation note). 'mmx' is a
-  // historical value still in some IDB payloads — treated as 'nca' for
-  // selection / status logic per NCA-INTEGRATION-DESIGN.
-  // LLM-INTEGRATION-0513 added 'vercel-ai' — direct SDK calls.
-  const activeAiAgent: 'pi' | 'nca' | 'mmx' | 'vercel-ai' =
-    settings.aiAgentProvider ?? settings.activeAiAgent ?? 'pi';
+  // M3.3-P3 commit a: `activeAiAgent` is now strictly `'vercel-ai'`.
+  // The runtime default flips to 'vercel-ai' for any payload that
+  // predates the migration (a one-shot IDB rewrite in useSettings.ts
+  // handles persisted user choices too). The two-field fall-through
+  // (aiAgentProvider → activeAiAgent → 'vercel-ai') is preserved for
+  // the same back-compat reason the field was kept on the type.
+  const activeAiAgent: 'vercel-ai' =
+    settings.aiAgentProvider ?? settings.activeAiAgent ?? 'vercel-ai';
 
 
   // FEAT-002b S1: drive the saved/saving/error pill from the real lifecycle
@@ -1004,7 +1003,14 @@ export function SettingsModal({
                   selected here too so legacy persisted settings render
                   correctly; lib/aiClient.ts back-compat-aliases mmx→nca. */}
               {(() => {
-                const selected = activeAiAgent === 'nca' || activeAiAgent === 'mmx';
+                // M3.3-P3 commit a: `activeAiAgent` is now strictly
+                // `'vercel-ai'`, so the literal-`'nca' | 'mmx'`
+                // comparison is dead at the type level. Cast through
+                // a local wider union so the dead code still
+                // type-checks until commit b deletes the whole nca
+                // card.
+                const legacy = activeAiAgent as 'vercel-ai' | 'nca' | 'mmx';
+                const selected = legacy === 'nca' || legacy === 'mmx';
                 const available = ncaStatus?.available ?? ncaAvailable;
                 let dot = 'bg-zinc-600';
                 let label = 'Checking…';
@@ -1037,7 +1043,13 @@ export function SettingsModal({
                       && available === true
                       && ncaStatus?.authenticated === true
                     ) {
-                      updateSettings({ activeAiAgent: 'nca', aiAgentProvider: 'nca' });
+                      // M3.3-P3 commit a: dead onClick path now (the
+                      // nca card is unreachable at runtime because
+                      // `activeAiAgent` can only be 'vercel-ai'). The
+                      // nca card + this handler die in commit b. The
+                      // `as never` keeps the surrounding `as` casts
+                      // from cascading the type-error.
+                      updateSettings({ activeAiAgent: 'nca' as never, aiAgentProvider: 'nca' as never });
                     }
                   };
                   // NCA-SETUP-UI-FIX: card is a div (not a button) so the
@@ -1108,7 +1120,9 @@ export function SettingsModal({
 
               {/* Pi.dev card */}
               {(() => {
-                const selected = activeAiAgent === 'pi';
+                // M3.3-P3 commit a: legacy literal cast — the Pi.dev
+                // card dies in commit c.
+                const selected = (activeAiAgent as 'vercel-ai' | 'pi') === 'pi';
                 const s = piStatus;
                 let dot = 'bg-zinc-600';
                 let label = 'Checking…';
@@ -1135,7 +1149,11 @@ export function SettingsModal({
                 return (
                   <button
                     type="button"
-                    onClick={() => updateSettings({ activeAiAgent: 'pi', aiAgentProvider: 'pi' })}
+                    // M3.3-P3 commit a: dead onClick path now (the
+                    // Pi.dev card is unreachable at runtime because
+                    // `activeAiAgent` can only be 'vercel-ai'). The
+                    // Pi.dev card + this handler die in commit c.
+                    onClick={() => updateSettings({ activeAiAgent: 'pi' as never, aiAgentProvider: 'pi' as never })}
                     aria-pressed={selected}
                     className={`text-left rounded-xl border p-4 transition-all ${
                       selected
@@ -1235,7 +1253,12 @@ export function SettingsModal({
                 (binary missing). When nca is installed-but-not-auth'd, the
                 inline form on the card itself is the single source of
                 truth — no duplicate input below. */}
-            {activeAiAgent === 'pi' && ncaIsNotInstalled && (
+            {/*
+              M3.3-P3 commit a: legacy literal cast — the
+              `activeAiAgent === 'pi'` block is unreachable now that
+              the type is narrowed, and the block dies in commit c.
+            */}
+            {(activeAiAgent as 'vercel-ai' | 'pi') === 'pi' && ncaIsNotInstalled && (
               <div className="pt-2">{ncaInstallBlock}</div>
             )}
 
@@ -1245,7 +1268,12 @@ export function SettingsModal({
                 "needs-auth" state is handled inside the card via
                 ncaApiKeyForm — not duplicated here. */}
             <div className="pt-2">
-              {(activeAiAgent === 'nca' || activeAiAgent === 'mmx') ? (
+              {(
+                // M3.3-P3 commit a: legacy literal cast — the whole
+                // nca-active panel dies in commit b.
+                (activeAiAgent as 'vercel-ai' | 'nca' | 'mmx') === 'nca'
+                || (activeAiAgent as 'vercel-ai' | 'nca' | 'mmx') === 'mmx'
+              ) ? (
                 <>
                   {ncaIsNotInstalled
                     ? ncaInstallBlock

@@ -501,44 +501,24 @@ export interface UserSettings {
    */
   heatmapEnabled?: boolean;
   /**
-   * Which AI agent backend handles text/idea/caption work.
-   *   'pi'  — pi.dev sidecar (default)
-   *   'nca' — @deprecated 2026-06-02. Aris's nca (native-cli-ai),
-   *           MiniMax-powered, replaced mmx on 2026-05-02
-   *           (NCA-INTEGRATION-DEV). Kept on the union as a back-compat
-   *           alias for installs that selected it before the
-   *           0513-CONSOLIDATION move to vercel-ai. lib/aiClient.ts
-   *           still routes 'nca' to /api/nca/prompt.
-   *   'mmx' — @deprecated 2026-06-02. Legacy MiniMax mmx CLI. Kept on
-   *           the union so persisted IDB payloads from before the
-   *           2026-05-02 migration still validate; lib/aiClient.ts
-   *           treats 'mmx' as a back-compat alias for 'nca' so chat
-   *           keeps working until users re-select.
-   *   'vercel-ai' — current default (LLM-INTEGRATION-0513). Direct
-   *           Vercel AI SDK calls, no subprocess.
-   * Configured from the Settings → AI Agent tab.
+   * M3.3-P3 commit a: narrowed from `'pi' | 'nca' | 'mmx' | 'vercel-ai'`
+   * to just `'vercel-ai'`. The pi/nca/mmx subprocess agents are being
+   * retired in v1.8.0 (see `I:\MashupForge-handoff\plans\m33-p3-recon-2026-06-12.md`).
+   * The runtime default in `lib/aiClient.ts` now reads `?? 'vercel-ai'`
+   * and a one-shot IDB migration in `useSettings.ts` rewrites any
+   * persisted `'pi' | 'nca' | 'mmx'` value to `'vercel-ai'` on first
+   * load after upgrade.
    *
    * @deprecated Use {@link aiAgentProvider} instead — kept on the type
    * for one release so persisted user-settings payloads still validate;
    * read sites should fall back to it for back-compat.
    */
-  activeAiAgent?: 'pi' | 'nca' | 'mmx' | 'vercel-ai';
+  activeAiAgent?: 'vercel-ai';
   /**
-   * Canonical name for the AI agent CLI provider. Same semantics as the
-   * deprecated `activeAiAgent` (kept on the type one release for
-   * back-compat with persisted IDB payloads).
-   *
-   * LLM-INTEGRATION-0513 added 'vercel-ai' — direct Vercel AI SDK
-   * calls, no subprocess. Default for fresh installs.
-   *
-   * 0513-CONSOLIDATION: 'nca' and 'mmx' are deprecated as of
-   * 2026-06-02 — vercel-ai is now the only recommended text path.
-   * They are kept on the union for back-compat with persisted
-   * IDB payloads. lib/aiClient.ts still routes 'nca' (and 'mmx'
-   * as its alias) to /api/nca/prompt; vercel-ai routes to
-   * /api/ai/prompt. New code should pick 'vercel-ai'.
+   * M3.3-P3 commit a: narrowed to `'vercel-ai'` only. See
+   * {@link activeAiAgent} for the full migration story.
    */
-  aiAgentProvider?: 'pi' | 'nca' | 'mmx' | 'vercel-ai';
+  aiAgentProvider?: 'vercel-ai';
   /**
    * P3 of PROV-AGNOSTIC-PARAMS: user-selected text model for vercel-ai
    * runs. When set, all vercel-ai prompt calls forward this through
