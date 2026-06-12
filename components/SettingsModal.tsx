@@ -1,20 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Settings as SettingsIcon,
   X,
   Check,
-  Image as ImageIcon,
   Trash2,
   Folder,
   Plus,
   Tag,
-  Minus,
-  Save,
-  FolderOpen,
-  RefreshCw,
   Eye,
   EyeOff,
   Copy,
@@ -22,12 +17,10 @@ import {
   Loader2,
   KeyRound,
   Cpu,
-  Stamp as WatermarkIcon,
   Video as VideoIcon,
   Monitor,
   Sliders,
   Bot,
-  Terminal,
   Sparkles,
   Coins,
 } from 'lucide-react';
@@ -38,24 +31,21 @@ import {
   type GeneratedImage,
 } from './MashupContext';
 import type { UserSettings, WatermarkSettings } from '@/types/mashup';
-import {
-  persistWatermarkToDisk,
-  displayWatermarkUrlAsync,
-  removeWatermarkFile,
-  parseDataUrl,
-  hashBytes,
-  extensionFromMime,
-} from '@/lib/watermarks/storage';
-import {
-  buildWatermarkUploadPatch,
-  buildWatermarkRemovePatch,
-} from '@/lib/watermarks/migrate';
+// M3.4-P4-B2: Watermark helpers moved to ./Settings/WatermarkSettings.tsx
+// along with the Watermark JSX block. The store-side types and the
+// `imageRef` flow are unchanged.
 import { getAllTextModelSpecs } from '@/lib/text-model-specs';
 import { DesktopSettingsPanel } from './DesktopSettingsPanel';
 import { VercelAiModelPicker, defaultVercelAiModel } from './Settings/VercelAiModelPicker';
 import { HiggsfieldConnection } from './Settings/HiggsfieldConnection';
 import { CameraAnglePicker } from './Settings/CameraAnglePicker';
 import { CreditBudgetSettings } from './Settings/CreditBudgetSettings';
+import { SettingsSection } from './Settings/SettingsSection';
+// M3.4-P4-B2: Watermark JSX moved into the WatermarkSettings
+// sub-component. Aliased on import to avoid a name clash with the
+// `WatermarkSettings` store type above.
+import { WatermarkSettings as WatermarkSettingsPanel } from './Settings/WatermarkSettings';
+import { SystemPromptEditor } from './Settings/SystemPromptEditor';
 import {
   HIGGSFIELD_DEFAULT_IMAGE_MODEL,
   HIGGSFIELD_DEFAULT_VIDEO_MODEL,
@@ -96,56 +86,10 @@ import { APP_VERSION, getAppVersion } from '@/lib/app-version';
 type TabId = 'general' | 'apiKeys' | 'aiAgent' | 'aiEngine' | 'desktop';
 
 /**
- * V082: SettingsSection — single source of truth for the section
- * divider + heading + icon + sub-text pattern used throughout this
- * modal. Each tab renders a stack of these; using a helper keeps the
- * spacing, gold accent, and icon-row consistent across Watermark,
- * Default Video Settings, AI System Prompt, and the new AI Engine
- * active-model card. Replaces the ad-hoc `<div className="mt-8 pt-6
- * border-t border-zinc-800"><h4 className="text-lg font-medium
- * text-white mb-4">…</h4></div>` pattern that had drifted across
- * four places with different paddings / icon usage.
+ * V082: SettingsSection — moved to `components/Settings/SettingsSection.tsx`
+ * in M3.4-P4-B2 so the Settings sub-components can wrap their own
+ * content without depending on this modal. Re-imported below.
  */
-function SettingsSection({
-  icon: Icon,
-  title,
-  subtitle,
-  children,
-  tone = 'gold',
-}: {
-  icon: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>;
-  title: string;
-  subtitle?: string;
-  children: React.ReactNode;
-  tone?: 'gold' | 'cyan' | 'emerald';
-}) {
-  const toneText = {
-    gold: 'text-[#c5a062]',
-    cyan: 'text-[#00e6ff]',
-    emerald: 'text-emerald-400',
-  }[tone];
-  const toneBorder = {
-    gold: 'border-[#c5a062]/20',
-    cyan: 'border-[#00e6ff]/20',
-    emerald: 'border-emerald-500/20',
-  }[tone];
-  return (
-    <section className={`mt-8 pt-6 border-t ${toneBorder} first:mt-0 first:pt-0 first:border-t-0`}>
-      <header className="mb-4 flex items-start gap-3">
-        <div className={`mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${toneBorder} bg-black/40 ${toneText}`}>
-          <Icon className="h-4 w-4" aria-hidden={true} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <h4 className="text-base font-semibold text-white leading-tight">{title}</h4>
-          {subtitle && (
-            <p className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">{subtitle}</p>
-          )}
-        </div>
-      </header>
-      {children}
-    </section>
-  );
-}
 
 const TABS: ReadonlyArray<{ id: TabId; label: string; icon: typeof SettingsIcon }> = [
   { id: 'general', label: 'General', icon: Sliders },
@@ -171,22 +115,10 @@ export interface PiStatus {
 
 export type PiBusy = null | 'install' | 'start' | 'stop' | 'setup';
 
-// V080-DES-003: defaults + builder live in lib/agent-prompt so the
-// runtime ("Reset to Default" button) can interpolate the user's actual
-// niches/genres into the system prompt instead of the old hardcoded
-// "Marvel, DC, Star Wars, Warhammer 40k" paragraph.
-import {
-  DEFAULT_NICHES as RECOMMENDED_NICHES,
-  DEFAULT_GENRES as RECOMMENDED_GENRES,
-  buildDefaultAgentPrompt,
-} from '@/lib/agent-prompt';
-import {
-  getAllBlocked,
-  getBlockedByModel,
-  getAllUserWhitelisted,
-  addUserWhitelist,
-  removeUserWhitelist,
-} from '@/lib/trademark-outcomes';
+// M3.4-P4-B2: agent-prompt defaults + builder + trademark-outcome store
+// all moved to ./Settings/SystemPromptEditor.tsx alongside the JSX
+// block that uses them. The modal no longer touches the trademark
+// store directly.
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -251,24 +183,10 @@ export function SettingsModal({
       cancelled = true;
     };
   }, []);
-  // Inline personality-save input — replaces the blocking prompt() dialog.
-  const [personalityName, setPersonalityName] = useState<string | null>(null);
-  // TRADEMARK-STAGED-PIPELINE (2026-05-22): bump on every blocklist /
-  // whitelist mutation. The store lives in localStorage; this tick
-  // forces the next render to re-read it.
-  const [trademarkStoreTick, setTrademarkStoreTick] = useState(0);
-  const bumpTrademarkStore = () => setTrademarkStoreTick((t) => t + 1);
-  // The trademark store lives in localStorage; bumping the tick forces
-  // a re-read on mutation. The lint rule can't see the read-through dep.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const trademarkBlocklist = useMemo(() => getAllBlocked(), [trademarkStoreTick]);
-  // BUG-FIX-2026-06-06: per-model breakdown of the blocklist (same shape
-  // as the underlying store: modelId -> sorted blocked names). Lets the
-  // user see which model is the strictest filter.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const trademarkBlockedByModel = useMemo(() => getBlockedByModel(), [trademarkStoreTick]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const trademarkWhitelist = useMemo(() => getAllUserWhitelisted(), [trademarkStoreTick]);
+  // M3.4-P4-B2: personalityName + trademarkStoreTick + the trademark
+  // selectors moved to ./Settings/SystemPromptEditor.tsx (the only
+  // component that used them). revealedFields stays here because the
+  // password reveal toggles are spread across the API Keys tab.
   // Which password fields are currently revealed.
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
   const toggleReveal = (field: string) =>
@@ -1245,215 +1163,13 @@ export function SettingsModal({
 
           {activeTab === 'general' && (
           <>
-          {/* V082: Watermark Settings — wrapped in SettingsSection
-              for the unified icon-row + gold-accent divider. */}
-          <SettingsSection
-            icon={WatermarkIcon}
-            title="Watermark"
-            subtitle="Brand every generated image with a small overlay so it's recognisable in feeds."
-          >
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-sm text-zinc-300">Enable Watermark</span>
-              <button
-                onClick={() => updateSettings({ watermark: { enabled: !settings.watermark?.enabled } as WatermarkSettings })}
-                className={`w-12 h-6 rounded-full transition-colors ${settings.watermark?.enabled ? 'bg-[#00e6ff]' : 'bg-zinc-700'} relative`}
-              >
-                <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.watermark?.enabled ? 'translate-x-6' : ''}`} />
-              </button>
-            </div>
-
-            {settings.watermark?.enabled && (
-              <div className="space-y-4 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
-                <div>
-                  <label className="block text-sm text-zinc-400 mb-2">Upload Logo</label>
-                  <input
-                    type="file"
-                    id="watermark-upload"
-                    accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      // V1.7.1-M3.2b-WATERMARK-DISK: write the bytes to
-                      // disk via persistWatermarkToDisk. The store
-                      // keeps only a thin imageRef; the runtime `image`
-                      // field becomes an asset:// URL so consumers
-                      // (applyWatermark, GalleryCard, ImageDetailModal)
-                      // don't have to change.
-                      const ref = await persistWatermarkToDisk({
-                        bytes: new Uint8Array(await file.arrayBuffer()),
-                        mime: file.type || 'image/png',
-                      });
-                      if (!ref) {
-                        // Off-Tauri or write failure — fall back to the
-                        // legacy data-URL so the user still sees their
-                        // logo. (Web preview build, or fs-permission
-                        // denied.)
-                        const reader = new FileReader();
-                        reader.onload = (event) => {
-                          const dataUrl = event.target?.result as string;
-                          if (!dataUrl) return;
-                          const parsed = parseDataUrl(dataUrl);
-                          if (!parsed) return;
-                          updateSettings({
-                            watermark: buildWatermarkUploadPatch(
-                              settings.watermark || ({} as WatermarkSettings),
-                              {
-                                dataUrl,
-                                assetUrl: dataUrl,
-                                hash: hashBytes(parsed.bytes),
-                                filename: '',
-                                mimeType: parsed.mime,
-                                size: parsed.bytes.byteLength,
-                              },
-                            ),
-                          });
-                        };
-                        reader.readAsDataURL(file);
-                        return;
-                      }
-                      const assetUrl = await displayWatermarkUrlAsync(ref);
-                      if (!assetUrl) {
-                        // Disk write succeeded but we couldn't resolve
-                        // the asset:// URL — extremely unlikely, but
-                        // handle it by leaving a stale ref and a
-                        // missing image rather than crashing the modal.
-                        return;
-                      }
-                      updateSettings({
-                        watermark: buildWatermarkUploadPatch(
-                          settings.watermark || ({} as WatermarkSettings),
-                          {
-                            dataUrl: '',
-                            assetUrl,
-                            hash: ref.hash,
-                            filename: ref.filename,
-                            mimeType: ref.mimeType,
-                            size: ref.size,
-                          },
-                        ),
-                      });
-                    }}
-                    className="hidden"
-                  />
-                  <label
-                    htmlFor="watermark-upload"
-                    className="flex items-center justify-center w-full py-3 px-4 rounded-xl border-2 border-dashed border-zinc-800 hover:border-[#00e6ff]/40 hover:bg-[#00e6ff]/5 transition-all cursor-pointer group"
-                  >
-                    <div className="flex flex-col items-center gap-1">
-                      <ImageIcon className="w-5 h-5 text-zinc-500 group-hover:text-[#00e6ff]" />
-                      <span className="text-xs text-zinc-500 group-hover:text-zinc-400 font-medium">
-                        {settings.watermark.image ? 'Change Logo' : 'Choose File'}
-                      </span>
-                    </div>
-                  </label>
-
-                  {settings.watermark.image && (
-                    <div className="mt-4 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Visual Preview</span>
-                        <button
-                          onClick={async () => {
-                            // V1.7.1-M3.2b-WATERMARK-DISK: clear the
-                            // runtime image AND the persistent ref, then
-                            // best-effort delete the on-disk file. The
-                            // store write happens first so a disk-write
-                            // failure can't leave the user thinking
-                            // their logo is gone when it isn't.
-                            await removeWatermarkFile();
-                            updateSettings({
-                              watermark: buildWatermarkRemovePatch(
-                                settings.watermark || ({} as WatermarkSettings),
-                              ),
-                            });
-                          }}
-                          className="text-xs text-red-400 hover:text-red-300 transition-colors flex items-center gap-1"
-                        >
-                          <Trash2 className="w-3 h-3" /> Remove
-                        </button>
-                      </div>
-
-                      {/* Visual Indicator Box */}
-                      <div className="relative aspect-video bg-zinc-900 rounded-xl border border-zinc-800/60 overflow-hidden flex items-center justify-center group">
-                        <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#333_1px,transparent_1px)] [background-size:16px_16px]" />
-                        <span className="text-[10px] text-zinc-700 font-mono uppercase tracking-[0.2em] select-none">Image Canvas Preview</span>
-
-                        {/* The Watermark Mockup */}
-                        <div
-                          className={`absolute transition-all duration-300 flex items-center justify-center`}
-                          style={{
-                            top: settings.watermark.position?.includes('top') ? '10%' : settings.watermark.position === 'center' ? '50%' : 'auto',
-                            bottom: settings.watermark.position?.includes('bottom') ? '10%' : 'auto',
-                            left: settings.watermark.position?.includes('left') ? '10%' : settings.watermark.position === 'center' ? '50%' : 'auto',
-                            right: settings.watermark.position?.includes('right') ? '10%' : 'auto',
-                            transform: settings.watermark.position === 'center' ? 'translate(-50%, -50%)' : 'none',
-                            opacity: settings.watermark.opacity || 0.8,
-                            width: `${(settings.watermark.scale || 0.15) * 100}%`,
-                            aspectRatio: '1/1',
-                            maxWidth: '40%',
-                            maxHeight: '40%',
-                          }}
-                        >
-                          <img
-                            src={settings.watermark.image}
-                            alt="Watermark preview"
-                            className="absolute inset-0 w-full h-full object-contain drop-shadow-lg"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* FEAT-002b bug fix: Manage Collections + Channel Name used
-                    to live HERE, nested inside the watermark.enabled wrapper —
-                    so disabling the watermark made them disappear. They have
-                    been lifted up to the top of the General tab. */}
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Position</label>
-                    <select
-                      value={settings.watermark.position || 'bottom-right'}
-                      onChange={(e) => updateSettings({ watermark: { position: e.target.value as WatermarkSettings['position'] } as WatermarkSettings })}
-                      className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
-                    >
-                      <option value="bottom-right">Bottom Right</option>
-                      <option value="bottom-left">Bottom Left</option>
-                      <option value="top-right">Top Right</option>
-                      <option value="top-left">Top Left</option>
-                      <option value="center">Center</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Opacity</label>
-                    <select
-                      value={settings.watermark.opacity || 0.8}
-                      onChange={(e) => updateSettings({ watermark: { opacity: parseFloat(e.target.value) } as WatermarkSettings })}
-                      className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
-                    >
-                      {[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0].map((val) => (
-                        <option key={val} value={val}>{Math.round(val * 100)}%</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Size (Relative to Image)</label>
-                  <select
-                    value={settings.watermark.scale || 0.15}
-                    onChange={(e) => updateSettings({ watermark: { scale: parseFloat(e.target.value) } as WatermarkSettings })}
-                    className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
-                  >
-                    {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5].map((val) => (
-                      <option key={val} value={val}>{Math.round(val * 100)}%</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            )}
-          </SettingsSection>
+          {/* M3.4-P4-B2: Watermark block moved to ./Settings/WatermarkSettings.tsx.
+              Aliased on import as `WatermarkSettingsPanel` to avoid clashing with
+              the `WatermarkSettings` type from @/types/mashup. */}
+          <WatermarkSettingsPanel
+            settings={settings}
+            updateSettings={updateSettings}
+          />
 
           {/* V1.0.7-PROMPT-ENG-A4: anti-AI-look toggle. Wired through
               useImageGeneration → submitLeonardoAndPoll / submitViaAiImage
@@ -1727,368 +1443,16 @@ export function SettingsModal({
 
           {activeTab === 'aiEngine' && (
           <>
-          {/* V082: AI System Prompt + Personality — SettingsSection'd */}
-          <SettingsSection
-            icon={Cpu}
-            title="AI System Prompt"
-            subtitle="Shapes every AI interaction: idea generation, prompt enhancement, captions, and parameter selection."
-            tone="cyan"
-          >
-            <div className="space-y-6 bg-zinc-950/50 p-4 rounded-xl border border-zinc-800/60">
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">System Prompt</label>
-                <textarea
-                  value={settings.agentPrompt}
-                  onChange={(e) => updateSettings({ agentPrompt: e.target.value })}
-                  placeholder="Define who the AI is, how it speaks, and what it focuses on..."
-                  className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 min-h-[220px] resize-y leading-relaxed font-mono"
-                />
-                <p className="text-[10px] text-zinc-500 leading-tight">
-                  {activeAiAgent === 'vercel-ai'
-                    ? 'This prompt shapes every AI interaction: idea generation, prompt enhancement, captions, and parameter selection. Changes apply immediately to the active Vercel.ai backend.'
-                    : 'This prompt shapes every AI interaction: idea generation, prompt enhancement, captions, and parameter selection. Applied to every pi request on top of the mode directive. Restart pi (Settings → Pi.dev AI Engine → Stop + Start) after editing.'}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Content Pillars</label>
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {settings.agentNiches?.map((n) => (
-                        <span
-                          key={n}
-                          className="px-2 py-1 bg-[#00e6ff]/10 text-[#00e6ff] text-[10px] rounded-lg border border-[#00e6ff]/20 flex items-center gap-1 group"
-                        >
-                          {n}
-                          <button
-                            onClick={() => updateSettings({ agentNiches: settings.agentNiches?.filter((t) => t !== n) })}
-                            className="text-[#00e6ff] hover:text-red-400 transition-all"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Add custom niche..."
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const val = e.currentTarget.value.trim();
-                          if (val && !settings.agentNiches?.includes(val)) {
-                            updateSettings({ agentNiches: [...(settings.agentNiches || []), val] });
-                            e.currentTarget.value = '';
-                          }
-                        }
-                      }}
-                      className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-[#00e6ff]/30"
-                    />
-                    <div className="pt-2">
-                      <p className="text-[10px] text-zinc-500 mb-2 uppercase tracking-tight font-semibold">Recommended Niches</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {RECOMMENDED_NICHES.filter((n) => !settings.agentNiches?.includes(n)).map((n) => (
-                          <button
-                            key={n}
-                            onClick={() => updateSettings({ agentNiches: [...(settings.agentNiches || []), n] })}
-                            className="px-2 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-500 hover:text-[#00e6ff] text-[9px] rounded-xl border border-zinc-800/60 transition-all flex items-center gap-1"
-                          >
-                            <Plus className="w-2 h-2" />
-                            {n}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Style Tags</label>
-                    <div className="flex flex-wrap gap-2 mb-2">
-                      {settings.agentGenres?.map((g) => (
-                        <span
-                          key={g}
-                          className="px-2 py-1 bg-[#00e6ff]/10 text-[#00e6ff] text-[10px] rounded-lg border border-[#00e6ff]/20 flex items-center gap-1 group"
-                        >
-                          {g}
-                          <button
-                            onClick={() => updateSettings({ agentGenres: settings.agentGenres?.filter((t) => t !== g) })}
-                            className="text-[#00e6ff] hover:text-red-400 transition-all"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                    <input
-                      type="text"
-                      placeholder="Add custom genre..."
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          const val = e.currentTarget.value.trim();
-                          if (val && !settings.agentGenres?.includes(val)) {
-                            updateSettings({ agentGenres: [...(settings.agentGenres || []), val] });
-                            e.currentTarget.value = '';
-                          }
-                        }
-                      }}
-                      className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30"
-                    />
-                    <div className="pt-2">
-                      <p className="text-[10px] text-zinc-500 mb-2 uppercase tracking-tight font-semibold">Recommended Genres</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {RECOMMENDED_GENRES.filter((g) => !settings.agentGenres?.includes(g)).map((g) => (
-                          <button
-                            key={g}
-                            onClick={() => updateSettings({ agentGenres: [...(settings.agentGenres || []), g] })}
-                            className="px-2 py-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-500 hover:text-[#00e6ff] text-[9px] rounded-xl border border-zinc-800/60 transition-all flex items-center gap-1"
-                          >
-                            <Plus className="w-2 h-2" />
-                            {g}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Saved Personalities */}
-              <div className="space-y-4 pt-4 border-t border-zinc-800/50">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Saved Personalities</label>
-                  {personalityName === null ? (
-                    <button
-                      onClick={() => setPersonalityName('')}
-                      className="text-[10px] text-[#00e6ff] hover:text-[#33eaff] flex items-center gap-1 transition-colors"
-                    >
-                      <Save className="w-3 h-3" />
-                      Save Current
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        autoFocus
-                        type="text"
-                        value={personalityName}
-                        onChange={(e) => setPersonalityName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && personalityName.trim()) {
-                            updateSettings({
-                              savedPersonalities: [
-                                ...(settings.savedPersonalities || []),
-                                {
-                                  id: `p-${Date.now()}`,
-                                  name: personalityName.trim(),
-                                  prompt: settings.agentPrompt || '',
-                                  niches: settings.agentNiches || [],
-                                  genres: settings.agentGenres || [],
-                                },
-                              ],
-                            });
-                            setPersonalityName(null);
-                          }
-                          if (e.key === 'Escape') setPersonalityName(null);
-                        }}
-                        placeholder="Personality name…"
-                        className="text-[10px] bg-zinc-900 border border-zinc-700 rounded px-2 py-0.5 text-zinc-200 w-28 focus:outline-none focus:ring-1 focus:ring-[#00e6ff]/40"
-                      />
-                      <button
-                        disabled={!personalityName.trim()}
-                        onClick={() => {
-                          if (!personalityName.trim()) return;
-                          updateSettings({
-                            savedPersonalities: [
-                              ...(settings.savedPersonalities || []),
-                              {
-                                id: `p-${Date.now()}`,
-                                name: personalityName.trim(),
-                                prompt: settings.agentPrompt || '',
-                                niches: settings.agentNiches || [],
-                                genres: settings.agentGenres || [],
-                              },
-                            ],
-                          });
-                          setPersonalityName(null);
-                        }}
-                        className="text-[10px] text-emerald-400 hover:text-emerald-300 disabled:opacity-40 transition-colors"
-                      >
-                        <Check className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => setPersonalityName(null)}
-                        className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 gap-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
-                  {settings.savedPersonalities?.map((p) => (
-                    <div key={p.id} className="flex items-center justify-between bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-3 group">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-medium text-white">{p.name}</span>
-                        <span className="text-[10px] text-zinc-500">{p.niches.length} Niches • {p.genres.length} Genres</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => updateSettings({
-                            agentPrompt: p.prompt,
-                            agentNiches: p.niches,
-                            agentGenres: p.genres,
-                          })}
-                          className="p-2 bg-[#00e6ff]/10 text-[#00e6ff] hover:bg-[#00e6ff]/20 rounded-lg transition-all"
-                          title="Load Personality"
-                        >
-                          <FolderOpen className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => updateSettings({
-                            savedPersonalities: settings.savedPersonalities?.filter((pers) => pers.id !== p.id),
-                          })}
-                          className="p-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {(!settings.savedPersonalities || settings.savedPersonalities.length === 0) && (
-                    <div className="text-center py-4 border border-dashed border-zinc-800 rounded-xl">
-                      <p className="text-xs text-zinc-500 italic">No saved personalities yet.</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* TRADEMARK-STAGED-PIPELINE (2026-05-22): visibility +
-                  control surface for the auto-managed blocklist. Auto-
-                  blocked names come from Leonardo TRADEMARK errors
-                  observed in past runs; whitelist is a hard override
-                  the user controls. */}
-              <div className="space-y-4 pt-4 border-t border-zinc-800/50">
-                <div>
-                  <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Trademark Blocklist</label>
-                  <p className="text-[10px] text-zinc-500 leading-tight mt-1">
-                    Names Leonardo has rejected in the past. The retry pipeline swaps these on stage 2/3 of a TRADEMARK block. Whitelist a name to let it pass verbatim.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Auto-blocked ({trademarkBlocklist.length})</div>
-                  {trademarkBlocklist.length === 0 ? (
-                    <div className="text-center py-3 border border-dashed border-zinc-800 rounded-xl">
-                      <p className="text-[10px] text-zinc-500 italic">No auto-blocked names yet.</p>
-                    </div>
-                  ) : (
-                    <>
-                      {/* BUG-FIX-2026-06-06: per-model breakdown. If the
-                          store has at least one modelId key, render the
-                          grouped view (shows which model blocks which
-                          names); otherwise fall back to a flat list. */}
-                      {Object.keys(trademarkBlockedByModel).length > 0 ? (
-                        <div className="space-y-3">
-                          {Object.entries(trademarkBlockedByModel).map(([modelId, names]) => (
-                            <div key={modelId} className="space-y-1">
-                              <div className="text-[9px] font-mono text-zinc-600 uppercase tracking-wider">
-                                {modelId} ({names.length})
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {names.map((name) => (
-                                  <span key={`${modelId}:${name}`} className="inline-flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-300 text-[10px] rounded-xl border border-red-500/30">
-                                    {name}
-                                    <button
-                                      type="button"
-                                      onClick={() => { addUserWhitelist(name); bumpTrademarkStore(); }}
-                                      title={`Whitelist "${name}" (let it pass on next attempt across all models)`}
-                                      className="ml-1 text-[9px] uppercase tracking-wider text-emerald-300 hover:text-emerald-200"
-                                    >
-                                      Whitelist
-                                    </button>
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
-                          {trademarkBlocklist.map((name) => (
-                            <span key={name} className="inline-flex items-center gap-1 px-2 py-1 bg-red-500/10 text-red-300 text-[10px] rounded-xl border border-red-500/30">
-                              {name}
-                              <button
-                                type="button"
-                                onClick={() => { addUserWhitelist(name); bumpTrademarkStore(); }}
-                                title="Whitelist this name (let it pass on next attempt)"
-                                className="ml-1 text-[9px] uppercase tracking-wider text-emerald-300 hover:text-emerald-200"
-                              >
-                                Whitelist
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">User-whitelisted ({trademarkWhitelist.length})</div>
-                  {trademarkWhitelist.length === 0 ? (
-                    <div className="text-center py-3 border border-dashed border-zinc-800 rounded-xl">
-                      <p className="text-[10px] text-zinc-500 italic">No whitelisted names yet.</p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-wrap gap-2">
-                      {trademarkWhitelist.map((name) => (
-                        <span key={name} className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-500/10 text-emerald-300 text-[10px] rounded-xl border border-emerald-500/30">
-                          {name}
-                          <button
-                            type="button"
-                            onClick={() => { removeUserWhitelist(name); bumpTrademarkStore(); }}
-                            title="Remove from whitelist (let auto-block take over again)"
-                            className="ml-1"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <button
-                onClick={() => {
-                  // V080-DES-003: build the prompt against the user's
-                  // CURRENT niches/genres (or curated defaults if they
-                  // have nothing selected) so Reset doesn't quietly
-                  // overwrite their personalisation with a hardcoded
-                  // franchise list. The runtime call sites then append
-                  // the live tag list on every request.
-                  const niches = (settings.agentNiches && settings.agentNiches.length > 0)
-                    ? settings.agentNiches
-                    : [...RECOMMENDED_NICHES];
-                  const genres = (settings.agentGenres && settings.agentGenres.length > 0)
-                    ? settings.agentGenres
-                    : [...RECOMMENDED_GENRES];
-                  updateSettings({
-                    agentPrompt: buildDefaultAgentPrompt({ niches, genres }),
-                    agentNiches: niches,
-                    agentGenres: genres,
-                  });
-                }}
-                className="w-full py-3 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-xl font-bold transition-all border border-zinc-800/60 flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest"
-              >
-                <RefreshCw className="w-3 h-3" />
-                Reset to Default Agent Personality
-              </button>
-            </div>
-          </SettingsSection>
+          {/* M3.4-P4-B2: AI System Prompt block (incl. Saved Personalities
+              + Trademark Blocklist + Reset button) moved to
+              ./Settings/SystemPromptEditor.tsx. The editor owns its
+              own local state for the in-flight personality name and
+              the trademark-store tick. */}
+          <SystemPromptEditor
+            settings={settings}
+            updateSettings={updateSettings}
+            activeAiAgent={activeAiAgent}
+          />
 
           {/* V1.1.1-SKILLS-AUTO-USE: toggle list of [agents.md] skills
               from docs/research/higgsfield-skills/. The list is
