@@ -753,6 +753,99 @@ settings, comparisons, ideas, and collections are untouched.
   contract suite for the shared persistence core
 
 ---
+
+### 🎬 Highlights
+
+
+A user-facing release. The whole Settings panel was restructured for the
+first time since the early tab split, every toggle now shares one control,
+and the internal persistence work that began in 1.8.2 is finished — the
+class of bug behind every past "my data disappeared on reload" report is
+now structurally impossible.
+
+#### 🎬 Highlights
+
+### Settings has a new 6-tab layout
+
+The five old tabs (General · API Keys · AI Agent · AI Engine · Desktop)
+became six, grouped by what you're actually configuring:
+
+- **General** — collections, channel name, watermark
+- **AI Engine** — the old *AI Agent* and *AI Engine* tabs merged into one:
+  active agent, model picker, system prompt, and skills all in one place
+- **Image & Video** — image-model defaults, the Higgsfield connection, the
+  prompt controls (anti-AI-look / Director / camera angle), and all video
+  settings, together at last
+- **Providers & Keys** — your Leonardo / Instagram / Pinterest credentials
+- **Credits** — the per-cycle Higgsfield credit budget
+- **Desktop / Advanced** — the native desktop configuration
+
+Nothing was lost in the move — every control is exactly where it was, just
+under a more sensible tab. One redundant dropdown was removed: the
+Higgsfield video-model picker that appeared twice (in the video section and
+in the Higgsfield connection card) now lives only in the connection card.
+
+### One unified toggle, one accent color
+
+Seven hand-rolled on/off switches had drifted into two sizes, two
+accessibility patterns, and two accent colors. They're now a single shared
+toggle with one gold accent and a consistent keyboard/screen-reader
+contract. Purely visual — every toggle does exactly what it did before.
+
+### The "lost my data on reload" bug class is closed
+
+1.8.2 extracted a shared, well-tested persistence core
+(`usePersistentStore`) and moved the *ideas* and *comparison* stores onto
+it. This release finishes the job: **images** and **settings** — the two
+stores behind the original reload-wipe and watermark-loss reports — now run
+on that same core too. All five persistence stores share one audited
+save-safety implementation. The family of bugs where a failed read could
+let a later write overwrite intact-but-unread data can no longer occur in
+any of them.
+
+#### 🔧 Breaking changes
+
+none
+
+#### 📋 Migration notes
+
+No action required — auto-update applies it on next launch. Your images,
+settings, collections, ideas, and comparisons are untouched, and every
+Settings option is still present (some have simply moved to a more fitting
+tab).
+
+#### 🧪 Test summary
+
+- `tsc --noEmit` clean, ESLint **0 errors**
+- Full vitest suite green (**2146 passing**), including the wipe-safety
+  contract suite and the per-hook regression suites for images & settings
+- The Settings reshuffle was verified by an adversarial old-vs-new
+  control-inventory diff: no control dropped, no new duplicate, the single
+  intended de-dup confirmed
+- Branch-protection gate (lint · type-check · full suite · bundle budget)
+  green on every merged PR
+
+#### 🧱 Under the hood (for the curious)
+
+- `usePersistentStore<T>` is now the single state machine behind all five
+  persistence hooks. Heavier hooks (images, settings) opt into extension
+  points — custom hydrate, a localStorage crash-recovery mirror, in-timer
+  write veto — without forking the gate logic.
+- The shared gold `Switch` (`components/Settings/Switch.tsx`) replaces seven
+  bespoke toggles.
+
+---
+## [1.9.0] — 2026-06-13
+
+### Changed
+- **settings:** restructure SettingsModal into a 6-tab IA (M4) (#102)
+- **settings:** unify toggles into a shared gold Switch (M4) (#101)
+- **hooks:** migrate useSettings onto usePersistentStore (wipe-class pt 3) (#100)
+- **hooks:** migrate useImages onto usePersistentStore (wipe-class pt 2) (#99)
+
+### Docs
+- **handoff:** v1.8.2 released; note diagnosed web-context errors (#98)
+
 ## [1.8.2] — 2026-06-13
 
 ### Changed
