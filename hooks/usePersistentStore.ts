@@ -48,7 +48,9 @@ export interface PersistentStoreOptions<T> {
   /** Initial in-memory value before hydration (e.g. [] or defaultSettings). */
   initial: T;
   /**
-   * REQUIRED per-store merge policy: fold the freshly-loaded store value
+   * Per-store merge policy for the DEFAULT load path. REQUIRED unless a
+   * custom `hydrate` is provided (which owns the load and ignores `merge`).
+   * Folds the freshly-loaded store value
    * together with any in-memory mutations made before hydration finished.
    * The merge families MUST stay distinct per hook and CANNOT be one-size:
    *   - id-union, in-memory PATCH wins (useImages/useIdeas) — the loaded
@@ -60,7 +62,7 @@ export interface PersistentStoreOptions<T> {
    * Baking any single policy into the core re-opens V1.4.5 (replace would
    * drop the pre-hydration image) or changes another hook's semantics.
    */
-  merge: (loaded: T | null, prev: T) => T;
+  merge?: (loaded: T | null, prev: T) => T;
   /**
    * Optional value-shape transform applied to the loaded payload on EVERY
    * hydration, before the merge commit (e.g. normalizeOnLoad's tag rewrite +
@@ -86,6 +88,78 @@ export interface PersistentStoreOptions<T> {
   onSaveError?: (e: unknown) => void;
   /** Fired if hydration throws (surface a load-error pill). */
   onLoadError?: (e: unknown) => void;
+  /**
+   * Fired exactly once after a SUCCESSFUL hydration (right after
+   * hydratedOnceRef flips true). A reactive success signal for consumers
+   * whose post-hydration effects must NOT run after a failed load (e.g.
+   * useImages' once-per-session slim migration) — flip a state flag here and
+   * gate the effect on it, instead of reading hydratedOnceRef during render.
+   */
+  onHydrated?: () => void;
+
+  // ── Extension points for the heavier consumers (useImages/useSettings) ──
+  // All optional; omitting every one of them gives the exact lean path that
+  // useIdeas/useComparison use (read → migrateOnLoad → merge, gated write,
+  // no mirror). These let a hook keep its irreducibly-bespoke logic in the
+  // hook while still sharing the wipe-safe gate state machine.
+
+  /**
+   * Custom load override. When provided, FULLY owns hydration: it reads the
+   * source(s) (store + any localStorage patch), performs any consolidation
+   * write-back, and commits the value via the cancellation-guarded `commit`
+   * setter. The store still owns the gates around it (loadTriggered /
+   * isLoaded / loadInFlightRef) and flips hydratedOnceRef true IFF this
+   * resolves WITHOUT throwing — so a bespoke load MUST throw on a real
+   * hydration failure (never swallow it) to keep the persist gate closed.
+   * Use this instead of forcing marker-pair guards / migrations / pendingOps
+   * replay through the generic `merge` signature. When omitted, the default
+   * `read → migrateOnLoad → merge` path runs.
+   */
+  hydrate?: (commit: (updater: React.SetStateAction<T>) => void) => Promise<void>;
+  /**
+   * In-timer veto for the debounced write, re-checked at fire time AFTER the
+   * loadInFlight/hydratedOnce gates (e.g. useImages' migratingRef: suppress
+   * store writes while the once-per-session slim migration walks the array).
+   */
+  shouldSkipWrite?: () => boolean;
+  /**
+   * Fired synchronously right after a canonical store write is INITIATED
+   * (not awaited) — e.g. useImages' autoBackupImages. Receives the value
+   * that was written.
+   */
+  afterWrite?: (value: T) => void;
+  /** Opt-in localStorage crash-recovery mirror (beforeunload flush). */
+  mirror?: MirrorAdapter<T>;
+}
+
+/**
+ * Optional localStorage crash-recovery mirror. Strictly opt-in: hooks without
+ * one (useIdeas/useComparison) get no localStorage write and no beforeunload
+ * listener. The store NEVER auto-adds this — adding a mirror to a hook that
+ * never had one manufactures a brand-new wipe surface unless shouldFlush is
+ * gated correctly. The load-side consume of the mirror lives in the hook's
+ * `hydrate` callback (it's part of the bespoke load), so this adapter only
+ * covers the WRITE side (the beforeunload snapshot).
+ */
+export interface MirrorAdapter<T> {
+  /** Synchronous localStorage write of the crash-recovery snapshot. */
+  writeSync: (value: T) => void;
+  /**
+   * Gate: should the beforeunload flush actually write? Receives the value
+   * and the live gate context. useImages uses `(v) => v.length > 0` (the
+   * empty-array short-circuit — register unconditionally, never write []).
+   * useSettings uses `(_v, c) => c.dirty && c.hydratedOnce`.
+   */
+  shouldFlush: (
+    value: T,
+    ctx: { dirty: boolean; hydratedOnce: boolean; loadInFlight: boolean },
+  ) => boolean;
+  // NOTE: the listener is registered UNCONDITIONALLY on mount (matching
+  // useImages' V1.4.4 fix). There is intentionally no registerWhen gate —
+  // `shouldFlush` is the single fire-time gate, and it already subsumes any
+  // "is the store loaded" condition (e.g. useSettings' `dirty && hydratedOnce`
+  // can only be true after a successful load). A registered-but-inert
+  // listener is observationally identical to an unregistered one.
 }
 
 export interface PersistentStore<T> {
@@ -138,6 +212,11 @@ export function usePersistentStore<T>(
     onSaved,
     onSaveError,
     onLoadError,
+    onHydrated,
+    hydrate,
+    shouldSkipWrite,
+    afterWrite,
+    mirror,
   } = opts;
 
   const [value, setValue] = useState<T>(initial);
@@ -175,9 +254,9 @@ export function usePersistentStore<T>(
 
   // Stable option refs so the load/persist effects don't re-fire when the
   // caller passes fresh closures each render (callers routinely do).
-  const cfg = useRef({ merge, migrateOnLoad, read, write, onSaving, onSaved, onSaveError, onLoadError });
+  const cfg = useRef({ merge, migrateOnLoad, read, write, onSaving, onSaved, onSaveError, onLoadError, onHydrated, hydrate, shouldSkipWrite, afterWrite, mirror });
   useEffect(() => {
-    cfg.current = { merge, migrateOnLoad, read, write, onSaving, onSaved, onSaveError, onLoadError };
+    cfg.current = { merge, migrateOnLoad, read, write, onSaving, onSaved, onSaveError, onLoadError, onHydrated, hydrate, shouldSkipWrite, afterWrite, mirror };
   });
 
   const writeNow = useCallback(
@@ -219,18 +298,33 @@ export function usePersistentStore<T>(
     setIsLoaded(false);
     let cancelled = false;
     loadInFlightRef.current = true;
+    // Cancellation-guarded committer handed to a custom hydrate(): a setValue
+    // after unmount/effect-re-run is a no-op, so the bespoke load can call it
+    // freely without threading `cancelled` through every branch.
+    const commit = (u: React.SetStateAction<T>) => {
+      if (!cancelled) setValue(u);
+    };
     (async () => {
       try {
-        const raw = await cfg.current.read(key);
-        const loaded = raw != null && cfg.current.migrateOnLoad
-          ? cfg.current.migrateOnLoad(raw)
-          : raw;
-        if (!cancelled) setValue((prev) => cfg.current.merge(loaded, prev));
+        if (cfg.current.hydrate) {
+          // Bespoke load owns reading + consolidation + commit. It MUST
+          // throw on a real failure so hydratedOnceRef stays false.
+          await cfg.current.hydrate(commit);
+        } else {
+          const raw = await cfg.current.read(key);
+          const loaded = raw != null && cfg.current.migrateOnLoad
+            ? cfg.current.migrateOnLoad(raw)
+            : raw;
+          // `merge` is required on the default path (asserted): a store with
+          // neither `hydrate` nor `merge` is a programmer error.
+          commit((prev) => cfg.current.merge!(loaded, prev));
+        }
         // SUCCEEDED, not merely "finished": set true only at the end of a
         // clean read (NEVER in finally). A thrown load leaves this false
         // so the persist effect refuses to write for the rest of the
         // session (V1.4.5-HYDRATION-FAIL / V1.6).
         hydratedOnceRef.current = true;
+        if (!cancelled) cfg.current.onHydrated?.();
       } catch (e) {
         cfg.current.onLoadError?.(e);
       } finally {
@@ -253,11 +347,13 @@ export function usePersistentStore<T>(
       // Synchronous in-effect write (useIdeas / useComparison). The effect
       // entry gates already exclude the mid-load window (isLoaded is false
       // while a real load runs), so no in-timer re-check is needed here.
+      if (cfg.current.shouldSkipWrite?.()) return;
       cfg.current.onSaving?.();
       void cfg.current.write(key, value).then(
         () => cfg.current.onSaved?.(),
         (e) => cfg.current.onSaveError?.(e),
       );
+      cfg.current.afterWrite?.(value);
       return;
     }
 
@@ -266,13 +362,46 @@ export function usePersistentStore<T>(
       // Belt-and-suspenders: React's scheduling can let a timer survive the
       // effect cleanup; refuse to fire mid-load or after a failed hydration.
       if (loadInFlightRef.current || !hydratedOnceRef.current) return;
+      // In-timer veto AFTER the load/hydration gates (e.g. migratingRef).
+      if (cfg.current.shouldSkipWrite?.()) return;
       void cfg.current.write(key, valueRef.current).then(
         () => cfg.current.onSaved?.(),
         (e) => cfg.current.onSaveError?.(e),
       );
+      cfg.current.afterWrite?.(valueRef.current);
     }, debounceMs);
     return () => clearTimeout(timer);
   }, [value, isLoaded, loadTriggered, debounceMs, key]);
+
+  // ── beforeunload crash-recovery flush (opt-in via `mirror`) ────────────
+  // Only mounted when a MirrorAdapter is supplied. The flush reads the
+  // latest value via valueRef and the live gate context, and writes the
+  // localStorage snapshot ONLY when the adapter's shouldFlush approves —
+  // so a defaults-shaped / empty / pre-hydration snapshot never lands (the
+  // V1.2.5/V1.4.7 wipe defense on the mirror side).
+  useEffect(() => {
+    if (!cfg.current.mirror) return;
+    // Registered ONCE on mount (empty deps), like useImages' V1.4.4 flush.
+    // The flush re-reads cfg.current.mirror + valueRef + the ref-based gate
+    // context at FIRE time, so it always sees the latest value/state without
+    // re-registering — and shouldFlush is the sole write gate.
+    const flush = () => {
+      const m = cfg.current.mirror;
+      if (!m) return;
+      const cur = valueRef.current;
+      if (
+        m.shouldFlush(cur, {
+          dirty: dirtyRef.current,
+          hydratedOnce: hydratedOnceRef.current,
+          loadInFlight: loadInFlightRef.current,
+        })
+      ) {
+        m.writeSync(cur);
+      }
+    };
+    window.addEventListener('beforeunload', flush);
+    return () => window.removeEventListener('beforeunload', flush);
+  }, []);
 
   return {
     value,

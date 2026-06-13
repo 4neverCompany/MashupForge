@@ -131,3 +131,101 @@ describe('usePersistentStore — wipe-safety contract', () => {
     expect(result.current.value).toEqual([])
   })
 })
+
+// Extension points used by the heavier consumers (useImages/useSettings).
+// These pin the contract independently of those hooks.
+describe('usePersistentStore — extension points', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('a custom hydrate() owns the load and bypasses the default read/merge', async () => {
+    const read = vi.fn(async () => STORED.map((i) => ({ ...i })))
+    const hydrate = vi.fn(async (commit: (u: React.SetStateAction<Item[]>) => void) => {
+      commit([{ id: 'fromHydrate' }])
+    })
+    const { result } = renderHook(() =>
+      usePersistentStore<Item[]>({ key: 'k', initial: [], merge: mergeById, read, hydrate }),
+    )
+    await act(async () => { result.current.requestLoad() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    expect(hydrate).toHaveBeenCalledOnce()
+    expect(read).not.toHaveBeenCalled() // default read path skipped
+    expect(result.current.value.map((i) => i.id)).toEqual(['fromHydrate'])
+  })
+
+  it('a throwing hydrate() leaves hydratedOnce false → no write + onHydrated not called', async () => {
+    const onHydrated = vi.fn()
+    const write = vi.fn(async (_k: string, _v: Item[]) => {})
+    const hydrate = vi.fn(async () => { throw new Error('boom') })
+    const { result } = renderHook(() =>
+      usePersistentStore<Item[]>({ key: 'k', initial: [], merge: mergeById, write, hydrate, onHydrated }),
+    )
+    await act(async () => { result.current.requestLoad() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    expect(onHydrated).not.toHaveBeenCalled()
+    await act(async () => { result.current.mutate((p) => [...p, { id: 'x' }]) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it('onHydrated fires exactly once on a successful load', async () => {
+    const onHydrated = vi.fn()
+    const { result } = renderHook(() =>
+      usePersistentStore<Item[]>({ key: 'k', initial: [], merge: mergeById, read: async () => [], onHydrated }),
+    )
+    await act(async () => { result.current.requestLoad() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    expect(onHydrated).toHaveBeenCalledOnce()
+  })
+
+  it('shouldSkipWrite vetoes the debounced write at fire time', async () => {
+    const write = vi.fn(async (_k: string, _v: Item[]) => {})
+    let skip = false
+    const { result } = renderHook(() =>
+      usePersistentStore<Item[]>({ key: 'k', initial: [], merge: mergeById, read: async () => [], write, debounceMs: 100, shouldSkipWrite: () => skip }),
+    )
+    await act(async () => { result.current.requestLoad() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+    skip = true
+    await act(async () => { result.current.mutate((p) => [...p, { id: 'x' }]) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    expect(write).not.toHaveBeenCalled() // vetoed
+    skip = false
+    await act(async () => { result.current.mutate((p) => [...p, { id: 'y' }]) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    expect(write).toHaveBeenCalledOnce() // now allowed
+  })
+
+  it('afterWrite fires with the written value after each persist', async () => {
+    const afterWrite = vi.fn()
+    const { result } = renderHook(() =>
+      usePersistentStore<Item[]>({ key: 'k', initial: [], merge: mergeById, read: async () => [], afterWrite }),
+    )
+    await act(async () => { result.current.requestLoad() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    await act(async () => { result.current.mutate([{ id: 'z' }]) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    expect(afterWrite).toHaveBeenCalled()
+    expect((afterWrite.mock.calls.at(-1)![0] as Item[]).map((i) => i.id)).toEqual(['z'])
+  })
+
+  it('mirror.writeSync fires on beforeunload only when shouldFlush approves', async () => {
+    const writeSync = vi.fn()
+    // shouldFlush mirrors useImages: only a non-empty value flushes.
+    const { result } = renderHook(() =>
+      usePersistentStore<Item[]>({
+        key: 'k', initial: [], merge: mergeById, read: async () => [],
+        mirror: { writeSync, shouldFlush: (v) => v.length > 0 },
+      }),
+    )
+    await act(async () => { result.current.requestLoad() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    // empty → no flush
+    act(() => { window.dispatchEvent(new Event('beforeunload')) })
+    expect(writeSync).not.toHaveBeenCalled()
+    // non-empty → flush
+    await act(async () => { result.current.mutate([{ id: 'a' }]) })
+    act(() => { window.dispatchEvent(new Event('beforeunload')) })
+    expect(writeSync).toHaveBeenCalledWith([{ id: 'a' }])
+  })
+})

@@ -165,6 +165,35 @@ describe('useImages — V1.4.5 debounce-write wipe protection', () => {
     expect(result.current.savedImages.map(i => i.id)).toEqual(['img-new'])
   })
 
+  it('hydration FAILURE on the localStorage-present path ALSO never overwrites the store', async () => {
+    // Coverage for the inner-fallback / non-empty-branch store-read throw
+    // (the original + migrated only had a test for the no-localStorage
+    // else-branch throw). localStorage HAS a value, so the load enters the
+    // non-empty branch: the store read throws → the inner catch retries
+    // get() → that throws too → it must PROPAGATE out of the load so
+    // hydratedOnce stays false and the persist gate stays shut. A future
+    // edit that swallowed either get() here would silently re-open
+    // V1.4.5-HYDRATION-FAIL — this test catches that.
+    localStorage.setItem('mashup_saved_images', JSON.stringify([img('ls-x')]))
+    getMock.mockImplementation(async () => { throw new Error('IDB unavailable') })
+    const { result } = renderHook(() => useImages())
+    await act(async () => {
+      result.current.requestLoad()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500)
+    })
+    await act(async () => {
+      result.current.saveImage(img('img-new'))
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    // The store must be untouched — no write of the lone in-memory mutation.
+    expect(setMock).not.toHaveBeenCalled()
+    expect(storeData['mashup_saved_images']).toEqual(libraryInStore)
+  })
+
   it('in-memory mutation made during an in-flight load survives the hydration commit', async () => {
     // Slow down the store read so the mutation lands mid-load.
     let release: (v: unknown) => void = () => {}
