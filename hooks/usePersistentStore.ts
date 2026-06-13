@@ -160,6 +160,23 @@ export interface MirrorAdapter<T> {
   // "is the store loaded" condition (e.g. useSettings' `dirty && hydratedOnce`
   // can only be true after a successful load). A registered-but-inert
   // listener is observationally identical to an unregistered one.
+
+  /**
+   * When true, the debounced-write effect's CLEANUP also writes the snapshot
+   * (the V1.2.5-HOTFIX soft-nav safety net: an unmount/dep-change before the
+   * debounce fires leaves a localStorage snapshot the next load migrates).
+   * Gated by the SAME `shouldFlush` PLUS an implicit `!loadInFlight` (the
+   * store adds it). useImages omits this (beforeunload only); useSettings
+   * sets it.
+   */
+  snapshotOnCleanup?: boolean;
+  /**
+   * Called after a SUCCESSFUL canonical store write resolves — the mirror's
+   * chance to drop its now-superseded localStorage snapshot (useSettings'
+   * V1.6 removeItem, so a stale one-commit-old snapshot can never outrank the
+   * just-persisted state on the next load). The mirror owns the key.
+   */
+  removeSnapshot?: () => void;
 }
 
 export interface PersistentStore<T> {
@@ -365,12 +382,36 @@ export function usePersistentStore<T>(
       // In-timer veto AFTER the load/hydration gates (e.g. migratingRef).
       if (cfg.current.shouldSkipWrite?.()) return;
       void cfg.current.write(key, valueRef.current).then(
-        () => cfg.current.onSaved?.(),
+        () => {
+          // V1.6: the canonical write supersedes any crash-recovery snapshot
+          // the cleanup wrote earlier — drop it so a stale one can't outrank
+          // this state as an "in-flight patch" on the next load.
+          cfg.current.mirror?.removeSnapshot?.();
+          cfg.current.onSaved?.();
+        },
         (e) => cfg.current.onSaveError?.(e),
       );
       cfg.current.afterWrite?.(valueRef.current);
     }, debounceMs);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      // V1.2.5-HOTFIX soft-nav snapshot: an unmount / dep-change before the
+      // debounce fires leaves a localStorage snapshot for the next load.
+      // Same `shouldFlush` gate as beforeunload PLUS an implicit !loadInFlight
+      // (never snapshot a not-yet-hydrated value).
+      const m = cfg.current.mirror;
+      if (
+        m?.snapshotOnCleanup
+        && !loadInFlightRef.current
+        && m.shouldFlush(valueRef.current, {
+          dirty: dirtyRef.current,
+          hydratedOnce: hydratedOnceRef.current,
+          loadInFlight: loadInFlightRef.current,
+        })
+      ) {
+        m.writeSync(valueRef.current);
+      }
+    };
   }, [value, isLoaded, loadTriggered, debounceMs, key]);
 
   // ── beforeunload crash-recovery flush (opt-in via `mirror`) ────────────
