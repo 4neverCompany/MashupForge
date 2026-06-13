@@ -97,7 +97,32 @@ interface ExtractResult {
   /** True if a marker was matched, false if we fell back to heuristic. */
   matchedMarker: boolean;
   /** How the draft was extracted — for diagnostics / future-proofing. */
-  source: 'marker' | 'paragraph-heuristic' | 'last-paragraph' | 'fallback';
+  source: 'marker' | 'paragraph-heuristic' | 'last-paragraph' | 'fallback' | 'rejected-commentary';
+}
+
+/**
+ * V1.8.1-COMMENTARY-LEAK: a candidate draft is "commentary-only" when it
+ * has at least one commentary tell AND zero image-prompt vocabulary. The
+ * v1.7.0 extractor handled commentary that WRAPS a real prompt body, but
+ * when the model emits ONLY commentary and no draft at all (Maurice's
+ * "The checker is strict… Let me build a final draft…" with nothing
+ * after it), the last-paragraph fallback returned that commentary
+ * verbatim — and it sailed into the image model.
+ *
+ * The conjunction is deliberately conservative: a clean short prompt
+ * ("Darth Vader in an Iron Man suit") has no commentary tell, so it is
+ * NEVER rejected. Only text that openly narrates ABOUT the prompt (and
+ * carries no visual vocabulary to redeem it) is dropped — at which point
+ * the caller's empty-draft path (`generate_prompt`'s min(40) schema /
+ * the agent-loop fallback / the pipeline's plausibility gate) correctly
+ * falls back to the verbatim concept instead of generating garbage.
+ */
+export function isCommentaryOnly(text: string): boolean {
+  if (!text || text.trim().length === 0) return false;
+  const hasCommentaryTell = COMMENTARY_PATTERNS.some((p) => p.test(text));
+  if (!hasCommentaryTell) return false;
+  const hasPromptVocab = PROMPT_VOCAB.some((re) => re.test(text));
+  return !hasPromptVocab;
 }
 
 /**
@@ -142,7 +167,9 @@ export function extractDraftFromCommentary(raw: string): ExtractResult {
     // prompt body ("Niches anchored. Ready to feed to generate_image
     // — just say the word.").
     const finalDraft = trimCommentarySuffix(trimmed);
-    if (finalDraft.length >= 40) {
+    // V1.8.1: a marker followed by pure commentary (no real body) must
+    // not be handed off — fall through to the heuristic / give-up path.
+    if (finalDraft.length >= 40 && !isCommentaryOnly(finalDraft)) {
       return { draft: finalDraft, matchedMarker: true, source: 'marker' };
     }
   }
@@ -176,9 +203,17 @@ export function extractDraftFromCommentary(raw: string): ExtractResult {
 
   // 3. Last-resort: last paragraph (often the prompt when the model
   //    leads with the commentary).
-  const last = paragraphs[paragraphs.length - 1];
+  const last = trimCommentarySuffix(paragraphs[paragraphs.length - 1]);
+  // V1.8.1-COMMENTARY-LEAK: if even the last paragraph is pure
+  // commentary, GIVE UP — return empty so the caller falls back to the
+  // verbatim concept rather than feeding the model's musings to the
+  // image generator (the credit-burning "random not-fitting images"
+  // Maurice reported). The previous code returned this verbatim.
+  if (isCommentaryOnly(last)) {
+    return { draft: '', matchedMarker: false, source: 'rejected-commentary' };
+  }
   return {
-    draft: trimCommentarySuffix(last),
+    draft: last,
     matchedMarker: false,
     source: 'last-paragraph',
   };

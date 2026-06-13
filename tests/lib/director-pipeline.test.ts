@@ -182,4 +182,10 @@ describe('checkPromptPlausibility', () => {
       "Sorry, the generate_prompt tool kept failing so there is no draft available for this concept and you should retry later with a different angle or model.";
     expect(checkPromptPlausibility(apology, undefined)).toMatch(/failure explanation/i);
   });
+
+  it('rejects reasoning/commentary that slipped past the extractor (V1.8.1)', () => {
+    const commentary =
+      'The checker is strict about literal keyword matches. Let me build a final draft that explicitly weaves in the niche vocabulary and required anti-AI-look tokens for this concept.';
+    expect(checkPromptPlausibility(commentary, 'natural')).toMatch(/commentary|reasoning/i);
+  });
 });

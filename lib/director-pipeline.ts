@@ -67,6 +67,19 @@ export function checkPromptPlausibility(
   ) {
     return 'director returned a failure explanation instead of a prompt';
   }
+  // V1.8.1-COMMENTARY-LEAK: last line of defense against the model's
+  // reasoning/meta-narration reaching the image generator (the
+  // credit-burning off-topic images Maurice reported). The server-side
+  // extractor (prompt-extract.ts) is the primary guard; this client
+  // gate catches anything that slips through a future regression. A
+  // genuine image prompt never talks ABOUT building a prompt.
+  if (
+    /\b(the\s+checker|let\s+me\s+(build|draft|think|write)|niches?\s+anchored|ready\s+to\s+feed|anti-?ai-?look\s+tokens?|copy-?paste\s+ready|final\s+(draft|prompt)\s*\(|weaves?\s+in\s+the\s+niche)\b/i.test(
+      prompt,
+    )
+  ) {
+    return 'director returned commentary/reasoning instead of a prompt';
+  }
   return null;
 }
 
