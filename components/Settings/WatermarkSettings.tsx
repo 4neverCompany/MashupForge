@@ -16,6 +16,7 @@ import {
 import { showToast } from '@/components/Toast';
 import type { UserSettings, WatermarkSettings } from '@/types/mashup';
 import { SettingsSection } from './SettingsSection';
+import { Switch } from './Switch';
 
 /**
  * M3.4-P4-B2: Watermark settings block, extracted from
@@ -58,16 +59,12 @@ export function WatermarkSettings({ settings, updateSettings }: WatermarkSetting
     >
       <div className="flex items-center justify-between mb-4">
         <span className="text-sm text-zinc-300">Enable Watermark</span>
-        <button
-          onClick={() =>
-            updateSettings({ watermark: { enabled: !wm.enabled } as WatermarkSettings })
-          }
-          className={`w-12 h-6 rounded-full transition-colors ${wm.enabled ? 'bg-[#00e6ff]' : 'bg-zinc-700'} relative`}
-        >
-          <span
-            className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${wm.enabled ? 'translate-x-6' : ''}`}
-          />
-        </button>
+        <Switch
+          checked={!!wm.enabled}
+          onChange={(v) => updateSettings({ watermark: { enabled: v } as WatermarkSettings })}
+          label="Watermark"
+          size="md"
+        />
       </div>
 
       {wm.enabled && (

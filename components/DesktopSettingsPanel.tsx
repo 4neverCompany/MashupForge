@@ -14,6 +14,7 @@ import {
 import { PortConflictBanner } from './PortConflictBanner';
 import { AutoUpdateSettings } from './Settings/AutoUpdateSettings';
 import { AutoStartSettings } from './Settings/AutoStartSettings';
+import { Switch } from './Settings/Switch';
 
 // Provider/model changes need pi to respawn so the new env reaches the
 // child process. The next prompt will auto-restart pi after stop().
@@ -268,18 +269,7 @@ function PlatformGroupSection({
           )}
         </div>
         {showToggle && (
-          <button
-            type="button"
-            onClick={() => onToggle(!enabled)}
-            aria-pressed={enabled}
-            aria-label={enabled ? `Disable ${group.label}` : `Enable ${group.label}`}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent
-              transition-colors focus:outline-none focus:ring-2 focus:ring-[#c5a062]/40
-              ${enabled ? 'bg-[#c5a062]' : 'bg-zinc-700'}`}
-          >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform
-              ${enabled ? 'translate-x-4' : 'translate-x-0'}`} />
-          </button>
+          <Switch checked={enabled} onChange={onToggle} label={group.label} size="sm" />
         )}
       </div>
       {enabled && fieldMetas.length > 0 && (
@@ -434,20 +424,13 @@ export function DesktopSettingsPanel() {
               <p className="text-[10px] text-zinc-600">Start MashupForge when Windows boots</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void autolaunch.toggle()}
+          <Switch
+            checked={autolaunch.enabled}
+            onChange={() => void autolaunch.toggle()}
+            label="launch at startup"
             disabled={autolaunch.loading}
-            aria-pressed={autolaunch.enabled}
-            aria-label={autolaunch.enabled ? 'Disable launch at startup' : 'Enable launch at startup'}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent
-              transition-colors focus:outline-none focus:ring-2 focus:ring-[#c5a062]/40
-              ${autolaunch.enabled ? 'bg-[#c5a062]' : 'bg-zinc-700'}
-              ${autolaunch.loading ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform
-              ${autolaunch.enabled ? 'translate-x-4' : 'translate-x-0'}`} />
-          </button>
+            size="sm"
+          />
         </div>
       )}
 
