@@ -46,6 +46,11 @@ export function CarouselPickerModal({
   // where `openCarouselPicker` reset `pickerSelected` before showing.
   const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
 
+  // Sync the picker selection from the target group on an OPEN
+  // transition (guarded by `if (!open) return`) — the original
+  // in-MainContent reset behavior. Not a pure derived value:
+  // pickerSelected is also mutated by user clicks while open.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!open) return;
     if (pickerTargetGroupId) {
@@ -55,6 +60,7 @@ export function CarouselPickerModal({
       setPickerSelected(new Set());
     }
   }, [open, pickerTargetGroupId, carouselGroups]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!open) return null;
 
