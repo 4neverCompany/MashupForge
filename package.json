@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "precommit": "tsc --noEmit && vitest run",
+    "precommit": "tsc --noEmit && eslint . && vitest run",
     "typecheck": "tsc --noEmit",
     "test:ci": "vitest run --reporter=verbose",
     "prepare": "simple-git-hooks",
