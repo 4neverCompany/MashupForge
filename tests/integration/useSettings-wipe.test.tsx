@@ -172,6 +172,37 @@ describe('useSettings — V1.4.7 reload wipe protection', () => {
     expect(written.watermark).toEqual(customWatermark)
   })
 
+  it('a THROWING (rejected) store read keeps the persist gate shut — no write after a later edit', async () => {
+    // Coverage hole the usePersistentStore migration review flagged: the
+    // suite's only failure test uses a HANGING read (never resolves); this
+    // covers a REJECTED read, exercising the catch / onLoadError /
+    // hydratedOnce-stays-false branch. A regression that set hydratedOnce
+    // true on failure (re-opening the V1.6 wipe) would otherwise pass green.
+    // localStorage is empty (beforeEach) → load takes the no-localStorage
+    // else branch → its single get() throws → propagates → hydratedOnce false.
+    getMock.mockImplementationOnce(async () => { throw new Error('IDB unavailable') })
+    const { result } = renderHook(() => useSettings())
+    await act(async () => {
+      result.current.requestLoad()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    // Hydration failed → error surfaced, store untouched.
+    expect(result.current.saveState.kind).toBe('error')
+    expect((storeData['mashup_settings'] as UserSettings).watermark).toEqual(customWatermark)
+    setMock.mockClear()
+    // An edit after the failed load must NOT write the (intact) store.
+    await act(async () => {
+      result.current.updateSettings({ channelName: 'AfterFail' })
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(setMock).not.toHaveBeenCalled()
+    expect((storeData['mashup_settings'] as UserSettings).watermark).toEqual(customWatermark)
+  })
+
   it('clearSettings before hydration stays cleared after the hydration commit', async () => {
     ;(storeData['mashup_settings'] as Partial<UserSettings>).cameraAngle = 'low-angle'
     const { result } = renderHook(() => useSettings())

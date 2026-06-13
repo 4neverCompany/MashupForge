@@ -209,6 +209,37 @@ describe('usePersistentStore — extension points', () => {
     expect((afterWrite.mock.calls.at(-1)![0] as Item[]).map((i) => i.id)).toEqual(['z'])
   })
 
+  it('mirror.snapshotOnCleanup writes the snapshot on unmount when dirty+hydrated', async () => {
+    const writeSync = vi.fn()
+    const { result, unmount } = renderHook(() =>
+      usePersistentStore<Item[]>({
+        key: 'k', initial: [], merge: mergeById, read: async () => [], debounceMs: 200,
+        mirror: { writeSync, shouldFlush: (_v, c) => c.dirty && c.hydratedOnce, snapshotOnCleanup: true },
+      }),
+    )
+    await act(async () => { result.current.requestLoad() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+    // no edit yet → unmount must NOT snapshot (not dirty)
+    await act(async () => { result.current.mutate([{ id: 'a' }]) }) // arms dirty; schedules a 200ms write
+    unmount() // cleanup runs before the 200ms timer fires
+    expect(writeSync).toHaveBeenCalledWith([{ id: 'a' }])
+  })
+
+  it('mirror.removeSnapshot fires after a successful canonical write', async () => {
+    const removeSnapshot = vi.fn()
+    const { result } = renderHook(() =>
+      usePersistentStore<Item[]>({
+        key: 'k', initial: [], merge: mergeById, read: async () => [], write: async () => {}, debounceMs: 100,
+        mirror: { writeSync: vi.fn(), shouldFlush: () => false, removeSnapshot },
+      }),
+    )
+    await act(async () => { result.current.requestLoad() })
+    await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+    await act(async () => { result.current.mutate([{ id: 'a' }]) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    expect(removeSnapshot).toHaveBeenCalled()
+  })
+
   it('mirror.writeSync fires on beforeunload only when shouldFlush approves', async () => {
     const writeSync = vi.fn()
     // shouldFlush mirrors useImages: only a non-empty value flushes.
