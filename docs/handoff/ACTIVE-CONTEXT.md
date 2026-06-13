@@ -2,32 +2,44 @@
 
 > **Was ist grad in flight?** Lese das hier, um zu wissen welche Threads offen sind, ohne SESSION-LOG durchsuchen zu müssen.
 
-## ⚡ AKTUELL (2026-06-13, Session 10): v1.8.1-Cleanup-Batch fertig codiert — Release-OK ausstehend
+## ⚡ AKTUELL (2026-06-13, Session 10): v1.8.1 RELEASED + 2 Followups gemerged → nächster Milestone M4
 
-**Stand:** main = **v1.8.0**. Der v1.8.1-Batch (Audit-Nachbesserung der
-Fremdagent-1.8.0-Arbeit, "alles fixen → v1.8.1") ist codiert + grün; PRs
-warten auf Merge bzw. sind gemerged. Reihenfolge bewusst linear-grün:
-ESLint-PR zuerst → main grün → restliche PRs rebasen.
+**Stand:** main = **v1.8.1 SHIPPED** (Tag 6d81ac9, alle 4 Assets + Auto-Update,
+Release-Notes auf Highlights gesetzt). Maurice gab explizites Release-OK.
+v1.8.1 = Audit-Nachbesserung der Fremdagent-1.7.0→1.8.0-Arbeit. Danach 2
+Followups gemerged (auf main, **NICHT getaggt** — akkumulieren für ein
+zukünftiges Release; nur v1.8.1 hatte OK).
 
-**PRs (alle einzeln verifiziert — tsc/eslint/build/vitest):**
-- **#89** (auf main, 35aba9d): 2 Live-Bugs — Director-Thinking-Leak
-  (Credit-Burner) + Higgsfield UNC-cwd-Spawn-Fix.
-- **#90 (PR-A, gemerged):** weekly-fill past-failed-counting +
-  Watermark-Migration-Persistenz (+ Regressionstests).
-- **#91 (PR-B, gemerged):** ESLint grün (9 React-Compiler-Verstöße +
-  Date.now-during-render-Fix). **→ CI-Schuld unten ERLEDIGT.**
-- **#92 (PR-D, offen/CI):** pi.dev-Retirement (M3.3-P3c, ~2280 Zeilen).
-- **PR-E (offen):** Hygiene — Changelogs + Handoff + Tests (dieser Stand).
-- **M3.4:** kein Code — First-Load-Ziel bereits via MashupStudio-Lazy
-  erfüllt (ROADMAP korrigiert).
+**v1.8.1-Batch (alle gemerged + im Release):**
+- **#89** Director-Thinking-Leak (Credit-Burner) + Higgsfield UNC-cwd-Fix.
+- **#90** weekly-fill past-failed-counting + Watermark-Migration-Persistenz.
+- **#91** ESLint grün (9 React-Compiler-Verstöße + Date.now-during-render).
+- **#92** pi.dev-Retirement (M3.3-P3c, ~2280 Zeilen; mmx unangetastet).
+- **#93** Hygiene (Changelogs 1.8.0+1.8.1, Handoff, parseGeneratedItems-Tests).
+- **M3.4:** kein Code — First-Load-Ziel bereits via MashupStudio-Lazy erfüllt.
 
-**✅ CI-Schuld ERLEDIGT:** der ESLint-Rot seit #87/#88 ist mit #91 (PR-B)
-behoben — main ist wieder 0 ESLint-Fehler.
+**Post-v1.8.1-Followups (auf main, ungetaggt):**
+- **#94 CI-Hardening:** main hatte GAR KEINEN Branch-Schutz → DAS war die
+  Wurzel warum v1.8.0 ESLint-rot shippte. **main jetzt branch-protected:**
+  ESLint + TypeScript + Vitest + Bundle-size sind REQUIRED checks. `gh pr
+  merge` BLOCKT bei rotem Check (Admin-Notausgang: `--admin`; strict:false;
+  keine required reviews). + eslint läuft jetzt im precommit-Hook.
+- **#95 usePersistentStore<T>:** Wipe-Vektor-Bug-Klasse (die Familie hinter
+  dem v1.4.x-Reload-Wipe + dem v1.8.1-Watermark-Bug). Skeleton extrahiert +
+  **useIdeas + useComparison** migriert (nach 7-Agent map→design→adversarial-
+  Workflow). useComparisons V1.4.7-Hydration-Fail-Loch nebenbei geschlossen.
 
-**▶ Offene Vorschläge an Maurice:** **v1.8.1-Release** sobald #92 + PR-E
-gemerged + grün sind — auf explizites OK warten (Batch-Release-Konvention,
-release.sh + Tag = ~20min-Build + forced-update). Danach: **M4**
-(Settings-Redesign → v1.9.0).
+**▶ NÄCHSTER EINSTIEG:**
+- **M4** (Settings-Redesign → v1.9.0) — nächster Milestone, durch M3.3-Cleanup
+  jetzt entsperrt. Siehe ROADMAP.md.
+- **Offener Thread — Task #41:** useImages + useSettings auf usePersistentStore
+  migrieren (Rest der Wipe-Klasse). Braucht erst neue Extension-Points am
+  Skeleton: write-during-load-consolidation (useImages:141 — der Adversarial-
+  Verify-Befund), opt-in MirrorAdapter (localStorage-Mirror + beforeunload),
+  PendingOps. useImages-Suiten (debounce-wipe/flush/flush-v144) + useSettings-
+  Suiten UNCHANGED als Gate laufen lassen. useCollections bleibt bespoke
+  (inverse-safety: sicher durch ABWESENHEIT von Writern).
+- Offen: Pre-Hydration-Opt-out-Befund (deferred v1.6.0-Review).
 
 ---
 ### (älterer Stand, evtl. überholt — Stand 2026-06-11)
