@@ -704,6 +704,63 @@ No action required — auto-update applies everything on next launch.
   past-failed weekly-fill case and the watermark-migration persistence
 
 ---
+
+### 🎬 Highlights
+
+
+A small, low-risk release. There are **no new features and no visible UI
+changes** — it bundles internal-quality work that landed after 1.8.1:
+hardening the data-persistence layer that every save flows through, and
+closing the process gap that let 1.8.0 ship with a broken lint check.
+
+#### 🎬 Highlights
+
+### Comparison results are harder to lose
+
+The five hooks that persist your data (images, settings, comparisons,
+ideas, collections) each hand-rolled the same save-safety logic — and a
+missing guard in any one of them is exactly what caused past data-loss
+reports. This release extracts that logic into one shared, well-tested
+core (`usePersistentStore`) and moves the **ideas** and **comparison**
+stores onto it. As a side effect it closes a latent edge case: if reading
+the comparison store ever failed, a subsequent edit could overwrite the
+intact-but-unread data — that can no longer happen. (Images and settings
+keep their existing, separately-tested implementations for now.)
+
+### A CI gate so a broken build can't ship again
+
+1.8.0 shipped with a red lint check because the repo's `main` branch had
+no required-checks gate at all. That's fixed at the process level: lint,
+type-check, the full test suite, and the bundle-size budget must now pass
+before anything merges, and the pre-commit hook runs lint locally too.
+This is invisible to you as a user — it's insurance against the class of
+mistake that produced the 1.8.1 cleanup.
+
+#### 🔧 Breaking changes
+
+none
+
+#### 📋 Migration notes
+
+No action required — auto-update applies it on next launch. Your images,
+settings, comparisons, ideas, and collections are untouched.
+
+#### 🧪 Test summary
+
+- `tsc --noEmit` clean, ESLint **0 errors**
+- `next build` OK, all routes within the 300 KB first-load budget
+- Full vitest suite green (2136 passing), including a new wipe-safety
+  contract suite for the shared persistence core
+
+---
+## [1.8.2] — 2026-06-13
+
+### Changed
+- **hooks:** extract usePersistentStore<T>; migrate useIdeas + useComparison (#95)
+
+### Docs
+- **handoff:** v1.8.1 released + #94/#95 followups; main is branch-protected (#96)
+
 ## [1.8.1] — 2026-06-13
 
 ### Fixed
