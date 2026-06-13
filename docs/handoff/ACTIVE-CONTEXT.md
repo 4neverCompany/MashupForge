@@ -2,13 +2,32 @@
 
 > **Was ist grad in flight?** Lese das hier, um zu wissen welche Threads offen sind, ohne SESSION-LOG durchsuchen zu müssen.
 
-## ⚡ AKTUELL (2026-06-11): v1.7.0 SHIPPED (M2 ✅) — Einstieg = M3 + Ops-Pflichten
+## ⚡ AKTUELL (2026-06-13, Session 10): v1.8.0 RELEASED + 2 Maurice-Hotfixes auf main
 
-**v1.7.0 published** (00:41 UTC, von einer parallelen Session): M2 komplett
-(#69 Camera-Angle per Image, #70 Skill-Routing) + #71 Director-Clean-Prompt,
-#72 Pipeline-Higgsfield (verbraucht jetzt echte Credits!), #73
-Watermark-Timeout. Handoff wurde von dieser Session NICHT nachgezogen —
-jetzt erledigt.
+**Stand:** main = **v1.8.0** (released 2026-06-12, von parallelen Sessions:
+M3.2b Watermark-to-disk, M3.4-P4-Refactors #87/#88, 4-Bug-Batch 31e9b4e).
+Diese Sessions ziehen den Handoff oft NICHT nach — Vorsicht, der Block
+unten ("M3-Fortschritt") spiegelt evtl. nicht alles, was schon gemerged
+ist. `git log --oneline` ist die Wahrheit.
+
+**Session 10 (heute): 2 Live-Bugs von Maurice gefixt → PR #89 auf main
+(35aba9d):** (1) Director-Thinking-Leak in Bildprompts (Credit-Burner) —
+`prompt-extract.ts` gibt jetzt bei Nur-Kommentar auf + Plausibility-Gate;
+(2) Higgsfield-CLI UNC-cwd-Warnung gefixt (der eigentliche
+`aspect-ratio`-Fehler war schon in v1.8.0 als `--aspect_ratio` gelöst —
+Maurice muss updaten). Details siehe SESSION-LOG.
+
+**🔴 BLOCKIERT NICHTS, aber wichtig — CI-Schuld:** main ist seit #87/#88
+**ESLint-rot** (9 React-Compiler-Fehler in MainContent.tsx; v1.8.0 damit
+released). ESLint ist KEIN merge-blockierender Check. Fix-Task existiert.
+Pre-commit läuft nur tsc+vitest → lint rutscht durch.
+
+**▶ Offene Vorschläge an Maurice:** v1.8.1-Patch für die 2 Hotfixes
+(Credit-Burner!) — OK abwarten. Danach M3.3-Cleanup (bmad-Removal, OK
+liegt vor) + die ESLint-Schuld.
+
+---
+### (älterer Stand, evtl. überholt — Stand 2026-06-11)
 
 **Ops-Pflichten: ✅ ALLE ERLEDIGT (11.06. vormittags):**
 1. ✅ camofox-integration.yml-YAML-Fix (649b4ac).
