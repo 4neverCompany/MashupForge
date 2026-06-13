@@ -312,6 +312,16 @@ export function useSettings() {
     (async () => {
       const patch = await migrateWatermarkToDisk(current);
       if (cancelled || !patch || !patch.watermark) return;
+      // V1.8.1: arm the persist gate. The migration patches settings via
+      // setSettings below, but the 300ms-debounced store-write refuses
+      // unless dirtyRef is set (only updateSettings/clearSettings arm it
+      // — see the gate at the persist effect). Without this, the slim
+      // {imageRef + asset URL} record stays in memory only: the store
+      // KEEPS the ~10.7MB data-URL across sessions and this migration
+      // re-runs every launch — defeating M3.2b's entire purpose (shrink
+      // the store). Arming dirtyRef makes the slimmed watermark persist
+      // exactly once, like every other settings edit.
+      dirtyRef.current = true;
       // The spread of `patch.watermark` is `Partial<WatermarkSettings>`
       // (imageRef is optional), and merging it with `prev.watermark`
       // can leave every field as `... | undefined`. The setState

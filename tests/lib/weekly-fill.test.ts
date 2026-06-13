@@ -87,6 +87,23 @@ describe('computeWeekFillStatus', () => {
     expect(s.pendingApprovalTotal).toBe(1);
   });
 
+  it('counts a PAST-dated failed post toward fill (the realistic case)', () => {
+    // V1.8.1: the prior test only had a FUTURE-dated failed post
+    // (2026-04-21 vs NOW 2026-04-20), so it passed the `ts < now`
+    // filter and counted even without the fix — masking the real bug.
+    // A real failed post is in the PAST (you already tried the slot).
+    // NOW = 2026-04-20 12:00; this failed post at 08:00 today is past.
+    // Pre-fix it was dropped by the future-only filter → day showed
+    // "open" → the daemon re-filled the slot Maurice already used.
+    const posts: ScheduledPost[] = [
+      post('2026-04-20', '08:00', 'failed'), // past today — must still count
+    ];
+    const s = computeWeekFillStatus(posts, 7, 2, NOW);
+    expect(s.days[0].date).toBe('2026-04-20');
+    expect(s.days[0].scheduledCount).toBe(1);
+    expect(s.scheduledTotal).toBe(1);
+  });
+
   it('pending_approval posts do not satisfy fill — daemon must keep generating', () => {
     // 7 days * 2/day = 14 slots. INCLUDE-TODAY (2026-05-22): place 14
     // pending_approval posts starting TODAY. Both slot times (14:00,

@@ -134,9 +134,16 @@ export function computeWeekFillStatus(
       // callers include user-edited settings that may be half-filled.
       const ts = new Date(`${p.date}T${p.time}:00`).getTime();
       if (!Number.isFinite(ts)) continue;
-      if (p.status === 'posted') {
-        // Skip the future-only filter — 'posted' posts are always in
-        // the past, but they still satisfy the day target.
+      if (p.status === 'posted' || p.status === 'failed') {
+        // Skip the future-only filter — a posted OR failed post is a
+        // TRIED slot and is, by definition, in the past. The
+        // V1.7.0-PRE-PROD-FIX comment above already declares `failed`
+        // should count, but `failed` previously fell through to the
+        // `ts < now` filter below and was dropped for past timestamps
+        // (i.e. every real failed post) — the day then showed "open"
+        // and the daemon re-filled the slot. That was the exact bug
+        // Maurice reported; counting `failed` here regardless of time
+        // is what actually closes it.
         scheduledCounts.set(p.date, (scheduledCounts.get(p.date) ?? 0) + 1);
         continue;
       }
