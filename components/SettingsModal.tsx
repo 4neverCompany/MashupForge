@@ -23,6 +23,7 @@ import {
   Bot,
   Sparkles,
   Coins,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { showToast } from '@/components/Toast';
 import {
@@ -80,11 +81,22 @@ function isTextModelInfo(raw: unknown): boolean {
 import type { SettingsSaveState } from '@/hooks/useSettings';
 import { APP_VERSION, getAppVersion } from '@/lib/app-version';
 
-// FEAT-002b: tab restructure. Four sections — General (collections, channel,
-// image/video defaults, watermark), API Keys (web-only inputs + a desktop hint),
-// AI Engine (pi.dev + system prompt + niches/genres + personalities), and
-// Desktop (auto-update + Tauri-native config panel).
-type TabId = 'general' | 'apiKeys' | 'aiAgent' | 'aiEngine' | 'desktop';
+// M4: information-architecture reshuffle, 5 → 6 tabs. The old AI-Agent and
+// AI-Engine tabs merge into one text-AI "AI Engine" tab; the image/video
+// generation controls (previously buried under "General") get their own
+// "Image & Video" tab; the per-cycle Credit Budget gets its own "Credits"
+// tab; "API Keys" becomes "Providers & Keys" and "Desktop" becomes
+// "Desktop / Advanced". Pure UI move — no settings shape change. Every block
+// is relocated verbatim; the only de-dup is the Higgsfield video-model
+// select (HiggsfieldConnection already owns defaultHiggsfieldVideoModel).
+//   general     — collections, channel name, watermark
+//   aiEngine    — active agent + model picker + system prompt + skills
+//   imageVideo  — image-model defaults, Higgsfield connection, prompt
+//                 controls (anti-AI-look / Director / camera), video settings
+//   apiKeys     — web-only provider credentials + a desktop hint
+//   credits     — per-cycle Higgsfield credit budget
+//   desktop     — auto-update + Tauri-native config panel
+type TabId = 'general' | 'aiEngine' | 'imageVideo' | 'apiKeys' | 'credits' | 'desktop';
 
 /**
  * V082: SettingsSection — moved to `components/Settings/SettingsSection.tsx`
@@ -94,10 +106,11 @@ type TabId = 'general' | 'apiKeys' | 'aiAgent' | 'aiEngine' | 'desktop';
 
 const TABS: ReadonlyArray<{ id: TabId; label: string; icon: typeof SettingsIcon }> = [
   { id: 'general', label: 'General', icon: Sliders },
-  { id: 'apiKeys', label: 'API Keys', icon: KeyRound },
-  { id: 'aiAgent', label: 'AI Agent', icon: Bot },
   { id: 'aiEngine', label: 'AI Engine', icon: Cpu },
-  { id: 'desktop', label: 'Desktop', icon: Monitor },
+  { id: 'imageVideo', label: 'Image & Video', icon: ImageIcon },
+  { id: 'apiKeys', label: 'Providers & Keys', icon: KeyRound },
+  { id: 'credits', label: 'Credits', icon: Coins },
+  { id: 'desktop', label: 'Desktop / Advanced', icon: Monitor },
 ];
 
 // M3.3-P3 commit b: NcaStatus + NcaModel interfaces deleted.
@@ -210,10 +223,11 @@ export function SettingsModal({
   // Model list from /api/nca/models. Populated lazily once nca is
   // M3.3-P3 commit b: nca-status useEffect deleted with the nca routes.
   // LLM-INTEGRATION-0513: probe /api/ai/status for the vercel-ai card.
-  // Same gating as the nca probe (only fires when the AI Agent tab is
-  // open) — no point burning a server hop on every tab change.
+  // M4: the agent card + the active-model card both moved into the merged
+  // "AI Engine" tab, so the probe now fires when that tab opens — no point
+  // burning a server hop on every tab change.
   useEffect(() => {
-    if (activeTab !== 'aiAgent') return;
+    if (activeTab !== 'aiEngine') return;
     let cancelled = false;
     fetch('/api/ai/status', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
@@ -517,7 +531,7 @@ export function SettingsModal({
           </>
           )}
 
-          {activeTab === 'aiAgent' && (
+          {activeTab === 'aiEngine' && (
           <>
           <div className="space-y-4">
             <div className="flex items-center gap-2 mb-2">
@@ -693,7 +707,14 @@ export function SettingsModal({
               />
             </div>
           </div>
+          </>
+          )}
 
+          {/* M4: image-generation defaults (Higgsfield add-on, default image
+              model, default text model) relocated from "General" to the new
+              "Image & Video" tab. Block content is unchanged. */}
+          {activeTab === 'imageVideo' && (
+          <>
           <div className="space-y-4 pt-4 border-t border-zinc-800">
             <h4 className="text-lg font-medium text-white mb-2">Image Generation Settings</h4>
 
@@ -896,40 +917,49 @@ export function SettingsModal({
                 selected={settings.activeTextModel ?? null}
                 onSelect={(modelId) => updateSettings({ activeTextModel: modelId })}
               />
-
-              {/* HIGGSFIELD-INTEGRATION: image generation provider
-                  alongside Leonardo. OAuth-based — each user connects
-                  their own Higgsfield account. Peer, not replacement. */}
-              <div className="pt-4 mt-4 border-t border-zinc-800">
-                <HiggsfieldConnection
-                  selectedImageModel={
-                    (settings.defaultHiggsfieldImageModel as never) ||
-                    HIGGSFIELD_DEFAULT_IMAGE_MODEL
-                  }
-                  selectedVideoModel={
-                    (settings.defaultHiggsfieldVideoModel as never) ||
-                    HIGGSFIELD_DEFAULT_VIDEO_MODEL
-                  }
-                  onSelectImageModel={(slug) =>
-                    updateSettings({ defaultHiggsfieldImageModel: slug })
-                  }
-                  onSelectVideoModel={(slug) =>
-                    updateSettings({ defaultHiggsfieldVideoModel: slug })
-                  }
-                  cliToken={settings.higgsfieldCliToken}
-                  onSaveCliToken={(token) =>
-                    updateSettings({ higgsfieldCliToken: token })
-                  }
-                  onConnectionChange={(connected) =>
-                    updateSettings({ higgsfieldConnected: connected })
-                  }
-                />
-              </div>
             </div>
 
             <p className="text-[10px] text-zinc-500 pt-2 border-t border-zinc-800/60">
               This prompt shapes every AI interaction across the app. Changes apply immediately.
             </p>
+          </div>
+          </>
+          )}
+
+          {/* M4: Higgsfield connection (OAuth/CLI + default image/video models)
+              relocated from "AI Engine" to "Image & Video" so all image/video
+              provider config lives in one tab. Component + props unchanged. It
+              is the single owner of defaultHiggsfieldVideoModel (the duplicate
+              per-provider video select in the Video block below was removed). */}
+          {activeTab === 'imageVideo' && (
+          <>
+          <div className="space-y-4 pt-4 border-t border-zinc-800">
+            {/* HIGGSFIELD-INTEGRATION: image generation provider
+                alongside Leonardo. OAuth-based — each user connects
+                their own Higgsfield account. Peer, not replacement. */}
+            <HiggsfieldConnection
+              selectedImageModel={
+                (settings.defaultHiggsfieldImageModel as never) ||
+                HIGGSFIELD_DEFAULT_IMAGE_MODEL
+              }
+              selectedVideoModel={
+                (settings.defaultHiggsfieldVideoModel as never) ||
+                HIGGSFIELD_DEFAULT_VIDEO_MODEL
+              }
+              onSelectImageModel={(slug) =>
+                updateSettings({ defaultHiggsfieldImageModel: slug })
+              }
+              onSelectVideoModel={(slug) =>
+                updateSettings({ defaultHiggsfieldVideoModel: slug })
+              }
+              cliToken={settings.higgsfieldCliToken}
+              onSaveCliToken={(token) =>
+                updateSettings({ higgsfieldCliToken: token })
+              }
+              onConnectionChange={(connected) =>
+                updateSettings({ higgsfieldConnected: connected })
+              }
+            />
           </div>
           </>
           )}
@@ -943,16 +973,16 @@ export function SettingsModal({
             settings={settings}
             updateSettings={updateSettings}
           />
+          </>
+          )}
 
-          {/* V1.0.7-PROMPT-ENG-A4: anti-AI-look toggle. Wired through
-              useImageGeneration → submitLeonardoAndPoll / submitViaAiImage
-              (PR #35). Hidden behind a default-OFF switch so the
-              curated negative list only kicks in when the user
-              explicitly opts in. */}
-          {/* V1.0.7-PROMPT-ENG-D: per-cycle credit budget. Sits next to
-              the Image Generation section because the gate only
-              affects the Higgsfield provider; users who don't enable
-              a cap see nothing here. */}
+          {/* M4: the per-cycle Higgsfield credit budget gets its own
+              "Credits" tab. Block content unchanged. */}
+          {activeTab === 'credits' && (
+          <>
+          {/* V1.0.7-PROMPT-ENG-D: per-cycle credit budget. The gate only
+              affects the Higgsfield provider; users who don't enable a cap
+              see nothing here. */}
           <SettingsSection
             icon={Coins}
             title="Credit Budget"
@@ -964,7 +994,20 @@ export function SettingsModal({
               onChange={(next) => updateSettings({ higgsfieldMonthlyCreditCap: next })}
             />
           </SettingsSection>
+          </>
+          )}
 
+          {/* M4: image prompt-engineering controls (anti-AI-look / Director /
+              camera) + the video settings render under "Image & Video".
+              Block content unchanged except the de-duped Higgsfield video
+              select (see the Video block below). */}
+          {activeTab === 'imageVideo' && (
+          <>
+          {/* V1.0.7-PROMPT-ENG-A4: anti-AI-look toggle. Wired through
+              useImageGeneration → submitLeonardoAndPoll / submitViaAiImage
+              (PR #35). Hidden behind a default-OFF switch so the
+              curated negative list only kicks in when the user
+              explicitly opts in. */}
           <SettingsSection
             icon={Sparkles}
             title="Image Generation"
@@ -1172,22 +1215,15 @@ export function SettingsModal({
                 </div>
               )}
               {(settings.videoProviders ?? ['minimax']).includes('higgsfield') && (
-                <div className="space-y-2">
-                  <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Higgsfield Video Model</label>
-                  <select
-                    value={settings.defaultHiggsfieldVideoModel || 'seedance_2_0'}
-                    onChange={(e) => updateSettings({ defaultHiggsfieldVideoModel: e.target.value })}
-                    className="w-full bg-zinc-900 border border-zinc-800/60 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#c5a062]/30 cursor-pointer"
-                  >
-                    <option value="seedance_2_0">Seedance 2.0 (Flagship)</option>
-                    <option value="seedance1_5">Seedance 1.5 Pro</option>
-                    <option value="kling3_0">Kling v3.0</option>
-                    <option value="veo3_1">Google Veo 3.1</option>
-                    <option value="veo3_1_lite">Google Veo 3.1 Lite</option>
-                    <option value="wan2_6">Wan 2.6</option>
-                    <option value="minimax_hailuo">MiniMax Hailuo 02</option>
-                  </select>
-                </div>
+                <p className="text-[10px] text-zinc-500 leading-relaxed">
+                  {/* M4 de-dup: this select used to write
+                      defaultHiggsfieldVideoModel — the same key the
+                      Higgsfield connection card owns. Removed to keep a
+                      single source of truth; pick the model in the
+                      Higgsfield connection above. */}
+                  Higgsfield video model is chosen in the{' '}
+                  <span className="text-zinc-400">Higgsfield connection</span> above.
+                </p>
               )}
               {(settings.videoProviders ?? ['minimax']).includes('mmx') && (
                 <p className="text-[10px] text-zinc-500 leading-relaxed">
