@@ -1,16 +1,19 @@
 /**
- * V050-003: typed errors for the four external-API surfaces the studio
+ * V050-003: typed errors for the three external-API surfaces the studio
  * talks to. Replaces ad-hoc `throw new Error('...')` + Error.message
  * sniffing at call sites.
  *
  * The discriminator is `source` so callers can pattern-match per API
- * (e.g. only retry Leonardo 429s, not pi.dev timeouts). The
+ * (e.g. only retry Leonardo 429s). The
  * `retryable` flag is derived by classifyHttpStatus() and is the
  * canonical "should I try again" signal — call sites should not
  * re-derive it from the http status.
+ *
+ * M3.3-P3 commit c: `'pi'` removed from ApiSource / RETRY_BUDGET /
+ * labelFor with the pi routes.
  */
 
-export type ApiSource = 'leonardo' | 'pi' | 'social' | 'trending';
+export type ApiSource = 'leonardo' | 'social' | 'trending';
 
 export type ApiErrorCode =
   | 'http'           // HTTP non-2xx response
@@ -37,13 +40,11 @@ export interface ApiError {
 
 /**
  * Per-API retry budget. Total attempts INCLUDING the first try.
- * Budgets reflect the brief: Leonardo can handle real waits; pi.dev
- * is faster and a second try usually settles transient blips; social
+ * Budgets reflect the brief: Leonardo can handle real waits; social
  * is non-idempotent so we attempt once and surface the failure.
  */
 export const RETRY_BUDGET: Record<ApiSource, number> = {
   leonardo: 3,
-  pi: 2,
   social: 1,
   trending: 2,
 };
@@ -131,7 +132,6 @@ export function toastMessageForApiError(error: ApiError): string {
 function labelFor(source: ApiSource): string {
   switch (source) {
     case 'leonardo': return 'Leonardo';
-    case 'pi':       return 'pi.dev';
     case 'social':   return 'Social post';
     case 'trending': return 'Trending';
   }

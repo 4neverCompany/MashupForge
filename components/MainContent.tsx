@@ -122,7 +122,9 @@ import type { CarouselGroup } from './MashupContext';
 import type { PostPlatform } from '@/types/mashup';
 import TimePicker24 from './TimePicker24';
 import { formatTime24, formatTimeShort } from './TimePicker24';
-import { SettingsModal, type PiStatus, type PiBusy } from './SettingsModal';
+// M3.3-P3 commit c: PiStatus + PiBusy type imports removed with the
+// pi route deletion.
+import { SettingsModal } from './SettingsModal';
 import { CollectionModal } from './CollectionModal';
 import { ImageDetailModal } from './ImageDetailModal';
 import { BulkTagModal } from './BulkTagModal';
@@ -685,114 +687,16 @@ export function MainContent() {
   // postReadyHandlers / batchCaptionImages all moved to
   // useMainContentScheduling (M3.3-P4 Batch 1).
 
-  // Pi.dev runtime status, polled when the Settings panel is open.
-  const [piStatus, setPiStatus] = useState<PiStatus | null>(null);
-  const [piBusy, setPiBusy] = useState<PiBusy>(null);
-  const [piError, setPiError] = useState<string | null>(null);
-  const [piSetupMsg, setPiSetupMsg] = useState<string | null>(null);
-  // Renamed from mmxSetupMsg in NCA-INTEGRATION-DESIGN; the AI agent's
-  // setup-message string is now provider-agnostic (used for nca-side
-  // success/pending banners). Multimodal mmx flows have their own state.
-  const [ncaSetupMsg, setNcaSetupMsg] = useState<string | null>(null);
-  const piAutoBootRef = useRef(false);
-
-  const refreshPiStatus = async (): Promise<PiStatus | null> => {
-    try {
-      const res = await fetch('/api/pi/status');
-      if (!res.ok) throw new Error(`status ${res.status}`);
-      const data = await res.json() as PiStatus;
-      setPiStatus(data);
-      return data;
-    } catch (e: unknown) {
-      setPiError(getErrorMessage(e) || 'Failed to fetch pi status');
-      return null;
-    }
-  };
-
-  // Autonomous pi boot: on first mount, check status → install if missing
-  // → start if installed but not running. Runs once per page load. Auth is
-  // the only step that requires user action (Sign In button below).
-  useEffect(() => {
-    if (piAutoBootRef.current) return;
-    piAutoBootRef.current = true;
-    (async () => {
-      const initial = await refreshPiStatus();
-      if (!initial) return;
-
-      let s = initial;
-      if (!s.installed) {
-        setPiBusy('install');
-        try {
-          const res = await fetch('/api/pi/install', { method: 'POST' });
-          const data = await res.json() as { success?: boolean; stderr?: string; error?: string };
-          if (!res.ok || data.success === false) {
-            setPiError(data.stderr || data.error || 'Auto-install failed');
-          }
-        } catch (e) {
-          setPiError(getErrorMessage(e) || 'Auto-install failed');
-        } finally {
-          setPiBusy(null);
-        }
-        s = (await refreshPiStatus()) || s;
-      }
-
-      if (s.installed && s.authenticated && !s.running) {
-        setPiBusy('start');
-        try {
-          const res = await fetch('/api/pi/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ systemPrompt: settings.agentPrompt || '' }),
-          });
-          const data = await res.json() as { success?: boolean; error?: string };
-          if (!res.ok || data.success === false) {
-            setPiError(data.error || 'Auto-start failed');
-          }
-        } catch (e) {
-          setPiError(getErrorMessage(e) || 'Auto-start failed');
-        } finally {
-          setPiBusy(null);
-        }
-        await refreshPiStatus();
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    // Fetch-on-open: refreshPiStatus is async (fetch → setState in a
-    // microtask), so the setState is never synchronous-in-effect; the
-    // React-Compiler heuristic flags the call site anyway. Established
-    // repo convention for this verified-safe pattern.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (showSettings) refreshPiStatus();
-  }, [showSettings]);
+  // M3.3-P3 commit c: the entire pi-status / pi-autonomous-boot /
+  // pi-handleSetup block deleted with the pi routes. The vercel-ai
+  // backend (commit a default) requires no client-side runtime
+  // management.
 
   useEffect(() => {
     const handler = () => setShowSettings(true);
     window.addEventListener('mashup:open-settings', handler);
     return () => window.removeEventListener('mashup:open-settings', handler);
   }, []);
-
-  // handlePiInstall / handlePiStart / handlePiStop intentionally removed —
-  // pi install + start are autonomous (see piAutoBootRef effect). Only the
-  // auth step (handlePiSetup → /api/pi/setup) requires user interaction.
-
-  const handlePiSetup = async () => {
-    setPiBusy('setup');
-    setPiError(null);
-    try {
-      const res = await fetch('/api/pi/setup', { method: 'POST' });
-      const data = await res.json() as { success?: boolean; error?: string; tmuxSession?: string };
-      if (!res.ok || data.success === false) {
-        setPiError(data.error || 'Setup failed');
-      } else {
-        setPiSetupMsg(data.tmuxSession || 'pi-setup');
-      }
-    } finally {
-      setPiBusy(null);
-    }
-  };
 
   const PREDEFINED_PROMPTS = [
     "Darth Vader as a Space Marine in the Warhammer 40k universe, grimdark style",
@@ -1655,12 +1559,12 @@ export function MainContent() {
                             onClick={handleSuggestParameters}
                             disabled={!comparisonPrompt.trim() || isSuggesting}
                             className="text-xs text-[#00e6ff] hover:text-white flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[#00e6ff]/25 hover:border-[#00e6ff]/50 bg-[#00e6ff]/5 hover:bg-[#00e6ff]/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                            title="Ask pi.dev to reason about the best models/style/ratio/quality/negative prompt for this idea"
+                            title="Ask the AI to reason about the best models/style/ratio/quality/negative prompt for this idea"
                           >
                             {isSuggesting ? (
                               <>
                                 <Loader2 className="w-3 h-3 animate-spin" />
-                                pi is thinking…
+                                AI is thinking…
                               </>
                             ) : (
                               <>
@@ -3558,12 +3462,9 @@ export function MainContent() {
           clearSettings={clearSettings}
           saveState={settingsSaveState}
           isDesktop={isDesktop}
-          piStatus={piStatus}
-          piBusy={piBusy}
-          piError={piError}
-          piSetupMsg={piSetupMsg}
-          handlePiSetup={handlePiSetup}
-          refreshPiStatus={refreshPiStatus}
+          // M3.3-P3 commit c: piStatus / piBusy / piError / piSetupMsg /
+          // handlePiSetup / refreshPiStatus props deleted with the pi
+          // routes. SettingsModal no longer renders a Pi.dev card.
           collections={collections}
           savedImages={savedImages}
           deleteCollection={deleteCollection}

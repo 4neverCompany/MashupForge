@@ -56,7 +56,9 @@ const nextConfig: NextConfig = {
   },
   outputFileTracingExcludes: {
     '*': ['./src-tauri/**', './docs/**', './tests/**', './scripts/**', './.github/**'],
-    '/api/pi/**': ['./next.config.ts'],
+    // M3.3-P3 commit c: the `/api/pi/**` self-referential trace exclude
+    // is gone with the pi route. The self-trace workaround for the
+    // next.config.ts reference was a pi-route-only artifact.
   },
   // Expose the CI commit SHA so the desktop Settings panel can show the
   // exact build. Falls back to 'dev' in local dev. GITHUB_SHA is set by

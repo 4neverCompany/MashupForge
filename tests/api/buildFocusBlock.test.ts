@@ -7,7 +7,10 @@
 // breaking generation quality.
 
 import { describe, it, expect } from 'vitest';
-import { buildFocusBlock } from '@/app/api/pi/prompt/route';
+// M3.3-P3 commit c: import the helper from its new home in
+// lib/ai-prompt-helpers.ts (the re-export shim on the pi route is
+// gone with the pi route).
+import { buildFocusBlock } from '@/lib/ai-prompt-helpers';
 
 describe('buildFocusBlock', () => {
   it('returns an empty string when both arrays are empty (safe no-op)', () => {
