@@ -204,11 +204,55 @@ interface RunOnceResult {
   timedOut: boolean;
 }
 
+/**
+ * V1.8.1-UNC-CWD: pick a spawn cwd cmd.exe can actually use.
+ *
+ * In the bundled Tauri build the Next.js sidecar's working directory is
+ * the extended-length resources path `\\?\G:\MashupForge\resources\app`.
+ * When we spawn a `.cmd` shim via cmd.exe, cmd inherits that cwd and
+ * prints "UNC paths are not supported. Defaulting to Windows directory."
+ * — noise in the user-facing error, and a real footgun (relative path
+ * resolution silently changes). The Higgsfield/mmx CLIs only ever
+ * receive absolute paths or UUIDs, so the cwd is irrelevant to them;
+ * we just need one that isn't UNC. Returns the OS temp dir when the
+ * current cwd is UNC (or unreadable), otherwise `undefined` (inherit —
+ * POSIX and normal-cwd Windows are untouched).
+ */
+/**
+ * Pure, platform-parameterized core of the UNC-cwd decision so it is
+ * testable on the (Linux) CI runner. Returns `tmpDir` when the spawn
+ * should override cwd, `undefined` to inherit. `\\?\…` (extended-length)
+ * and `\\server\share` (true UNC) both start with two backslashes and
+ * both trip cmd.exe; on non-Windows we always inherit.
+ */
+export function pickSafeCwd(
+  platform: NodeJS.Platform,
+  cwd: string | null,
+  tmpDir: string,
+): string | undefined {
+  if (platform !== 'win32') return undefined;
+  if (cwd === null) return tmpDir; // process.cwd() threw (deleted dir)
+  if (cwd.startsWith('\\\\')) return tmpDir;
+  return undefined;
+}
+
+function safeSpawnCwd(): string | undefined {
+  const os = require('node:os') as typeof import('node:os');
+  let cwd: string | null;
+  try {
+    cwd = process.cwd();
+  } catch {
+    cwd = null;
+  }
+  return pickSafeCwd(process.platform, cwd, os.tmpdir());
+}
+
 async function runOnce(opts: CliInvokeOptions<unknown>): Promise<RunOnceResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const start = Date.now();
 
   const env = { ...process.env, ...(opts.env ?? {}) } as NodeJS.ProcessEnv;
+  const cwd = safeSpawnCwd();
   // V1.4.5-SHELL-INJECTION: never hand raw args to `shell: true`. For
   // Windows .cmd/.bat shims we build the cmd.exe command line ourselves
   // with cross-spawn-style escaping (see buildWindowsShimSpawn). User
@@ -225,6 +269,9 @@ async function runOnce(opts: CliInvokeOptions<unknown>): Promise<RunOnceResult> 
       child = _spawn(file, spawnArgs, {
         stdio: ['ignore', 'pipe', 'pipe'],
         env,
+        // V1.8.1-UNC-CWD: undefined → inherit (POSIX / normal Windows);
+        // set only when the inherited cwd is a UNC path cmd.exe rejects.
+        ...(cwd ? { cwd } : {}),
         signal: opts.signal,
         // Node's own shell mode is permanently OFF — the .cmd shim
         // path goes through an explicit, escaped cmd.exe invocation

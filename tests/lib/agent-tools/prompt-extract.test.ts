@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractDraftFromCommentary,
+  isCommentaryOnly,
   stripModelCommentary,
   trimCommentarySuffix,
 } from '@/lib/agent-tools/prompt-extract';
@@ -154,6 +155,56 @@ Final prompt: A dramatic mountain vista at sunrise, jagged peaks catching first 
     // Marker matched but the post-marker content is < 40 chars, so
     // we fall through to paragraph heuristic / fallback.
     expect(matchedMarker).toBe(false);
+  });
+});
+
+describe('extractDraftFromCommentary — V1.8.1 all-commentary give-up', () => {
+  // Maurice 2026-06-13: the WHOLE thinking process landed in the image
+  // prompt and generated random off-topic images. The v1.7.0 extractor
+  // handled commentary WRAPPING a prompt, but pure-commentary-with-no-
+  // draft fell through to last-paragraph and was returned verbatim.
+  it("gives up (empty) on Maurice's exact all-commentary example", () => {
+    const raw =
+      'The checker is strict about literal keyword matches. Let me build a final draft that explicitly weaves in the niche vocabulary and required anti-AI-look tokens.';
+    const { draft, source } = extractDraftFromCommentary(raw);
+    expect(draft).toBe('');
+    expect(source).toBe('rejected-commentary');
+  });
+
+  it('gives up on a sign-off-only output', () => {
+    const raw = 'Let me think. Niches anchored, ready to feed to generate_image — just say the word.';
+    const { draft, source } = extractDraftFromCommentary(raw);
+    expect(draft).toBe('');
+    expect(source).toBe('rejected-commentary');
+  });
+
+  it('does NOT give up on a marker followed by a real body', () => {
+    const raw =
+      'The checker is strict. Let me build a final draft.\n\nFinal prompt: A weathered Mandalorian in a smoke-filled cantina, single warm light source, cinematic close-up.';
+    const { draft } = extractDraftFromCommentary(raw);
+    expect(draft).toContain('Mandalorian');
+    expect(draft).not.toContain('the checker');
+  });
+
+  it('does NOT reject a clean short prompt that lacks commentary tells', () => {
+    const raw = 'Darth Vader in an Iron Man suit, dramatic neon backlight.';
+    const { draft } = extractDraftFromCommentary(raw);
+    expect(draft).toBe(raw);
+  });
+});
+
+describe('isCommentaryOnly', () => {
+  it('flags commentary with no visual vocabulary', () => {
+    expect(isCommentaryOnly('Let me build a final draft that weaves in the niche.')).toBe(true);
+    expect(isCommentaryOnly('The checker is strict about keyword matches.')).toBe(true);
+  });
+  it('spares text with image-prompt vocabulary even if it has a tell', () => {
+    // "let me" tell, but "cinematic"/"close-up" vocab redeems it.
+    expect(isCommentaryOnly('Let me show a cinematic close-up of a warrior.')).toBe(false);
+  });
+  it('spares clean prompts and empty input', () => {
+    expect(isCommentaryOnly('A dramatic mountain vista, golden hour.')).toBe(false);
+    expect(isCommentaryOnly('')).toBe(false);
   });
 });
 

@@ -31,6 +31,7 @@ import {
   pushFlag,
   pushBool,
   spawnNeedsShell,
+  pickSafeCwd,
   type CliInvokeOptions,
 } from '@/lib/providers/cli-utils';
 import {
@@ -278,5 +279,25 @@ describe('cli-utils binaryExists', () => {
   it('returns true for path-like names without probing', () => {
     expect(binaryExists('C:/foo/bar.exe')).toBe(true);
     expect(binaryExists('./local-bin')).toBe(true);
+  });
+});
+
+describe('cli-utils pickSafeCwd (V1.8.1-UNC-CWD)', () => {
+  const TMP = '/tmp/x';
+  it('overrides to tmp when the Windows cwd is an extended-length \\\\?\\ path', () => {
+    expect(pickSafeCwd('win32', '\\\\?\\G:\\MashupForge\\resources\\app', TMP)).toBe(TMP);
+  });
+  it('overrides to tmp for a true UNC \\\\server\\share cwd', () => {
+    expect(pickSafeCwd('win32', '\\\\server\\share\\app', TMP)).toBe(TMP);
+  });
+  it('overrides to tmp when process.cwd() threw (null)', () => {
+    expect(pickSafeCwd('win32', null, TMP)).toBe(TMP);
+  });
+  it('inherits (undefined) for a normal drive-letter cwd', () => {
+    expect(pickSafeCwd('win32', 'C:\\Users\\x\\app', TMP)).toBeUndefined();
+  });
+  it('always inherits on non-Windows', () => {
+    expect(pickSafeCwd('linux', '\\\\?\\weird', TMP)).toBeUndefined();
+    expect(pickSafeCwd('darwin', null, TMP)).toBeUndefined();
   });
 });
