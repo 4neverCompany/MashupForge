@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-// BUG-DEV-012: persisted through `@/lib/persistence` so the last comparison
-// result survives a folder move on Windows (WebView2 IndexedDB fix).
-import { get, set } from '@/lib/persistence';
+import { useState } from 'react';
+// v1.8.1: the wipe-safe persistence machinery (dirty/loadInFlight/
+// hydratedOnce gating, lazy load) now lives in usePersistentStore — see
+// BUG-DEV-012 / V1.4.7-COMPARISON-WIPE. comparisonResults persists through
+// it (REPLACE-on-load, immediate gated write, no localStorage mirror).
+import { usePersistentStore } from './usePersistentStore';
 import { enhancePromptForModel } from '@/lib/modelOptimizer';
 import { buildEnhancedPrompt } from '@/lib/image-prompt-builder';
 import { streamAIToString } from '@/lib/aiClient';
@@ -44,78 +46,37 @@ export interface CachedEnhancement {
 }
 
 export function useComparison({ settings, saveImage, applyWatermark }: UseComparisonDeps) {
-  const [comparisonResults, setComparisonResults] = useState<GeneratedImage[]>([]);
+  // V1.4.7-COMPARISON-WIPE → v1.8.1: comparisonResults persistence + the
+  // dirty/loadInFlight/hydratedOnce wipe-safety gating now live in the
+  // shared usePersistentStore. REPLACE-on-load (`loaded ?? prev` — a
+  // deleted result must NOT be resurrected by a stale in-memory copy, and
+  // an absent store keeps the current value, exactly as the old
+  // `if (idb) setComparisonResults(idb)` did); immediate (non-debounced)
+  // gated write; no localStorage mirror. The hydratedOnceRef gate is a
+  // v1.8.1 hardening over the old bare-catch{} load: a thrown read now
+  // latches and refuses writes for the session, instead of letting a later
+  // mutation overwrite the intact store with just that mutation.
+  const store = usePersistentStore<GeneratedImage[]>({
+    key: 'mashup_comparison_results',
+    initial: [],
+    merge: (loaded, prev) => loaded ?? prev,
+  });
+  // Aliases so the generation logic below reads exactly as before.
+  const comparisonResults = store.value;
+  const setComparisonResults = store.setValue;
+  const markDirty = store.markDirty;
+
   const [comparisonPrompt, setComparisonPrompt] = useState('');
   const [comparisonOptions, setComparisonOptions] = useState<GenerateOptions>({
     aspectRatio: '1:1',
     imageSize: '1K',
     negativePrompt: ''
   });
-  const [isComparisonLoaded, setIsComparisonLoaded] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState('');
   const [comparisonError, setComparisonError] = useState<string | null>(null);
-  // V1.2.1: lazy load — see useImages.ts for the full rationale.
-  const [loadTriggered, setLoadTriggered] = useState(false);
-
-  // V1.4.7-COMPARISON-WIPE: dirty flag + in-flight guard, same pattern
-  // as useImages/useSettings/useIdeas. Only real mutations arm the
-  // persist effect below; hydration commits don't.
-  const dirtyRef = useRef(false);
-  const loadInFlightRef = useRef(false);
-  const markDirty = () => {
-    dirtyRef.current = true;
-    setLoadTriggered(true);
-  };
 
   const clearComparisonError = () => setComparisonError(null);
-
-  useEffect(() => {
-    if (!loadTriggered) {
-      // react-hooks/set-state-in-effect: deferred via queueMicrotask
-      // (project convention), stale-guarded against a loadTriggered
-      // flip before the microtask fires.
-      let stale = false;
-      queueMicrotask(() => {
-        if (!stale) setIsComparisonLoaded(true);
-      });
-      return () => { stale = true; };
-    }
-    // V1.4.7: close the persist gate while the real load runs.
-    // Documented project exception — same as useImages/useSettings.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setIsComparisonLoaded(false);
-    let cancelled = false;
-    loadInFlightRef.current = true;
-    const load = async () => {
-      try {
-        const idbComparisonResults = await get('mashup_comparison_results');
-        if (idbComparisonResults && !cancelled) setComparisonResults(idbComparisonResults);
-      } catch {
-        // silent — comparison results remain empty
-      } finally {
-        loadInFlightRef.current = false;
-        if (!cancelled) setIsComparisonLoaded(true);
-      }
-    };
-    load();
-    return () => { cancelled = true; };
-  }, [loadTriggered]);
-
-  // V1.4.7-COMPARISON-WIPE: this effect was gated ONLY on
-  // isComparisonLoaded — which the mount microtask flips to true while
-  // comparisonResults is still `[]`. Every Studio mount immediately
-  // wrote `[]` over the stored comparison results (no debounce, no
-  // dirty check): a deterministic wipe of the comparison library.
-  // Now gated like the other persistence hooks: a real mutation must
-  // have happened (dirtyRef), the store must have been hydrated
-  // (loadTriggered + isComparisonLoaded), and never mid-hydration.
-  useEffect(() => {
-    if (!isComparisonLoaded || !loadTriggered) return;
-    if (!dirtyRef.current) return;
-    if (loadInFlightRef.current) return;
-    set('mashup_comparison_results', comparisonResults);
-  }, [comparisonResults, isComparisonLoaded, loadTriggered]);
 
   const generateComparison = async (
     prompt: string,
@@ -541,19 +502,18 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
     saveImage(galleryImg);
   };
 
+  // Intentionally-immediate writers: writeNow does a full-value store write
+  // (never a partial/defaults snapshot) and arms dirty so the persist effect
+  // won't double-fight it. Replaces the old markDirty()+setState()+set()
+  // trio — same effect, one call.
   const clearComparison = () => {
-    markDirty();
-    setComparisonResults([]);
-    set('mashup_comparison_results', []);
+    store.writeNow([]);
   };
 
   const deleteComparisonResult = (id: string) => {
-    markDirty();
-    setComparisonResults(prev => {
-      const updated = prev.filter(img => img.id !== id);
-      set('mashup_comparison_results', updated);
-      return updated;
-    });
+    // Write the FULL filtered list (the design's explicit requirement for
+    // delete), derived from the current value.
+    store.writeNow(store.value.filter(img => img.id !== id));
   };
 
   return {
@@ -566,13 +526,13 @@ export function useComparison({ settings, saveImage, applyWatermark }: UseCompar
     pickComparisonWinner,
     clearComparison,
     deleteComparisonResult,
-    isComparisonLoaded,
+    isComparisonLoaded: store.isLoaded,
     isComparisonGenerating: isGenerating,
     comparisonProgress: progress,
     comparisonError,
     clearComparisonError,
     // V1.2.1: lazy load — see useImages.ts. Fired by the Compare view
     // mount in MainContent.tsx.
-    requestLoad: () => setLoadTriggered(true),
+    requestLoad: store.requestLoad,
   };
 }
