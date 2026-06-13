@@ -343,7 +343,9 @@ export function usePersistentStore<T>(
         hydratedOnceRef.current = true;
         if (!cancelled) cfg.current.onHydrated?.();
       } catch (e) {
-        cfg.current.onLoadError?.(e);
+        // !cancelled-guarded like the original useSettings load catch — don't
+        // surface a load error (setState) on an unmounted/superseded load.
+        if (!cancelled) cfg.current.onLoadError?.(e);
       } finally {
         loadInFlightRef.current = false;
         if (!cancelled) setIsLoaded(true);
