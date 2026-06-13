@@ -41,6 +41,7 @@ import { HiggsfieldConnection } from './Settings/HiggsfieldConnection';
 import { CameraAnglePicker } from './Settings/CameraAnglePicker';
 import { CreditBudgetSettings } from './Settings/CreditBudgetSettings';
 import { SettingsSection } from './Settings/SettingsSection';
+import { Switch } from './Settings/Switch';
 // M3.4-P4-B2: Watermark JSX moved into the WatermarkSettings
 // sub-component. Aliased on import to avoid a name clash with the
 // `WatermarkSettings` store type above.
@@ -979,18 +980,12 @@ export function SettingsModal({
                   Helps portraits and product shots feel less rendered. Off by default.
                 </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.antiAiLook === true}
-                aria-label="Enable anti-AI-look negatives"
-                onClick={() => updateSettings({ antiAiLook: !(settings.antiAiLook === true) })}
-                className={`w-12 h-6 rounded-full transition-colors shrink-0 ${settings.antiAiLook === true ? 'bg-[#00e6ff]' : 'bg-zinc-700'} relative`}
-              >
-                <span
-                  className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.antiAiLook === true ? 'translate-x-6' : ''}`}
-                />
-              </button>
+              <Switch
+                checked={settings.antiAiLook === true}
+                onChange={(v) => updateSettings({ antiAiLook: v })}
+                label="anti-AI-look negatives"
+                size="md"
+              />
             </div>
 
             {/* V1.6: agentic Director pipeline — the default path since
@@ -1015,23 +1010,14 @@ export function SettingsModal({
                   path.
                 </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={settings.useDirectorPipeline === true}
-                aria-label="Enable the agentic Director pipeline"
-                onClick={() =>
-                  updateSettings({
-                    useDirectorPipeline: !(settings.useDirectorPipeline === true),
-                    directorPipelineUserSet: true,
-                  })
+              <Switch
+                checked={settings.useDirectorPipeline === true}
+                onChange={(v) =>
+                  updateSettings({ useDirectorPipeline: v, directorPipelineUserSet: true })
                 }
-                className={`w-12 h-6 rounded-full transition-colors shrink-0 ${settings.useDirectorPipeline === true ? 'bg-[#00e6ff]' : 'bg-zinc-700'} relative`}
-              >
-                <span
-                  className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${settings.useDirectorPipeline === true ? 'translate-x-6' : ''}`}
-                />
-              </button>
+                label="the agentic Director pipeline"
+                size="md"
+              />
             </div>
 
             {/* V1.0.7-PROMPT-ENG-A3: 14-angle camera picker. Wired
