@@ -100,21 +100,8 @@ const TABS: ReadonlyArray<{ id: TabId; label: string; icon: typeof SettingsIcon 
 ];
 
 // M3.3-P3 commit b: NcaStatus + NcaModel interfaces deleted.
-// FIX-100 slice A: extracted from MainContent.tsx (~714 LOC).
-// PiStatus shape lifted from the inline declaration that lived inside
-// MainContent — moved to module scope so the prop interface can refer to it.
-export interface PiStatus {
-  installed: boolean;
-  authenticated: boolean;
-  running: boolean;
-  provider: string | null;
-  model: string | null;
-  modelsAvailable: number;
-  lastError: string | null;
-}
-
-export type PiBusy = null | 'install' | 'start' | 'stop' | 'setup';
-
+// M3.3-P3 commit c: PiStatus + PiBusy types deleted with the pi routes
+// (MainContent no longer imports them either).
 // M3.4-P4-B2: agent-prompt defaults + builder + trademark-outcome store
 // all moved to ./Settings/SystemPromptEditor.tsx alongside the JSX
 // block that uses them. The modal no longer touches the trademark
@@ -134,13 +121,8 @@ interface SettingsModalProps {
   /** FEAT-002b S1: lifecycle of the debounced IDB save — drives the header pill. */
   saveState: SettingsSaveState;
   isDesktop: boolean | null;
-  piStatus: PiStatus | null;
-  piBusy: PiBusy;
-  piError: string | null;
-  piSetupMsg: string | null;
-  handlePiSetup: () => void;
-  // M3.3-P3 commit b: ncaSetupMsg + onNcaSetupComplete props deleted.
-  refreshPiStatus: () => void;
+  // M3.3-P3 commit c: piStatus / piBusy / piError / piSetupMsg /
+  // handlePiSetup / refreshPiStatus props deleted with the pi routes.
   collections: Collection[];
   savedImages: GeneratedImage[];
   deleteCollection: (id: string) => void;
@@ -154,13 +136,9 @@ export function SettingsModal({
   clearSettings,
   saveState,
   isDesktop,
-  piStatus,
-  piBusy,
-  piError,
-  piSetupMsg,
-  handlePiSetup,
-  // M3.3-P3 commit b: ncaSetupMsg + onNcaSetupComplete destructured deleted.
-  refreshPiStatus,
+  // M3.3-P3 commit c: piStatus / piBusy / piError / piSetupMsg /
+  // handlePiSetup / refreshPiStatus destructured deleted with the
+  // pi routes.
   collections,
   savedImages,
   deleteCollection,
@@ -577,75 +555,10 @@ export function SettingsModal({
               </div>
             )}
 
-            {/* M3.3-P3 commit b: the nca card IIFE deleted. The grid
-                is now 2-col (Pi.dev + vercel-ai) instead of 3-col. */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-
-              {/* Pi.dev card */}
-              {(() => {
-                // M3.3-P3 commit a: legacy literal cast — the Pi.dev
-                // card dies in commit c.
-                const selected = (activeAiAgent as 'vercel-ai' | 'pi') === 'pi';
-                const s = piStatus;
-                let dot = 'bg-zinc-600';
-                let label = 'Checking…';
-                let labelColor = 'text-zinc-400';
-                if (s) {
-                  if (!s.installed) {
-                    dot = 'bg-red-500';
-                    label = 'Not Installed';
-                    labelColor = 'text-red-300';
-                  } else if (!s.authenticated) {
-                    dot = 'bg-amber-400';
-                    label = 'Not Authenticated';
-                    labelColor = 'text-amber-300';
-                  } else if (s.running) {
-                    dot = 'bg-emerald-400';
-                    label = 'Running';
-                    labelColor = 'text-emerald-300';
-                  } else {
-                    dot = 'bg-[#00e6ff]';
-                    label = 'Ready';
-                    labelColor = 'text-[#00e6ff]';
-                  }
-                }
-                return (
-                  <button
-                    type="button"
-                    // M3.3-P3 commit a: dead onClick path now (the
-                    // Pi.dev card is unreachable at runtime because
-                    // `activeAiAgent` can only be 'vercel-ai'). The
-                    // Pi.dev card + this handler die in commit c.
-                    onClick={() => updateSettings({ activeAiAgent: 'pi' as never, aiAgentProvider: 'pi' as never })}
-                    aria-pressed={selected}
-                    className={`text-left rounded-xl border p-4 transition-all ${
-                      selected
-                        ? 'border-[#c5a062] bg-[#c5a062]/10 shadow-[0_0_0_1px_rgba(197,160,98,0.3)]'
-                        : 'border-zinc-800/60 bg-zinc-950/40 hover:border-zinc-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <Cpu className="w-4 h-4 text-[#c5a062]" />
-                        <span className="text-sm font-bold text-white">Pi.dev</span>
-                      </div>
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${selected ? 'text-[#c5a062]' : 'text-zinc-500'}`}>
-                        {selected ? '● Selected' : '○ Select'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-                      <span className={`text-[11px] ${labelColor}`}>{label}</span>
-                      {s?.provider && s?.model && (
-                        <span className="text-[10px] text-zinc-500 ml-1 truncate">{s.provider}/{s.model}</span>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-zinc-500 leading-relaxed">
-                      pi.dev sidecar — text generation, ideas, captions, tags, vision.
-                    </p>
-                  </button>
-                );
-              })()}
+            {/* M3.3-P3 commit c: the Pi.dev card deleted. The grid is
+                now 1-col (vercel-ai only) — no other AI Engine option
+                remains. */}
+            <div className="grid grid-cols-1 gap-3">
 
               {/* LLM-INTEGRATION-0513: Vercel AI SDK card — stateless direct
                   HTTPS calls to the configured provider (OpenAI / Anthropic
@@ -703,49 +616,13 @@ export function SettingsModal({
               })()}
             </div>
 
-            {/* MMX install CTA — visible regardless of which agent is currently
-                active so users can install/auth MMX without first selecting it.
-                Without this hoist the button was buried inside the
-                `activeAiAgent === 'mmx'` branch and invisible whenever Pi.dev
-                was the default active agent. Renders during the null/loading
-                window as well so the install affordance never disappears: the
-                /api/mmx/status probe can take a beat on cold starts and we'd
-                rather show the button optimistically than make the user wait. */}
-            {/* M3.3-P3 commit b: the entire nca-install + active-agent panel block deleted. */}
-            <div className="pt-2">
-              {piStatus && !piStatus.authenticated && piStatus.installed ? (
-                <button
-                  type="button"
-                  onClick={handlePiSetup}
-                  disabled={piBusy !== null}
-                  className="btn-gold-sm rounded-lg"
-                >
-                  {piBusy === 'setup' ? 'Opening…' : 'Launch Pi.dev Setup'}
-                </button>
-              ) : piStatus?.authenticated ? (
-                <p className="text-[11px] text-emerald-400">pi.dev authenticated and ready.</p>
-              ) : (
-                <p className="text-[11px] text-zinc-500">
-                  {piStatus && !piStatus.installed
-                    ? 'pi.dev not installed — will auto-install on next check.'
-                    : 'Checking pi.dev status…'}
-                </p>
-              )}
-              {piSetupMsg && (
-                <div className="mt-3 bg-zinc-900 border border-zinc-700 rounded-lg p-3 space-y-1">
-                  <p className="text-[11px] text-amber-300 font-medium">Pi Setup</p>
-                  <code className="block text-[11px] text-emerald-400 bg-zinc-950 px-2 py-1 rounded">
-                    tmux attach -t pi-setup
-                  </code>
-                </div>
-              )}
-              {piError && (
-                <p className="mt-2 text-[11px] text-red-400 whitespace-pre-wrap">{piError}</p>
-              )}
-            </div>
-
+            {/* M3.3-P3 commit c: the entire active-agent panel block
+                (nca-install CTA + Pi.dev-active panel + piStatus /
+                piSetupMsg / piError surface) deleted. The aiAgent tab
+                is now just the card grid + the "Engine details live in
+                the AI Engine tab" footer. */}
             <p className="text-[10px] text-zinc-500 pt-2 border-t border-zinc-800/60">
-              The active agent handles all AI tasks. Engine details (system prompt, niches, genres) live in the AI Engine tab.
+              Engine details (system prompt, niches, genres) live in the AI Engine tab.
             </p>
           </div>
           </>
@@ -974,188 +851,83 @@ export function SettingsModal({
 
           {activeTab === 'aiEngine' && (
           <>
-          {/* AI Engine — shows whichever backend is the active agent */}
+          {/* M3.3-P3 commit c: the pi-specific sub-block deleted. The
+              AI Engine tab is now vercel-ai-only; the ternary
+              branching around 'Vercel.ai AI Engine' vs 'Pi.dev AI
+              Engine' is gone too. */}
           <div className="space-y-4 pt-4 border-t border-zinc-800">
             <h4 className="text-lg font-medium text-white mb-2">
-              {activeAiAgent === 'vercel-ai' ? 'Vercel.ai AI Engine' : 'Pi.dev AI Engine'}
+              Vercel.ai AI Engine
             </h4>
-            {activeAiAgent === 'vercel-ai' ? (
-              <div className="space-y-2 -mt-2">
-                <p className="text-[11px] text-zinc-500">
-                  Text AI runs through Vercel&apos;s AI gateway — no local subprocess.
-                  Pick a model below; provider keys are stored in <code>.env.local</code>.
-                </p>
-                {aiStatus?.modelInfo && (
-                  <div
-                    data-testid="active-model-card"
-                    className="rounded-xl border border-[#c5a062]/30 bg-gradient-to-br from-[#c5a062]/10 to-transparent p-3"
-                  >
-                    <div className="flex items-start justify-between gap-2 mb-1.5">
-                      <div>
-                        <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-[#c5a062] mb-0.5">
-                          Active model
-                        </div>
-                        <div className="font-mono text-sm text-white">
-                          {aiStatus.modelInfo.modelId}
-                        </div>
-                        <div className="text-[10.5px] text-zinc-400 mt-0.5">
-                          {aiStatus.modelInfo.family} · {aiStatus.modelInfo.generation}
-                        </div>
+            <div className="space-y-2 -mt-2">
+              <p className="text-[11px] text-zinc-500">
+                Text AI runs through Vercel&apos;s AI gateway — no local subprocess.
+                Pick a model below; provider keys are stored in <code>.env.local</code>.
+              </p>
+              {aiStatus?.modelInfo && (
+                <div
+                  data-testid="active-model-card"
+                  className="rounded-xl border border-[#c5a062]/30 bg-gradient-to-br from-[#c5a062]/10 to-transparent p-3"
+                >
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <div>
+                      <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-[#c5a062] mb-0.5">
+                        Active model
                       </div>
-                      <div className="text-right text-[9.5px] font-mono text-zinc-500 leading-tight">
-                        <div>{aiStatus.modelInfo.contextWindow.toLocaleString()} ctx</div>
-                        <div>{aiStatus.modelInfo.defaultMaxTokens.toLocaleString()} out</div>
+                      <div className="font-mono text-sm text-white">
+                        {aiStatus.modelInfo.modelId}
+                      </div>
+                      <div className="text-[10.5px] text-zinc-400 mt-0.5">
+                        {aiStatus.modelInfo.family} · {aiStatus.modelInfo.generation}
                       </div>
                     </div>
-                    <p className="text-[10.5px] text-zinc-400 leading-relaxed">
-                      {aiStatus.modelInfo.description}
-                    </p>
+                    <div className="text-right text-[9.5px] font-mono text-zinc-500 leading-tight">
+                      <div>{aiStatus.modelInfo.contextWindow.toLocaleString()} ctx</div>
+                      <div>{aiStatus.modelInfo.defaultMaxTokens.toLocaleString()} out</div>
+                    </div>
                   </div>
-                )}
-                <VercelAiModelPicker
-                  selected={settings.activeTextModel ?? null}
-                  onSelect={(modelId) => updateSettings({ activeTextModel: modelId })}
-                />
-
-                {/* HIGGSFIELD-INTEGRATION: image generation provider
-                    alongside Leonardo. OAuth-based — each user connects
-                    their own Higgsfield account. Peer, not replacement. */}
-                <div className="pt-4 mt-4 border-t border-zinc-800">
-                  <HiggsfieldConnection
-                    selectedImageModel={
-                      (settings.defaultHiggsfieldImageModel as never) ||
-                      HIGGSFIELD_DEFAULT_IMAGE_MODEL
-                    }
-                    selectedVideoModel={
-                      (settings.defaultHiggsfieldVideoModel as never) ||
-                      HIGGSFIELD_DEFAULT_VIDEO_MODEL
-                    }
-                    onSelectImageModel={(slug) =>
-                      updateSettings({ defaultHiggsfieldImageModel: slug })
-                    }
-                    onSelectVideoModel={(slug) =>
-                      updateSettings({ defaultHiggsfieldVideoModel: slug })
-                    }
-                    cliToken={settings.higgsfieldCliToken}
-                    onSaveCliToken={(token) =>
-                      updateSettings({ higgsfieldCliToken: token })
-                    }
-                    onConnectionChange={(connected) =>
-                      updateSettings({ higgsfieldConnected: connected })
-                    }
-                  />
+                  <p className="text-[10.5px] text-zinc-400 leading-relaxed">
+                    {aiStatus.modelInfo.description}
+                  </p>
                 </div>
+              )}
+              <VercelAiModelPicker
+                selected={settings.activeTextModel ?? null}
+                onSelect={(modelId) => updateSettings({ activeTextModel: modelId })}
+              />
+
+              {/* HIGGSFIELD-INTEGRATION: image generation provider
+                  alongside Leonardo. OAuth-based — each user connects
+                  their own Higgsfield account. Peer, not replacement. */}
+              <div className="pt-4 mt-4 border-t border-zinc-800">
+                <HiggsfieldConnection
+                  selectedImageModel={
+                    (settings.defaultHiggsfieldImageModel as never) ||
+                    HIGGSFIELD_DEFAULT_IMAGE_MODEL
+                  }
+                  selectedVideoModel={
+                    (settings.defaultHiggsfieldVideoModel as never) ||
+                    HIGGSFIELD_DEFAULT_VIDEO_MODEL
+                  }
+                  onSelectImageModel={(slug) =>
+                    updateSettings({ defaultHiggsfieldImageModel: slug })
+                  }
+                  onSelectVideoModel={(slug) =>
+                    updateSettings({ defaultHiggsfieldVideoModel: slug })
+                  }
+                  cliToken={settings.higgsfieldCliToken}
+                  onSaveCliToken={(token) =>
+                    updateSettings({ higgsfieldCliToken: token })
+                  }
+                  onConnectionChange={(connected) =>
+                    updateSettings({ higgsfieldConnected: connected })
+                  }
+                />
               </div>
-            ) : (
-              <p className="text-[11px] text-zinc-500 -mt-2">
-                All text AI runs through <code>pi</code> as a subprocess.
-                Pick a provider + model below in <span className="text-zinc-300">Desktop Configuration</span>; API keys are stored locally in <code>config.json</code>.
-              </p>
-            )}
-
-            {/* pi.dev-specific status + controls. Hidden entirely when the
-                vercel-ai backend is the active agent — vercel-ai has no
-                subprocess to install, start, authenticate, or surface
-                errors from, so the whole sub-block is pi-only. */}
-            {activeAiAgent !== 'vercel-ai' && (
-              <>
-            {/* Status row */}
-            <div className="flex items-center gap-3">
-              {(() => {
-                const s = piStatus;
-                let label = 'Checking…';
-                let bgColor = 'bg-zinc-700';
-                let textColor = 'text-white';
-                let dotColor = 'bg-white/70';
-                if (s) {
-                  if (!s.installed) { label = 'Not Installed'; bgColor = 'bg-red-600'; }
-                  else if (!s.authenticated) { label = 'Not Authenticated'; bgColor = 'bg-[#c5a062]'; textColor = 'text-[#050505]'; dotColor = 'bg-[#050505]/40'; }
-                  else if (s.running) { label = 'Running'; bgColor = 'bg-[#00e6ff]'; textColor = 'text-[#050505]'; dotColor = 'bg-[#050505]/40'; }
-                  else { label = 'Ready'; bgColor = 'bg-[#00e6ff]/20 border border-[#00e6ff]/30'; textColor = 'text-[#00e6ff]'; dotColor = 'bg-[#00e6ff]'; }
-                }
-                return (
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium ${bgColor} ${textColor}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
-                    {label}
-                  </span>
-                );
-              })()}
-              {piStatus?.provider && piStatus?.model && (
-                <span className="text-[11px] text-zinc-400">
-                  {piStatus.provider}/{piStatus.model}
-                </span>
-              )}
-              {piStatus && piStatus.modelsAvailable > 0 && (
-                <span className="text-[11px] text-zinc-500">
-                  {piStatus.modelsAvailable} models available
-                </span>
-              )}
             </div>
-
-            {/* Autonomous boot status — no manual install/start buttons.
-                Install + start are triggered automatically on app mount
-                (see piAutoBootRef effect in MainContent). The only user
-                action that remains is the Sign-in button below for pi's
-                auth flow, which requires interactive OAuth. */}
-            <div className="flex flex-wrap gap-2 items-center">
-              {piBusy === 'install' && (
-                <span className="text-[11px] text-[#00e6ff]">Installing pi.dev (first launch only, ~30–60s)…</span>
-              )}
-              {piBusy === 'start' && (
-                <span className="text-[11px] text-[#00e6ff]">Starting pi.dev…</span>
-              )}
-              {!piBusy && piStatus && !piStatus.installed && (
-                <span className="text-[11px] text-[#c5a062]">pi.dev not installed — will auto-install on next check</span>
-              )}
-              {!piBusy && piStatus?.running && (
-                <span className="text-[11px] text-emerald-400">pi.dev running</span>
-              )}
-              <button
-                onClick={() => refreshPiStatus()}
-                disabled={piBusy !== null}
-                className="px-3 py-1.5 text-xs bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition-colors"
-              >
-                Refresh
-              </button>
-            </div>
-
-            {piStatus && !piStatus.authenticated && piStatus.installed && (
-              <button
-                onClick={handlePiSetup}
-                disabled={piBusy !== null}
-                className="btn-gold-sm rounded-lg"
-              >
-                {piBusy === 'setup' ? 'Opening…' : 'Setup Pi.dev'}
-              </button>
-            )}
-
-            {piSetupMsg && (
-              <div className="bg-zinc-900 border border-zinc-700 rounded-lg p-3 space-y-1">
-                <p className="text-[11px] text-amber-300 font-medium">Pi Setup gestartet</p>
-                <p className="text-[11px] text-zinc-300">
-                  Terminal öffnen und verbinden:
-                </p>
-                <code className="block text-[11px] text-emerald-400 bg-zinc-950 px-2 py-1 rounded">
-                  tmux attach -t pi-setup
-                </code>
-                <p className="text-[10px] text-zinc-500">
-                  Pi führt dich durch Provider-Auswahl und Login. Danach &quot;Start Pi&quot; drücken.
-                </p>
-              </div>
-            )}
-
-            {piError && (
-              <p className="text-[11px] text-red-400 whitespace-pre-wrap">
-                {piError}
-              </p>
-            )}
-              </>
-            )}
 
             <p className="text-[10px] text-zinc-500 pt-2 border-t border-zinc-800/60">
-              {activeAiAgent === 'vercel-ai'
-                ? 'This prompt shapes every AI interaction across the app. Changes apply immediately.'
-                : 'The AI System Prompt lives below in this same tab. Restart pi (stop + start) after changing it for the new prompt to take effect.'}
+              This prompt shapes every AI interaction across the app. Changes apply immediately.
             </p>
           </div>
           </>
@@ -1520,7 +1292,7 @@ export function SettingsModal({
                     <p className="text-xs font-semibold text-white">Desktop-only</p>
                   </div>
                   <p className="text-[11px] text-zinc-400 leading-relaxed">
-                    The desktop app stores credentials in <code className="text-zinc-300">config.json</code>, manages the pi.dev sidecar, and ships with auto-update. Run the Tauri build to access these settings.
+                    The desktop app stores credentials in <code className="text-zinc-300">config.json</code>, bundles the Higgsfield CLI, and ships with auto-update. Run the Tauri build to access these settings.
                   </p>
                 </div>
               )}
