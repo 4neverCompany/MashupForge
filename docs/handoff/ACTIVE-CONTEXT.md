@@ -2,13 +2,24 @@
 
 > **Was ist grad in flight?** Lese das hier, um zu wissen welche Threads offen sind, ohne SESSION-LOG durchsuchen zu müssen.
 
-## ⚡ AKTUELL (2026-06-13, Session 10): v1.8.1 RELEASED + 2 Followups gemerged → nächster Milestone M4
+## ⚡ AKTUELL (2026-06-13, Session 10): v1.8.2 RELEASED → nächster Milestone M4
 
-**Stand:** main = **v1.8.1 SHIPPED** (Tag 6d81ac9, alle 4 Assets + Auto-Update,
-Release-Notes auf Highlights gesetzt). Maurice gab explizites Release-OK.
-v1.8.1 = Audit-Nachbesserung der Fremdagent-1.7.0→1.8.0-Arbeit. Danach 2
-Followups gemerged (auf main, **NICHT getaggt** — akkumulieren für ein
-zukünftiges Release; nur v1.8.1 hatte OK).
+**Stand:** main = **v1.8.2 SHIPPED** (Tag f40d15f, alle 4 Assets + Auto-Update,
+Release-Notes auf Highlights). v1.8.2 ist ein Stability/Internal-Release: es
+taggt die 2 Post-v1.8.1-Followups (#94 CI-Hardening + #95 usePersistentStore)
+— keine Features/UI-Änderung, eine comparison-results-Robustheit + der CI-Gate.
+Patch-Bump (1.9.0 ist für M4 reserviert). Maurice gab OK. (Davor v1.8.1, Tag
+6d81ac9 = Audit-Nachbesserung der Fremdagent-1.7.0→1.8.0-Arbeit.)
+
+**Hinweis (Web-Errors, diagnostiziert 2026-06-13):** Maurices `next dev`-Web-
+View (localhost:3000) zeigt Fehler — ALLE Web-Kontext-Artefakte des Tauri-
+DESKTOP-Apps im Browser, KEINER ein v1.8.x-Regress: eval/CSP (Preview-Sandbox),
+`UpdateChecker invoke undefined` (Tauri-API im Browser fehlt), Clipboard-denied
+(Browser-Sandbox), und `[StartupReconciler] getAllPosts` = pre-existing+caught
+Bug (`useReconciler.ts:84` baut `new IdbPostLifecycleStorage()` OHNE driver →
+this.driver undefined; seit 5109d17, in JEDER Version; gefangen → stiller
+No-Op; Fix = `await IdbPostLifecycleStorage.open()`, aber weckt dormantes
+Subsystem → spawn_task task_e632f334). Desktop-Build unberührt.
 
 **v1.8.1-Batch (alle gemerged + im Release):**
 - **#89** Director-Thinking-Leak (Credit-Burner) + Higgsfield UNC-cwd-Fix.
@@ -18,7 +29,7 @@ zukünftiges Release; nur v1.8.1 hatte OK).
 - **#93** Hygiene (Changelogs 1.8.0+1.8.1, Handoff, parseGeneratedItems-Tests).
 - **M3.4:** kein Code — First-Load-Ziel bereits via MashupStudio-Lazy erfüllt.
 
-**Post-v1.8.1-Followups (auf main, ungetaggt):**
+**Post-v1.8.1-Followups (jetzt in v1.8.2 getaggt):**
 - **#94 CI-Hardening:** main hatte GAR KEINEN Branch-Schutz → DAS war die
   Wurzel warum v1.8.0 ESLint-rot shippte. **main jetzt branch-protected:**
   ESLint + TypeScript + Vitest + Bundle-size sind REQUIRED checks. `gh pr
