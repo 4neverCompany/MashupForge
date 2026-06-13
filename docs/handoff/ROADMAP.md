@@ -2,7 +2,8 @@
 
 > Erstellt 2026-06-10 aus Maurice' 10 Punkten, fundiert durch eine 7-Agent
 > Code-Investigation (jeder Punkt root-gecaused + Aufwand + Abhängigkeiten).
-> Status: 🟡 geplant · 🔵 in Arbeit · ✅ done. Aktuelle App-Version: **1.7.0**.
+> Status: 🟡 geplant · 🔵 in Arbeit · ✅ done. Aktuelle App-Version: **1.8.x**
+> (1.8.0 released; 1.8.1-Cleanup-Batch in Arbeit — siehe Block unten).
 > Release-Konvention: NICHT pro Fix taggen — pro Milestone EIN gebündeltes
 > Release vorschlagen + Maurice' OK abwarten (siehe .claude/rules/release-flow.md).
 
@@ -173,27 +174,31 @@ weiter ein Multi-MB-bis-100MB-JSON, das der plugin-store eager parsed.
 - Optional: mashup_saved_images in eigene Store-Datei (damit ein Settings-Read
   nicht das Image-Metadata-Array mitzieht).
 
-### M3.3 — Code-/Repo-Cleanup (Aufwand L, phasenweise)
+### M3.3 — Code-/Repo-Cleanup (Aufwand L, phasenweise) ✅ KOMPLETT
 **Punkt 9.** Definition "aufgeräumt" hier: kein toter Provider-Code, keine
 projektfremden Assets im Repo, keine Duplikate, eine PM-Lockfile-Wahrheit.
-- **P1 Zero-Risk Declutter ⚡ (S):** `pnpm-lock.yaml`/`pnpm-workspace.yaml` löschen
-  (bun ist kanonisch); `docs/working-folder/{landing-screens,png-sources}`
-  git-rm (~27MB Marketing-PNGs in der git-Historie einer Desktop-App) +
-  gitignoren. ⚠ Erst mit dir klären ob die Landing-Repo das braucht.
-- **P2 Confirmed-Dead (S):** `lib/providers/mmx/cli-adapter.ts` + Registry-
-  Wiring löschen (0 Caller); `text-model-specs.ts`-Shim auf -catalog migrieren
-  + löschen.
-- **P3 Tote Subprocess-Agents retiren (M, vorsichtig):** pi (app/api/pi ~708 LOC,
-  pi-client/pi-setup, Pi.dev-Card), nca (~639 LOC), mmx-TEXT-Pfad. **KRITISCH:**
-  erst aiClient-Default von pi→vercel-ai flippen, DANN löschen. `lib/mmx-client.ts`
-  + multimodale mmx-Routes NICHT anfassen (lebendig).
-- **P4 God-File-Splits (L, eigener Track, NICHT mit P3 bündeln):** MainContent
-  (5163 LOC), SettingsModal (2649), useImageGeneration (1672) — eine Datei pro PR.
-- **Dead Dep ⚡:** `@mariozechner/pi-ai` (0 Imports) aus package.json.
+- ✅ **P1 Zero-Risk Declutter** — erledigt in v1.8.0 (0c0dd97).
+- ✅ **P2 Confirmed-Dead** — `mmx/cli-adapter.ts` + Shim erledigt in v1.8.0.
+- ✅ **P3 Tote Subprocess-Agents retiren:** commit a (#83, default→vercel-ai +
+  Union-Narrowing), commit b (#84, nca + mmx-TEXT), **commit c (#92, pi.dev +
+  Tauri-Sidecar, v1.8.1)**. `lib/mmx-client.ts` + multimodale mmx-Routes blieben
+  unangetastet (lebendig). Bestands-Settings mit `pi`/`nca`/`mmx` werden via
+  `applyM33AiAgentFlip` beim ersten Hydrate auf `vercel-ai` umgeschrieben.
+- ✅ **P4 God-File-Splits** — MainContent (#81), SettingsModal (#87),
+  useImageGeneration (#88) in v1.8.0 gesplittet.
+- ✅ **Dead Dep** — `@mariozechner/pi-ai` bereits weg; `@mariozechner/pi-coding-agent`
+  mit der pi-Löschung (#92) entfernt.
 
-### M3.4 — Bundle-Code-Splitting (Aufwand M)
-Settings-Panel + react-markdown aus dem /studio-First-Load via `dynamic(ssr:false)`
-(beide sind hinter User-Interaktion). Mit check-bundle-size.mjs verifizieren.
+### M3.4 — Bundle-Code-Splitting (Aufwand M) ✅ BEREITS ERFÜLLT (kein Code-Change nötig)
+Ursprüngliches Ziel: Settings-Panel + react-markdown aus dem /studio-First-Load
+via `dynamic(ssr:false)` ziehen. **Befund (v1.8.1-Audit):** Das Ziel ist bereits
+erreicht — `MashupStudio.tsx` lädt **MainContent UND Sidebar** schon via
+`dynamic(ssr:false)`, d.h. SettingsModal (in MainContent) und react-markdown (in
+Sidebar) waren nie im /studio-First-Load. `check-bundle-size.mjs` misst nur den
+First-Load (= MashupStudio-Shell ~276 KB von 300); Per-Komponenten-`dynamic()`
+INNERHALB bereits-lazy Eltern ändert die Metrik nicht (276.6→276.7) und fügt nur
+Loading-Flackern hinzu. Turbopack splittet beide ohnehin automatisch (der schwere
+react-markdown-Chunk ~34.5 KB gz ist nicht in studio.html). **Kein Code-Change.**
 
 ---
 

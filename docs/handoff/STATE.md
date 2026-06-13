@@ -1,9 +1,39 @@
 # State — MashupForge
 
-**Last updated:** 2026-06-11 06:50 (Europe/Berlin, UTC+2)
-**Active session:** Claude Code (Fable 5) — Lagebild nach v1.7.0 + Ops-Fixes + M3-Start
+**Last updated:** 2026-06-13 (Europe/Berlin, UTC+2)
+**Active session:** Claude Code (Opus 4.8 1M) — Audit der 1.7.0→1.8.0-Fremdagent-Arbeit + v1.8.1-Cleanup-Batch
 **Workspace:** I:\c4n-MashupForge (Handoff source of truth: I:\MashupForge-handoff\)
-**Current version:** **1.7.0 SHIPPED** (published 2026-06-11 00:41 UTC, Build 21m23s grün, alle 4 Assets — von einer parallelen Session gebaut). Inhalt = M2 komplett + 3 Fixes: #69 kontextueller Per-Image-Camera-Angle (Settings-Picker = optionaler Lock), #70 automatische Skill-Selektion (Skill-Index + Routing-Anweisung statt Body-Dump, Studio-Route + Director), #71 Director übergibt den sauberen Prompt statt seines Terminal-Reports (+ Provider-Name im Pipeline-Log), #72 Pipeline kann Higgsfield wirklich nutzen (higgsfield:<slug>-Routing statt Leonardo-Fallback — ACHTUNG: verbraucht jetzt echte Higgsfield-Credits in Pipeline-Runs), #73 applyWatermark mit 15s-Load-Timeout (kein Infinite-Hang mehr). Davor: **1.6.0** (M1 + Director-Default, siehe unten). Inhalt: M1 komplett (PR #65: Director `.chat()`-Fix in den Tools + 502-Error-Surfacing, Higgsfield-CLI-counts-as-connected in Panel+Image+Video-Routes, `color-scheme: dark` Dropdown-Fix, Serper→Brave→DDG-Trending-Chain + SERPER_API_KEY-Config) **plus** Director als DEFAULT-Pipeline-Pfad (PR #66: Opt-out-Migration `applyV160DirectorDefaultMigration` + `directorPipelineUserSet`-Marker, gehärtet nach 17-Agent-Adversarial-Review — Per-Idea-Kosten-Memo gegen die Continuous-Mode-Geld-Schleife, 3-min-Client-/4-min-Server-Timeout + Skip-Abort durchgereicht bis in den Loop, DIRECTOR_FAILED-Sentinel + Client-Plausibilitäts-Gate gegen Apology-als-Prompt, Caption-Fallback = kurzes Verbatim-Konzept, Marker-Pair-Guard + hydratedOnceRef="Hydration erfolgreich" in useSettings). Serper-Key liegt auf Maurice' Maschine in config.json (live getestet, 2.499/2.500 Credits). Davor: 1.5.2 (CLI im Installer), 1.5.1 (Director-Toggle), 1.5.0 (5 Feature-Requests).
+
+## ⚡ 2026-06-13: v1.8.1-Cleanup-Batch (nach Audit der Fremdagent-1.8.0-Arbeit)
+
+Maurice nutzte von 1.7.0→1.8.0 einen anderen Agenten und bat um ein
+Quality-Audit + Nachbesserung. Befund: Deletions/Refactors solide (KEEP,
+2134 Tests grün), aber reale Lücken. Batch (jede einzeln verifiziert; EIN
+gebündeltes Release vorgeschlagen — Tag erst nach Maurice' OK):
+- **#89** (schon auf main): 2 Produktions-Bugs — Director-Commentary leakt
+  als Bildprompt (isCommentaryOnly-Give-up + Plausibilitäts-Gate) + Higgsfield
+  UNC-CWD-Spawn-Fix (pickSafeCwd → tmpdir bei `\\?\`-Pfaden auf Windows).
+- **#90 (PR-A):** weekly-fill zählt vergangene `failed`-Posts zur Füllung
+  (skippt den Future-Filter wie `posted`) + Watermark-Migration persistiert
+  jetzt wirklich (dirtyRef im Migrations-Effect). Beide mit Regressionstests.
+- **#91 (PR-B):** ESLint wieder grün — 9 React-Compiler-Fehler aus dem 1.8.0-
+  God-File-Split (`main` war rot: ESLint ist kein Merge-Blocking-Check + pre-
+  commit läuft nur tsc+vitest). Inkl. echtem Fix: `Date.now()`-during-render.
+- **#92 (PR-D):** pi.dev retiren (M3.3-P3c) — 7 Routes + Client/Setup + Pi.dev-
+  Card + Sidecar, ~2280 Zeilen. Adaptiert aus prepared commit 4faa8b4. mmx
+  unangetastet. applyM33AiAgentFlip migriert Bestands-`pi`-Settings.
+- **M3.4 (kein Code):** Befund — First-Load-Ziel schon erfüllt (MashupStudio
+  lädt MainContent+Sidebar bereits via dynamic(ssr:false)). ROADMAP korrigiert.
+- **PR-E (dies):** Changelogs 1.8.0+1.8.1, ROADMAP/Handoff auf 1.8.x, Tests für
+  parseGeneratedItems-Pure-Funktionen.
+
+**▶ Nächster Einstieg nach v1.8.1-Release:** M4 (Settings-Redesign → v1.9.0).
+
+---
+
+### Historie (vor v1.8.1)
+
+**Current version (Stand 1.7.0-Block):** **1.7.0 SHIPPED** (published 2026-06-11 00:41 UTC, Build 21m23s grün, alle 4 Assets — von einer parallelen Session gebaut). Inhalt = M2 komplett + 3 Fixes: #69 kontextueller Per-Image-Camera-Angle (Settings-Picker = optionaler Lock), #70 automatische Skill-Selektion (Skill-Index + Routing-Anweisung statt Body-Dump, Studio-Route + Director), #71 Director übergibt den sauberen Prompt statt seines Terminal-Reports (+ Provider-Name im Pipeline-Log), #72 Pipeline kann Higgsfield wirklich nutzen (higgsfield:<slug>-Routing statt Leonardo-Fallback — ACHTUNG: verbraucht jetzt echte Higgsfield-Credits in Pipeline-Runs), #73 applyWatermark mit 15s-Load-Timeout (kein Infinite-Hang mehr). Davor: **1.6.0** (M1 + Director-Default, siehe unten). Inhalt: M1 komplett (PR #65: Director `.chat()`-Fix in den Tools + 502-Error-Surfacing, Higgsfield-CLI-counts-as-connected in Panel+Image+Video-Routes, `color-scheme: dark` Dropdown-Fix, Serper→Brave→DDG-Trending-Chain + SERPER_API_KEY-Config) **plus** Director als DEFAULT-Pipeline-Pfad (PR #66: Opt-out-Migration `applyV160DirectorDefaultMigration` + `directorPipelineUserSet`-Marker, gehärtet nach 17-Agent-Adversarial-Review — Per-Idea-Kosten-Memo gegen die Continuous-Mode-Geld-Schleife, 3-min-Client-/4-min-Server-Timeout + Skip-Abort durchgereicht bis in den Loop, DIRECTOR_FAILED-Sentinel + Client-Plausibilitäts-Gate gegen Apology-als-Prompt, Caption-Fallback = kurzes Verbatim-Konzept, Marker-Pair-Guard + hydratedOnceRef="Hydration erfolgreich" in useSettings). Serper-Key liegt auf Maurice' Maschine in config.json (live getestet, 2.499/2.500 Credits). Davor: 1.5.2 (CLI im Installer), 1.5.1 (Director-Toggle), 1.5.0 (5 Feature-Requests).
 
 **▶ Nächster Einstieg: M3** (+ Ops: Actions-Node-20-Deadline 16.06., Dependabot-Backlog) — siehe ROADMAP.md "NÄCHSTER EINSTIEG" + ACTIVE-CONTEXT.md. camofox-integration.yml-YAML-Fix (roter Run pro Push seit 09.06.) ist auf main.
 

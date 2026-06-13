@@ -2,29 +2,32 @@
 
 > **Was ist grad in flight?** Lese das hier, um zu wissen welche Threads offen sind, ohne SESSION-LOG durchsuchen zu müssen.
 
-## ⚡ AKTUELL (2026-06-13, Session 10): v1.8.0 RELEASED + 2 Maurice-Hotfixes auf main
+## ⚡ AKTUELL (2026-06-13, Session 10): v1.8.1-Cleanup-Batch fertig codiert — Release-OK ausstehend
 
-**Stand:** main = **v1.8.0** (released 2026-06-12, von parallelen Sessions:
-M3.2b Watermark-to-disk, M3.4-P4-Refactors #87/#88, 4-Bug-Batch 31e9b4e).
-Diese Sessions ziehen den Handoff oft NICHT nach — Vorsicht, der Block
-unten ("M3-Fortschritt") spiegelt evtl. nicht alles, was schon gemerged
-ist. `git log --oneline` ist die Wahrheit.
+**Stand:** main = **v1.8.0**. Der v1.8.1-Batch (Audit-Nachbesserung der
+Fremdagent-1.8.0-Arbeit, "alles fixen → v1.8.1") ist codiert + grün; PRs
+warten auf Merge bzw. sind gemerged. Reihenfolge bewusst linear-grün:
+ESLint-PR zuerst → main grün → restliche PRs rebasen.
 
-**Session 10 (heute): 2 Live-Bugs von Maurice gefixt → PR #89 auf main
-(35aba9d):** (1) Director-Thinking-Leak in Bildprompts (Credit-Burner) —
-`prompt-extract.ts` gibt jetzt bei Nur-Kommentar auf + Plausibility-Gate;
-(2) Higgsfield-CLI UNC-cwd-Warnung gefixt (der eigentliche
-`aspect-ratio`-Fehler war schon in v1.8.0 als `--aspect_ratio` gelöst —
-Maurice muss updaten). Details siehe SESSION-LOG.
+**PRs (alle einzeln verifiziert — tsc/eslint/build/vitest):**
+- **#89** (auf main, 35aba9d): 2 Live-Bugs — Director-Thinking-Leak
+  (Credit-Burner) + Higgsfield UNC-cwd-Spawn-Fix.
+- **#90 (PR-A, gemerged):** weekly-fill past-failed-counting +
+  Watermark-Migration-Persistenz (+ Regressionstests).
+- **#91 (PR-B, gemerged):** ESLint grün (9 React-Compiler-Verstöße +
+  Date.now-during-render-Fix). **→ CI-Schuld unten ERLEDIGT.**
+- **#92 (PR-D, offen/CI):** pi.dev-Retirement (M3.3-P3c, ~2280 Zeilen).
+- **PR-E (offen):** Hygiene — Changelogs + Handoff + Tests (dieser Stand).
+- **M3.4:** kein Code — First-Load-Ziel bereits via MashupStudio-Lazy
+  erfüllt (ROADMAP korrigiert).
 
-**🔴 BLOCKIERT NICHTS, aber wichtig — CI-Schuld:** main ist seit #87/#88
-**ESLint-rot** (9 React-Compiler-Fehler in MainContent.tsx; v1.8.0 damit
-released). ESLint ist KEIN merge-blockierender Check. Fix-Task existiert.
-Pre-commit läuft nur tsc+vitest → lint rutscht durch.
+**✅ CI-Schuld ERLEDIGT:** der ESLint-Rot seit #87/#88 ist mit #91 (PR-B)
+behoben — main ist wieder 0 ESLint-Fehler.
 
-**▶ Offene Vorschläge an Maurice:** v1.8.1-Patch für die 2 Hotfixes
-(Credit-Burner!) — OK abwarten. Danach M3.3-Cleanup (bmad-Removal, OK
-liegt vor) + die ESLint-Schuld.
+**▶ Offene Vorschläge an Maurice:** **v1.8.1-Release** sobald #92 + PR-E
+gemerged + grün sind — auf explizites OK warten (Batch-Release-Konvention,
+release.sh + Tag = ~20min-Build + forced-update). Danach: **M4**
+(Settings-Redesign → v1.9.0).
 
 ---
 ### (älterer Stand, evtl. überholt — Stand 2026-06-11)
