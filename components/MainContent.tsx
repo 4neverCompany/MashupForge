@@ -760,6 +760,11 @@ export function MainContent() {
   }, []);
 
   useEffect(() => {
+    // Fetch-on-open: refreshPiStatus is async (fetch → setState in a
+    // microtask), so the setState is never synchronous-in-effect; the
+    // React-Compiler heuristic flags the call site anyway. Established
+    // repo convention for this verified-safe pattern.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (showSettings) refreshPiStatus();
   }, [showSettings]);
 
@@ -860,6 +865,10 @@ export function MainContent() {
       try {
         const parsed = JSON.parse(storedModels);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          // One-time hydrate of the model selection from localStorage on
+          // mount (empty deps) — the same init-effect pattern useImages
+          // uses for its store load. Safe: runs once, no cascade.
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setComparisonModels(parsed);
           return;
         }
@@ -867,7 +876,8 @@ export function MainContent() {
         // parse failure — fall through to defaults below
       }
     }
-    // Default: all three models selected
+    // Default: all three models selected. (No disable needed here — the
+    // React Compiler rule fires once per effect, already silenced above.)
     setComparisonModels(LEONARDO_MODELS.map(m => m.id));
   }, []);
 
@@ -876,7 +886,12 @@ export function MainContent() {
   }, [comparisonModels]);
 
   // Clean up stale per-model overrides when comparison models change.
+  // Functional updater with a referential-equality bail (returns `prev`
+  // when nothing changed), so this cannot cascade — but the value can't
+  // be a pure useMemo because perModelOverrides is also user-mutated
+  // elsewhere. Verified-safe derived-cleanup pattern.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPerModelOverrides(prev => {
       const modelSet = new Set(comparisonModels);
       const filtered = Object.fromEntries(
@@ -892,6 +907,9 @@ export function MainContent() {
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!comparisonPrompt.trim() || comparisonModels.length === 0) {
+      // Clear stale previews when there's nothing to preview. A
+      // one-shot reset guarded by the condition — no cascade.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setModelPreviews({});
       return;
     }
@@ -945,6 +963,13 @@ export function MainContent() {
     [savedImages],
   );
 
+  // The React Compiler bails on this manual useMemo (it can't prove
+  // `settings.scheduledPosts || []` + getAllRejectedImageIds() are
+  // stable across renders); the manual memo is intentional and correct,
+  // perf-only. The rule anchors its diagnostic on the dependency array,
+  // so a block disable is needed (a -next-line above the useMemo would
+  // not cover the deps line).
+  /* eslint-disable react-hooks/preserve-manual-memoization */
   const displayedImages = useMemo(() => {
     // V080-DEV-002: hide images whose ScheduledPosts are all 'rejected'.
     // BUG-DEV-003 stopped these from being orphaned (pipelinePending is
@@ -991,6 +1016,7 @@ export function MainContent() {
         return sortBy === 'newest' ? timeB - timeA : timeA - timeB;
       });
   }, [view, images, savedImages, settings.scheduledPosts, searchQuery, filterModel, filterUniverse, selectedCollectionId, tagQuery, sortBy]);
+  /* eslint-enable react-hooks/preserve-manual-memoization */
 
   /**
    * Active Post-Ready images — everything flagged `isPostReady` EXCEPT:
@@ -1000,6 +1026,7 @@ export function MainContent() {
    * are kept here — `every` on an empty list returns true, so we explicitly
    * require at least one 'posted' post before hiding.
    */
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- React Compiler can't prove `settings.scheduledPosts || []` is stable; manual memo intentional, perf-only.
   const postReadyImages = useMemo(() => {
     const allPosts = settings.scheduledPosts || [];
     const filtered = savedImages.filter((i) => {
@@ -1817,7 +1844,19 @@ export function MainContent() {
                               </button>
                             </div>
                             <span className="shrink-0 text-[10px] text-zinc-500 uppercase tracking-widest">
-                              {new Date(parseInt(compId.split('-')[2]) || Date.now()).toLocaleDateString()}
+                              {(() => {
+                                // V1.8.1: derive the badge date PURELY from the
+                                // group id's embedded creation timestamp
+                                // (`carousel-…-<ms>-…`). The old `|| Date.now()`
+                                // fallback called an impure clock during render
+                                // (React-Compiler violation + a misleading
+                                // "today" for malformed ids); show an em-dash
+                                // instead when there's no parseable timestamp.
+                                const tsPart = parseInt(compId.split('-')[2], 10);
+                                return Number.isFinite(tsPart)
+                                  ? new Date(tsPart).toLocaleDateString()
+                                  : '—';
+                              })()}
                             </span>
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-top-4 duration-500">
