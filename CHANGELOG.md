@@ -895,6 +895,78 @@ galleries, the stale "Pinterest not set up" notice for disabled platforms,
 and an enable toggle for Instagram. These are tracked and coming next.
 
 ---
+
+### 🎬 Highlights
+
+
+Follow-ups to the 1.9.x desktop reports. The headline is a long-standing
+data-hygiene problem in the gallery; the rest are smaller Settings fixes.
+
+#### 🎬 Highlights
+
+### Gallery: an honest count + one-click cleanup of "missing" images
+
+Your saved-image library only ever grew — nothing ever checked a record
+against what's actually on disk. So when an image's pixels went away (a
+reinstall that wiped the image folder, a file deleted outside the app, an
+expired remote link), the entry stuck around: counted, but un-displayable.
+That's why the gallery could say "300 images" while showing ~100.
+
+The gallery now scans on open (desktop) and, when it finds records whose
+pixels are gone, shows a **"N missing"** badge and a **"Clean up"** button.
+Nothing is deleted silently — you confirm, and only the dead entries are
+removed (no recoverable image is touched). As a bonus this should also fix
+the **slow/unresponsive moment when clicking or approving** in a large
+library: the on-disk backup re-serializes the whole library on every change,
+so trimming the dead weight makes that fast again.
+
+### Instagram can be toggled on/off
+
+Instagram used to be hard-wired "always on." It's now a normal platform
+toggle like Twitter / Pinterest / Discord — defaults on when your IG
+credentials are present, so nothing changes for existing setups, but you can
+turn it off when you don't want to post there.
+
+### Pinterest (and any disabled platform) stops nagging
+
+A platform you'd switched off still showed a red "not set up" health dot,
+because the check ignored the disabled flag. Disabled platforms now read as
+simply off, not broken.
+
+### Watermark shows + applies again (Windows)
+
+On Windows the watermark logo could fail to appear in the preview and not get
+applied to images — the on-disk asset URL the app builds (`http://asset.localhost/…`)
+wasn't allowed by the content-security policy (only the `https://` form was).
+Saved images had a fallback that hid this; the watermark didn't. Fixed by
+allowing the Windows asset host.
+
+#### 🔧 Breaking changes
+
+none
+
+#### 📋 Migration notes
+
+No action required — auto-update applies it on next launch. The gallery
+cleanup is opt-in: it only ever removes entries after you click "Clean up"
+and confirm.
+
+#### 🧪 Test summary
+
+- `tsc --noEmit` clean, ESLint **0 errors**
+- Full suite green (**2158 passing**), including 8 new reconcile-safety tests
+  (a failed file probe never flags an image; web builds never flag anything)
+  and the updated platform-toggle suites for the Instagram toggle
+
+---
+## [1.9.2] — 2026-06-14
+
+### Added
+- **gallery:** reconcile zombie image records + honest count + cleanup (#106)
+
+### Fixed
+- **settings:** platform-toggle fixes + watermark asset CSP (#105)
+
 ## [1.9.1] — 2026-06-14
 
 ### Fixed
