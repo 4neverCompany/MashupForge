@@ -889,11 +889,11 @@ export function SettingsModal({
               {aiStatus?.modelInfo && (
                 <div
                   data-testid="active-model-card"
-                  className="rounded-xl border border-[#c5a062]/30 bg-gradient-to-br from-[#c5a062]/10 to-transparent p-3"
+                  className="rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-3"
                 >
                   <div className="flex items-start justify-between gap-2 mb-1.5">
                     <div>
-                      <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-[#c5a062] mb-0.5">
+                      <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-zinc-500 mb-0.5">
                         Active model
                       </div>
                       <div className="font-mono text-sm text-white">

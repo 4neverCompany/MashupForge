@@ -835,6 +835,71 @@ tab).
   bespoke toggles.
 
 ---
+
+### 🎬 Highlights
+
+
+A fast patch on top of 1.9.0. The headline fix is a hard crash that hit
+anyone using the Captioning Studio; three smaller Settings regressions from
+the 1.9.0 reshuffle are fixed alongside it.
+
+#### 🎬 Highlights
+
+### Fixed: "Something went wrong" crash in the studio
+
+If you had captioned (approved) images, the main view could crash with
+*"Cannot read properties of null (reading 'current')."* The shared
+auto-sizing caption textarea read a React ref that isn't always present;
+once there were captions to render, it threw and the whole content area fell
+back to the error screen. It's now safe regardless of how it's wired, with a
+regression test so it can't come back.
+
+### Fixed: the Captioning panel showing in every tab
+
+The Captioning Studio lost its "only show on the Captioning tab" guard in an
+earlier refactor, so it leaked into the other tabs when you visited the
+gallery. It's scoped back to its own tab — which also stopped feeding the
+crash above.
+
+### Fixed: two identical autostart toggles
+
+Desktop settings showed two "start on boot" switches that controlled the
+exact same OS setting. Collapsed to one ("Start with Windows").
+
+### Polished: the active-model card
+
+The model indicator in AI Engine settings was a loud gold card competing
+with the model picker — toned down to a neutral card.
+
+#### 🔧 Breaking changes
+
+none
+
+#### 📋 Migration notes
+
+No action required — auto-update applies it on next launch.
+
+#### 🧪 Test summary
+
+- `tsc --noEmit` clean, ESLint **0 errors**
+- Full suite green (**2149 passing**), including a new ref-safety regression
+  test for the caption textarea
+- Verified in a running build, not just unit tests
+
+#### 🛠️ Still being worked on (targeted for 1.9.1.x / 1.9.2)
+
+A few reported issues need a bit more investigation and are not in this
+patch: the watermark logo not showing in preview / not applying to images
+(a desktop asset-URL path), a slowdown when clicking/approving in large
+galleries, the stale "Pinterest not set up" notice for disabled platforms,
+and an enable toggle for Instagram. These are tracked and coming next.
+
+---
+## [1.9.1] — 2026-06-14
+
+### Fixed
+- **studio:** null-ref crash + captioning leak + dup autostart + loud model card
+
 ## [1.9.0] — 2026-06-13
 
 ### Changed
