@@ -1843,6 +1843,7 @@ export function MainContent() {
                 </div>
               )}
 
+              {view === 'captioning' && (
               <CaptioningView
             savedImages={savedImages}
             setView={setView}
@@ -1859,6 +1860,7 @@ export function MainContent() {
             openCarouselPicker={openCarouselPicker}
             setPreparingPostId={setPreparingPostId}
           />
+              )}
               {view === 'post-ready' && (() => {
                 const ready = postReadyImages;
                 // Carousel-aware view used by Smart Schedule so grouped

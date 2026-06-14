@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, Monitor, CheckCircle2, AlertCircle, Loader2, Power, Camera, MessageCircle, Pin, Hash } from 'lucide-react';
+import { Eye, EyeOff, Monitor, CheckCircle2, AlertCircle, Loader2, Camera, MessageCircle, Pin, Hash } from 'lucide-react';
 import {
   DESKTOP_CONFIG_KEYS,
   PLATFORM_GROUPS,
@@ -22,52 +22,11 @@ import { Switch } from './Settings/Switch';
 // gone with the pi routes. The persist() function still exists for
 // the non-pi desktop config keys (api keys, model defaults, etc.).
 
-// ── PROP-005: Tauri auto-launch toggle ────────────────────────────────────────
-// Dynamically imported so the web build (no Tauri) never bundles the plugin.
-async function getAutostartPlugin() {
-  try {
-    return await import('@tauri-apps/plugin-autostart');
-  } catch {
-    return null;
-  }
-}
-
-function useAutolaunch(isDesktop: boolean) {
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!isDesktop) return;
-    let cancelled = false;
-    getAutostartPlugin().then(async (plugin) => {
-      if (!plugin || cancelled) return;
-      try {
-        const on = await plugin.isEnabled();
-        if (!cancelled) setEnabled(on);
-      } catch { /* not available */ }
-    });
-    return () => { cancelled = true; };
-  }, [isDesktop]);
-
-  const toggle = useCallback(async () => {
-    const plugin = await getAutostartPlugin();
-    if (!plugin) return;
-    setLoading(true);
-    try {
-      if (enabled) {
-        await plugin.disable();
-        setEnabled(false);
-      } else {
-        await plugin.enable();
-        setEnabled(true);
-      }
-    } catch { /* ignore */ } finally {
-      setLoading(false);
-    }
-  }, [enabled]);
-
-  return { enabled, loading, toggle };
-}
+// V1.9.1: the inline PROP-005 "Launch at startup" toggle + its useAutolaunch
+// hook were removed — they drove the SAME @tauri-apps/plugin-autostart OS
+// state as the dedicated <AutoStartSettings> ("Start with Windows") rendered
+// below, so the panel showed two identical autostart toggles. AutoStartSettings
+// is the canonical one (better copy + useAutostartFirstRun integration).
 
 // STORY-131: debounce window between the last keystroke and the auto-PATCH.
 // 800 ms is long enough that rapid typing doesn't thrash the file system but
@@ -301,7 +260,6 @@ export function DesktopSettingsPanel() {
   const [saveError, setSaveError] = useState('');
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autolaunch = useAutolaunch(config?.isDesktop ?? false);
   // Skip the initial save trigger when `draft` is first seeded from the GET
   // response — otherwise we'd PATCH on mount and race with the initial read.
   const seededRef = useRef(false);
@@ -414,25 +372,9 @@ export function DesktopSettingsPanel() {
       {/* PORT-001: Warn when ephemeral-port fallback fired */}
       <PortConflictBanner />
 
-      {/* PROP-005: Auto-launch at startup toggle */}
-      {autolaunch.enabled !== null && (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Power className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-            <div>
-              <p className="text-xs text-zinc-300">Launch at startup</p>
-              <p className="text-[10px] text-zinc-600">Start MashupForge when Windows boots</p>
-            </div>
-          </div>
-          <Switch
-            checked={autolaunch.enabled}
-            onChange={() => void autolaunch.toggle()}
-            label="launch at startup"
-            disabled={autolaunch.loading}
-            size="sm"
-          />
-        </div>
-      )}
+      {/* V1.9.1: the duplicate inline "Launch at startup" toggle was removed.
+          The single autostart control is <AutoStartSettings> ("Start with
+          Windows") rendered in the Auto-Start subsection below. */}
 
       {/* Config fields — kind-discriminated dispatch.
           UPDATER_KEYS render in the dedicated Updates subsection below.
