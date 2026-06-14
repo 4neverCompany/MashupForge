@@ -1213,6 +1213,8 @@ export interface MashupContextType {
   rerollImage: (id: string, prompt: string, options?: GenerateOptions) => Promise<void>;
   saveImage: (img: GeneratedImage) => void;
   deleteImage: (id: string, fromSaved: boolean) => void;
+  /** #51: bulk-remove saved-image metadata in one store write (zombie cleanup). */
+  removeImages: (ids: ReadonlySet<string>) => void;
   updateImageTags: (id: string, tags: string[]) => void;
   createCollection: (name?: string, description?: string, imageIds?: string[], savedImages?: GeneratedImage[]) => Promise<Collection>;
   bulkUpdateImageTags: (ids: string[], tags: string[], mode: 'append' | 'replace') => void;

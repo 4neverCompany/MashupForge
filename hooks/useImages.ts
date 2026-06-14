@@ -233,6 +233,17 @@ export function useImages() {
     return !fromSaved;
   };
 
+  // Bulk-remove saved-image metadata in a SINGLE store write (one markDirty +
+  // one setValue), so cleaning up a few hundred zombie records doesn't fire a
+  // few hundred debounced persists + auto-backups. Metadata-only: the gallery
+  // reconciler only ever passes ids whose pixels are already gone (no on-disk
+  // file to delete). See lib/images/reconcile.ts.
+  const removeImages = (ids: ReadonlySet<string>) => {
+    if (ids.size === 0) return;
+    markDirty();
+    setSavedImages(prev => prev.filter(i => !ids.has(i.id)));
+  };
+
   const updateImageTags = (id: string, tags: string[]) => {
     markDirty();
     setSavedImages(prev => prev.map(img => img.id === id ? { ...img, tags } : img));
@@ -274,6 +285,7 @@ export function useImages() {
     savedImages,
     saveImage,
     deleteImage,
+    removeImages,
     updateImageTags,
     bulkUpdateImageTags,
     toggleApproveImage,

@@ -29,6 +29,12 @@ export interface GalleryFilterBarProps {
   galleryStats: GalleryStats;
   postReadyCount: number;
   displayedCount: number;
+  /** #51: saved records whose pixels are gone (local file + base64 both absent). */
+  missingCount?: number;
+  /** True while the one-shot disk reconcile scan is running. */
+  reconcileScanning?: boolean;
+  /** Drop every missing record (caller already confirmed via the button). */
+  onCleanupMissing?: () => void;
   selectedForBatch: Set<string>;
   searchQuery: string;
   sortBy: 'newest' | 'oldest';
@@ -62,6 +68,9 @@ export function GalleryFilterBar({
   galleryStats,
   postReadyCount,
   displayedCount,
+  missingCount = 0,
+  reconcileScanning = false,
+  onCleanupMissing,
   selectedForBatch,
   searchQuery,
   sortBy,
@@ -132,6 +141,39 @@ export function GalleryFilterBar({
           <span>{galleryStats.captioned} captioned</span>
           <span className="text-zinc-700">·</span>
           <span>{postReadyCount} post-ready</span>
+          {/* #51: honest count — flag saved records whose pixels are gone and
+              offer a user-confirmed cleanup (shrinks the store → fixes the freeze). */}
+          {reconcileScanning && missingCount === 0 && (
+            <>
+              <span className="text-zinc-700">·</span>
+              <span className="text-zinc-600">checking files…</span>
+            </>
+          )}
+          {missingCount > 0 && (
+            <>
+              <span className="text-zinc-700">·</span>
+              <span
+                className="text-amber-400"
+                title="Saved entries whose image file is gone (no local file and no embedded pixels). They inflate the count and bloat the on-disk backup."
+              >
+                {missingCount} missing
+              </span>
+              <button
+                onClick={() => {
+                  const ok = window.confirm(
+                    `Remove ${missingCount} missing image${missingCount === 1 ? '' : 's'} from the library?\n\n` +
+                      `Their pixels are already gone (no local file, no embedded data). This only clears the stale entries and shrinks the saved-image store — no recoverable image is deleted. This cannot be undone.`,
+                  );
+                  if (ok) onCleanupMissing?.();
+                }}
+                title="Remove the saved entries whose image files no longer exist"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 hover:bg-amber-500/20 transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
+                Clean up
+              </button>
+            </>
+          )}
           <button
             onClick={onAutoOrganizeByTag}
             title="Scan saved images and auto-create a collection for every shared tag"

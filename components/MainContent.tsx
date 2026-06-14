@@ -152,6 +152,7 @@ import { proposeTagGroups } from '@/hooks/useCollections';
 // M3.3-P4 Batch 1: AutoTextarea moved to components/AutoTextarea.tsx
 import { useAuth } from '@/hooks/useAuth';
 import { useDesktopConfig } from '@/hooks/useDesktopConfig';
+import { useImageReconciler } from '@/hooks/useImageReconciler';
 import { showToast } from '@/components/Toast';
 import { reapplyWatermark } from '@/lib/watermark';
 // M3.3-P4 Batch 1: extracted hooks + sub-components
@@ -178,8 +179,9 @@ export function MainContent() {
     generateImages,
     generatePostContent,
     rerollImage, 
-    saveImage, 
+    saveImage,
     deleteImage,
+    removeImages,
     updateImageTags,
     createCollection,
     deleteCollection,
@@ -208,6 +210,12 @@ export function MainContent() {
     isSidebarOpen,
     setIsSidebarOpen
   } = useMashup();
+
+  // #51: gallery zombie reconciler — scans saved records against disk and
+  // exposes a count + a user-confirmed cleanup for the ones whose pixels are
+  // gone (inflates the count + bloats the auto-backup → the click/approve freeze).
+  const imageReconcile = useImageReconciler(savedImages, isDesktop, removeImages);
+
   // M3.3-P4 Batch 1: extracted hooks
   const scheduling = useMainContentScheduling({
     settings,
@@ -1430,6 +1438,9 @@ export function MainContent() {
                   galleryStats={galleryStats}
                   postReadyCount={postReadyImages.length}
                   displayedCount={displayedImages.length}
+                  missingCount={imageReconcile.missingCount}
+                  reconcileScanning={imageReconcile.scanning}
+                  onCleanupMissing={imageReconcile.removeMissing}
                   selectedForBatch={selectedForBatch}
                   searchQuery={searchQuery}
                   sortBy={sortBy}
