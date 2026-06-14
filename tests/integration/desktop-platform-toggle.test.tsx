@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 //
-// V060-002: Desktop tab platform toggles. Pins the user-visible behavior
-// of the new Platforms section in DesktopSettingsPanel:
-//   - Instagram is core; its API fields render unconditionally and no
-//     toggle button is shown.
-//   - Twitter / Pinterest / Discord each render a compact row with an
-//     enable toggle; their fields render only when the toggle is ON.
+// V060-002 / V1.9.2 (#47b): Desktop tab platform toggles. Pins the
+// user-visible behavior of the Platforms section in DesktopSettingsPanel:
+//   - All four platforms (incl. Instagram since #47b) render a compact row
+//     with an enable toggle; their fields render only when the toggle is ON.
+//   - Existing creds default a platform ON (graceful migration), so an
+//     Instagram user upgrading from a build where IG was always-on keeps
+//     IG enabled and its fields visible.
 //   - First load with empty config: non-core platforms default OFF.
 //   - First load with creds already in config.json: graceful migration
 //     keeps the platform expanded so the user's stored keys stay visible.
@@ -67,20 +68,35 @@ afterEach(() => {
 });
 
 describe('DesktopSettingsPanel — V060-002 platform toggles', () => {
-  it('renders the Instagram group with no toggle and shows its fields immediately', async () => {
+  it('renders an Instagram toggle (OFF on empty config) and reveals fields when enabled', async () => {
     installFetchMock({});
     render(<DesktopSettingsPanel />);
 
+    // V1.9.2 (#47b): Instagram is now toggleable. Empty config → no creds →
+    // defaults OFF, fields hidden, just like the other platforms.
+    const toggle = await waitFor(() => screen.getByLabelText('Enable Instagram'));
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByText('Instagram Account ID')).toBeNull();
+
+    // Enabling reveals the credential fields.
+    fireEvent.click(toggle);
     await waitFor(() => {
-      expect(screen.getByText('Instagram')).toBeTruthy();
+      expect(screen.getByLabelText('Disable Instagram')).toBeTruthy();
     });
-
-    // alwaysOn → no toggle button rendered for Instagram
-    expect(screen.queryByLabelText(/(Disable|Enable) Instagram/)).toBeNull();
-
-    // Fields visible from the start
     expect(screen.getByText('Instagram Account ID')).toBeTruthy();
     expect(screen.getByText('Instagram Access Token')).toBeTruthy();
+  });
+
+  it('graceful migration: an existing Instagram setup stays enabled + expanded', async () => {
+    installFetchMock({ INSTAGRAM_ACCESS_TOKEN: 'tok', INSTAGRAM_ACCOUNT_ID: 'acct' });
+    render(<DesktopSettingsPanel />);
+
+    // Pre-#47b users had IG always-on with creds — after the change those
+    // creds default the platform ON so nothing disappears on upgrade.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Disable Instagram')).toBeTruthy();
+    });
+    expect(screen.getByText('Instagram Account ID')).toBeTruthy();
   });
 
   it('renders Twitter / Pinterest / Discord toggles in OFF state when config is empty', async () => {

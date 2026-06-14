@@ -56,6 +56,7 @@ export const DESKTOP_CONFIG_KEYS: readonly DesktopConfigFieldMeta[] = [
   // from config.json — that is the off state. The UI computes the default
   // from existing creds so users with already-configured platforms see
   // their fields expanded on first load (graceful migration).
+  { key: 'INSTAGRAM_ENABLED',      label: 'Instagram enabled',      hint: 'Internal toggle — managed by the Platforms section.' },
   { key: 'TWITTER_ENABLED',        label: 'Twitter enabled',        hint: 'Internal toggle — managed by the Platforms section.' },
   { key: 'PINTEREST_ENABLED',      label: 'Pinterest enabled',      hint: 'Internal toggle — managed by the Platforms section.' },
   { key: 'DISCORD_ENABLED',        label: 'Discord enabled',        hint: 'Internal toggle — managed by the Platforms section.' },
@@ -90,9 +91,10 @@ export const UPDATER_KEYS: ReadonlySet<string> = new Set([
 
 // V060-002: platform groupings for the Desktop tab. Each group renders
 // as a single compact row when toggled OFF and expands to show its
-// fieldKeys when toggled ON. Instagram is `alwaysOn` so the toggle is
-// hidden — it's the core platform and the rest of the app assumes it.
-// `enabledKey` is null for alwaysOn groups (no flag persisted).
+// fieldKeys when toggled ON. V1.9.2 (#47b): Instagram is now toggleable too
+// (was alwaysOn) — every platform has an `enabledKey`. An absent flag falls
+// back to "on if any creds exist" (platformEnabledDefault), so existing
+// setups keep working; `alwaysOn` remains for any future always-on group.
 export interface PlatformGroupMeta {
   id: 'instagram' | 'twitter' | 'pinterest' | 'discord';
   label: string;
@@ -103,11 +105,15 @@ export interface PlatformGroupMeta {
 
 export const PLATFORM_GROUPS: readonly PlatformGroupMeta[] = [
   {
+    // V1.9.2 (#47b): Instagram gained an enable toggle (was hard-coded
+    // alwaysOn). Defaults enabled when creds are present (platformEnabledDefault),
+    // so existing setups are unchanged, but the user can now turn IG off like
+    // any other platform.
     id: 'instagram',
     label: 'Instagram',
-    enabledKey: null,
+    enabledKey: 'INSTAGRAM_ENABLED',
     fieldKeys: ['INSTAGRAM_ACCOUNT_ID', 'INSTAGRAM_ACCESS_TOKEN'],
-    alwaysOn: true,
+    alwaysOn: false,
   },
   {
     id: 'twitter',
