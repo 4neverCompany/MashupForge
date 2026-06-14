@@ -7,10 +7,10 @@ import {
   platformEnabledDefault,
 } from '@/lib/desktop-config-keys';
 
-// V060-002: pins the platform-toggle contract used by the Desktop tab.
-//   - Instagram is `alwaysOn` (core platform — toggle hidden, fields shown).
-//   - Twitter / Pinterest / Discord each have an explicit enable flag
-//     persisted to config.json. Empty / absent flag falls back to
+// V060-002 / V1.9.2 (#47b): pins the platform-toggle contract used by the
+// Desktop tab.
+//   - All four platforms (incl. Instagram since #47b) have an explicit enable
+//     flag persisted to config.json. Empty / absent flag falls back to
 //     "on if any creds exist" so existing setups don't get hidden on
 //     first load after the redesign.
 //   - PLATFORM_OWNED_KEYS contains every field key + every enable key,
@@ -26,10 +26,10 @@ describe('PLATFORM_GROUPS', () => {
     ]);
   });
 
-  it('marks Instagram as alwaysOn with no enable flag', () => {
+  it('marks Instagram as toggleable with an enable flag (V1.9.2 #47b)', () => {
     const ig = PLATFORM_GROUPS.find((g) => g.id === 'instagram')!;
-    expect(ig.alwaysOn).toBe(true);
-    expect(ig.enabledKey).toBeNull();
+    expect(ig.alwaysOn).toBe(false);
+    expect(ig.enabledKey).toBe('INSTAGRAM_ENABLED');
   });
 
   it('every non-core platform has a non-null enabledKey', () => {
@@ -61,9 +61,14 @@ describe('isPlatformEnabled / platformEnabledDefault', () => {
   const twitter = PLATFORM_GROUPS.find((g) => g.id === 'twitter')!;
   const instagram = PLATFORM_GROUPS.find((g) => g.id === 'instagram')!;
 
-  it('Instagram is always enabled regardless of values', () => {
-    expect(isPlatformEnabled(instagram, {})).toBe(true);
-    expect(isPlatformEnabled(instagram, { INSTAGRAM_ACCESS_TOKEN: '' })).toBe(true);
+  it('Instagram defaults ON when creds exist, OFF when none (toggleable since #47b)', () => {
+    // No creds, no flag → off (consistent with the other platforms).
+    expect(isPlatformEnabled(instagram, {})).toBe(false);
+    // Creds present → default-on (graceful migration — existing setups stay on).
+    expect(isPlatformEnabled(instagram, { INSTAGRAM_ACCESS_TOKEN: 'tok' })).toBe(true);
+    // Explicit '1' / '0' override the default either way.
+    expect(isPlatformEnabled(instagram, { INSTAGRAM_ENABLED: '1' })).toBe(true);
+    expect(isPlatformEnabled(instagram, { INSTAGRAM_ACCESS_TOKEN: 'tok', INSTAGRAM_ENABLED: '0' })).toBe(false);
   });
 
   it('Twitter defaults to OFF when no creds exist and no flag is set', () => {

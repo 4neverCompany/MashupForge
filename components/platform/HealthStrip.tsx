@@ -118,16 +118,24 @@ const usePlatformHealth = () => {
   // Tauri shell — without consulting them, IG configured via the desktop
   // settings panel reads as "Missing credentials" (BUG-UI-008). Single
   // source of truth: lib/platform-credentials.isPlatformConfigured.
-  const { credentials: desktopCreds } = useDesktopConfig();
+  const { credentials: desktopCreds, platformEnabled } = useDesktopConfig();
   return useMemo(() => {
     const posts = settings.scheduledPosts || [];
     const inPipeline = new Set(settings.pipelinePlatforms || []);
     return PLATFORMS.map((p) => {
+      // V1.9.2 (#48): a platform the user turned OFF in Desktop settings keeps
+      // its creds on disk, so the credential check below would still read it as
+      // "configured" (or "missing creds" if removed) and show a red dot. A
+      // disabled platform is simply off — render it as neutral/unused, never
+      // as a "not set up" warning.
+      if (!platformEnabled[p.key]) {
+        return { ...p, state: 'unused' as HealthState, detail: 'Disabled in Desktop settings' };
+      }
       const credsPresent = isPlatformConfigured(p.key, settings, desktopCreds);
       const { state, detail } = derive(p.key, credsPresent, inPipeline.has(p.key), posts);
       return { ...p, state, detail };
     });
-  }, [settings, desktopCreds]);
+  }, [settings, desktopCreds, platformEnabled]);
 };
 
 export const HealthStrip: React.FC = () => {
